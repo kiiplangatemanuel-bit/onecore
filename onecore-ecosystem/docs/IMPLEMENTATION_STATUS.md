@@ -358,3 +358,10 @@ fees/bursaries, boarding, transport, library, discipline, school health, e-learn
 communication, M-Pesa, statutory integrations, bilingual full UI, security/safeguarding
 review, performance testing or UAT. The current grading and ranking functions are a
 limited initial implementation, not a complete national CBC rules engine.
+
+
+### School foundation CI verification
+
+- GitHub Actions run `42363505011` for commit `4659fdcd35cb449ab02ae620017ed8dd7be536f3` completed successfully.
+- Alembic migration upgrade, downgrade and re-upgrade passed; Python compilation passed; pytest reported **46 passed, 5 warnings**.
+- Earlier school code run `42363477316` also passed with 46 tests. This is SQLite CI evidence only; no production PostgreSQL rehearsal, security/safeguarding review, browser accessibility audit or school pilot UAT has been completed.
