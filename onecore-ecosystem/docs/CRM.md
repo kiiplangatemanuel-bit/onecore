@@ -125,3 +125,18 @@ consent import evidence or delivery analytics is connected. A future dispatcher 
 re-check the latest consent immediately before every send; prepared recipient snapshots
 are not a permanent authorization to deliver. Review privacy and local legal obligations
 before enabling real campaigns.
+
+
+## Consent-aware campaign audience preview
+
+- Added a read-only audience preview for draft and prepared marketing campaigns:
+  `GET /api/v1/crm/campaigns/{id}/preview`.
+- The estimate evaluates the latest consent decision for the campaign channel and
+  purpose, excludes expired grants, and counts contacts without a usable channel
+  address separately.
+- The response reports the eligible count, consent exclusions, missing-address
+  count, the 5,000-contact preview cap and whether the result was truncated.
+- Preview does not create recipient snapshots, expose contact addresses, change
+  campaign state or send messages. Preparation remains a separate manager action.
+- Consent must still be rechecked immediately before any future provider dispatch;
+  a preview is an estimate, not authorization to send.
