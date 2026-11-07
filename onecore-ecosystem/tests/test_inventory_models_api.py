@@ -40,7 +40,7 @@ def test_stock_movement_contract_requires_idempotency_key():
 
 
 def test_inventory_api_routes_are_registered():
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/api/v1/inventory/products" in paths
     assert "/api/v1/inventory/stock" in paths
     assert "/api/v1/inventory/movements" in paths
