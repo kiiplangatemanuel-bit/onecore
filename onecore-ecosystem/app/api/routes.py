@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, PharmacyPrescription, PharmacyPrescriptionLine, PharmacyDispense, PharmacyAllergy, PharmacyDrugSafetyRule, PharmacyControlledEvent, PharmacyLabWorkflowRecord, LaboratoryTestPanel, LaboratoryTestPanelLine, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, PharmacyPrescriptionIn, PharmacyDispenseIn, PharmacyAllergyIn, PharmacySafetyRuleIn, PharmacyReturnIn, PharmacyRecallIn, LaboratoryPanelIn, LaboratorySampleDecisionIn, LaboratoryInstrumentIn, LaboratoryInstrumentResultIn, LaboratoryQCIn, LaboratoryCalibrationIn, PharmacyLabBillingIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, PharmacyPrescriptionIn, PharmacyDispenseIn, PharmacyAllergyIn, PharmacySafetyRuleIn, PharmacyReturnIn, PharmacyRecallIn, LaboratoryPanelIn, LaboratorySampleDecisionIn, LaboratoryInstrumentIn, LaboratoryInstrumentResultIn, LaboratoryQCIn, LaboratoryCalibrationIn, PharmacyLabBillingIn, PharmacyDispenseReversalIn, PharmacyStockAdjustmentIn, PharmacyReplenishmentIn, PharmacyClaimDecisionIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -5870,21 +5870,20 @@ def recall_pharmacy_batch(batch_id:int,payload:PharmacyRecallIn,
 
 
 @router.post("/pharmacy/replenishment")
-def request_pharmacy_replenishment(payload: dict,
+def request_pharmacy_replenishment(payload: PharmacyReplenishmentIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
-    medicine_id=int(payload.get("medicine_id",0));branch_id=str(payload.get("branch_id",""))
-    quantity=Decimal(str(payload.get("quantity","0")))
-    supplier_id=payload.get("supplier_id")
-    if quantity<=0 or not branch_id:raise HTTPException(422,"Positive quantity and branch are required")
+    medicine_id=payload.medicine_id;branch_id=payload.branch_id
+    quantity=payload.quantity
+    supplier_id=payload.supplier_id
     med=db.query(PharmacyMedicine).filter_by(
         id=medicine_id,organization_id=membership.organization_id,is_active=True).first()
     if not med or not can_access_branch(membership,branch_id):raise HTTPException(404,"Medicine or branch not found")
     data={"medicine_id":med.id,"branch_id":branch_id,"quantity":str(quantity),
-          "supplier_id":supplier_id,"reason":str(payload.get("reason",""))[:500],
+          "supplier_id":supplier_id,"reason":payload.reason.strip(),
           "purchase_order_status":"awaiting_procurement_conversion"}
     row,_=_pharm_lab_record(db,membership,user,"pharmacy_replenishment",
-        str(payload.get("idempotency_key") or uuid.uuid4()),data,branch_id=branch_id)
+        payload.idempotency_key,data,branch_id=branch_id)
     db.commit()
     audit(db,user.id,membership.organization_id,"pharmacy.replenishment.requested",
           "pharmacy_replenishment",row.id,f"medicine:{med.id};qty:{quantity}")
@@ -6148,3 +6147,141 @@ def pharmacy_lab_traceability(record_type:str|None=None,parent_id:int|None=None,
     return [{"id":x.id,"record_type":x.record_type,"parent_id":x.parent_id,
         "status":x.status,"payload":x.payload,"created_by":x.created_by,
         "created_at":x.created_at.isoformat()} for x in rows]
+
+
+@router.post("/pharmacy/dispenses/{dispense_id}/reverse")
+def reverse_pharmacy_dispense(dispense_id:int,payload:PharmacyDispenseReversalIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    verifier=db.query(Membership).filter_by(organization_id=membership.organization_id,
+        user_id=payload.verifier_id,is_active=True).first()
+    if not verifier or payload.verifier_id==user.id:
+        raise HTTPException(403,"A second active organization member must authorize reversal")
+    disp=db.query(PharmacyDispense).filter_by(id=dispense_id,
+        organization_id=membership.organization_id,status="dispensed").with_for_update().first()
+    if not disp:raise HTTPException(404,"Active dispense not found")
+    batch=_pharmacy_batch_or_404(db,membership,disp.batch_id,lock=True)
+    line=db.query(PharmacyPrescriptionLine).filter_by(
+        id=disp.prescription_line_id,organization_id=membership.organization_id).with_for_update().first()
+    med=db.query(PharmacyMedicine).filter_by(id=line.medicine_id,
+        organization_id=membership.organization_id).first()
+    if payload.restock_quantity>disp.quantity:
+        raise HTTPException(422,"Restock quantity exceeds the dispensed quantity")
+    if payload.restock_quantity>0 and (batch.status!="active" or batch.expiry_date<date.today()):
+        raise HTTPException(409,"Expired or recalled stock cannot be restocked")
+    prior=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="pharmacy_dispense_reversal",
+        parent_id=disp.id).first()
+    if prior:raise HTTPException(409,"This dispense has already been reversed")
+    if payload.restock_quantity>0:
+        batch.remaining_quantity+=payload.restock_quantity
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,
+            product_id=med.inventory_product_id,branch_id=batch.branch_id,
+            quantity_delta=payload.restock_quantity,movement_type="receipt",
+            reference=f"pharmacy-dispense-reversal:{disp.id}",
+            idempotency_key=f"pharmacy-dispense-reversal:{disp.id}",created_by=user.id))
+    line.quantity_dispensed=max(Decimal("0"),line.quantity_dispensed-disp.quantity)
+    line.status="pending" if line.quantity_dispensed==0 else "partially_dispensed"
+    disp.status="reversed"
+    row,_=_pharm_lab_record(db,membership,user,"pharmacy_dispense_reversal",
+        f"dispense-reversal:{disp.id}",{"dispense_id":disp.id,"reason":payload.reason.strip(),
+        "restock_quantity":str(payload.restock_quantity),"verifier_id":payload.verifier_id,
+        "restock_disposition":"verified_saleable_stock" if payload.restock_quantity>0 else "not_restocked"},
+        parent_id=disp.id,branch_id=batch.branch_id,status="reversed")
+    if med.is_controlled:
+        db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+            medicine_id=med.id,batch_id=batch.id,dispense_id=disp.id,event_type="reversed",
+            quantity=disp.quantity,reason=payload.reason.strip(),actor_id=user.id,witness_id=payload.verifier_id))
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.dispense.reversed",
+          "pharmacy_dispense",disp.id,payload.reason.strip())
+    return {"dispense_id":disp.id,"status":"reversed","restocked":str(payload.restock_quantity),
+            "record_id":row.id}
+
+
+@router.post("/pharmacy/batches/{batch_id}/adjust")
+def adjust_pharmacy_batch(batch_id:int,payload:PharmacyStockAdjustmentIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    verifier=db.query(Membership).filter_by(organization_id=membership.organization_id,
+        user_id=payload.verifier_id,is_active=True).first()
+    if not verifier or payload.verifier_id==user.id:
+        raise HTTPException(403,"A second member must verify stock adjustment")
+    batch=_pharmacy_batch_or_404(db,membership,batch_id,lock=True)
+    if batch.status!="active" or batch.expiry_date<date.today():
+        raise HTTPException(409,"Only active unexpired batches may be adjusted")
+    next_qty=batch.remaining_quantity+payload.quantity_delta
+    if next_qty<0:raise HTTPException(409,"Adjustment would make batch stock negative")
+    med=db.query(PharmacyMedicine).filter_by(id=batch.medicine_id,
+        organization_id=membership.organization_id).first()
+    key="pharmacy-stock-adjust:"+str(batch.id)+":"+uuid.uuid4().hex
+    batch.remaining_quantity=next_qty
+    db.add(InventoryStockMovement(organization_id=membership.organization_id,
+        product_id=med.inventory_product_id,branch_id=batch.branch_id,
+        quantity_delta=payload.quantity_delta,movement_type="adjustment",
+        reference=f"pharmacy-stock-adjust:{batch.id}",idempotency_key=key,created_by=user.id))
+    row,_=_pharm_lab_record(db,membership,user,"pharmacy_stock_adjustment",key,
+        {"batch_id":batch.id,"quantity_delta":str(payload.quantity_delta),
+         "reason":payload.reason.strip(),"verifier_id":payload.verifier_id,
+         "balance_after":str(next_qty)},parent_id=batch.id,branch_id=batch.branch_id,status="posted")
+    if med.is_controlled:
+        db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+            medicine_id=med.id,batch_id=batch.id,event_type="stock_adjustment",
+            quantity=payload.quantity_delta,reason=payload.reason.strip(),actor_id=user.id,witness_id=payload.verifier_id))
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.batch.adjusted",
+          "pharmacy_batch",batch.id,f"delta:{payload.quantity_delta};reason:{payload.reason}")
+    return {"batch_id":batch.id,"remaining_quantity":str(batch.remaining_quantity),"adjustment_id":row.id}
+
+
+@router.post("/pharmacy-lab/claims/{claim_id}/decision")
+def decide_pharmacy_lab_claim(claim_id:int,payload:PharmacyClaimDecisionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    claim=db.query(PharmacyLabWorkflowRecord).filter_by(id=claim_id,
+        organization_id=membership.organization_id,record_type="insurance_claim").with_for_update().first()
+    if not claim or not can_access_branch(membership,claim.branch_id):raise HTTPException(404,"Claim not found")
+    if claim.status not in {"submitted","approved"}:raise HTTPException(409,"Claim cannot transition from its current state")
+    if payload.decision=="settled" and claim.status!="approved":
+        raise HTTPException(409,"Only approved claims may be marked settled")
+    claim.status=payload.decision
+    claim.payload={**claim.payload,"decision_note":payload.note.strip(),
+        "decided_by":user.id,"decided_at":datetime.now(timezone.utc).isoformat()}
+    db.commit()
+    audit(db,user.id,membership.organization_id,"clinical.insurance_claim."+payload.decision,
+          "insurance_claim",claim.id,payload.note.strip())
+    return {"claim_id":claim.id,"status":claim.status}
+
+
+@router.post("/lab/critical-alerts/{alert_id}/acknowledge")
+def acknowledge_laboratory_critical_alert(alert_id:int,payload:dict,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(PharmacyLabWorkflowRecord).filter_by(id=alert_id,
+        organization_id=membership.organization_id,record_type="lab_critical_alert").with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id):raise HTTPException(404,"Critical alert not found")
+    if row.status not in {"queued","acknowledged"}:raise HTTPException(409,"Alert is already resolved")
+    note=str(payload.get("note","")).strip()
+    if len(note)<3:raise HTTPException(422,"Acknowledgement note is required")
+    row.status="acknowledged"
+    row.payload={**row.payload,"acknowledged_by":user.id,
+        "acknowledged_at":datetime.now(timezone.utc).isoformat(),"acknowledgement_note":note}
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.critical_alert.acknowledged",
+          "lab_critical_alert",row.id,note)
+    return {"alert_id":row.id,"status":row.status}
+
+
+@router.get("/lab/critical-alerts")
+def list_laboratory_critical_alerts(status:str|None=None,
+    membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    q=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="lab_critical_alert")
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(PharmacyLabWorkflowRecord.branch_id.in_(allowed))
+    if status:q=q.filter(PharmacyLabWorkflowRecord.status==status)
+    return [{"id":x.id,"status":x.status,"payload":x.payload,
+        "created_at":x.created_at.isoformat()} for x in q.order_by(PharmacyLabWorkflowRecord.created_at.desc()).limit(200).all()]
