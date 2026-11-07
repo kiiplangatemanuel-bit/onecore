@@ -3295,7 +3295,8 @@ def create_healthcare_patient(payload:HealthcarePatientIn,
 
 @router.get("/healthcare/patients")
 def list_healthcare_patients(membership=Depends(active_membership),
-    db:Session=Depends(get_db),limit:int=Query(default=100,ge=1,le=500)):
+    user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
     require_permission(membership,"read")
     q=db.query(HealthcarePatient).filter_by(organization_id=membership.organization_id)
     allowed=branch_scope_ids(membership)
@@ -3303,6 +3304,8 @@ def list_healthcare_patients(membership=Depends(active_membership),
         if not allowed:return []
         q=q.filter(HealthcarePatient.branch_id.in_(allowed))
     rows=q.order_by(HealthcarePatient.id.desc()).limit(limit).all()
+    audit(db,user.id,membership.organization_id,"healthcare.patient.directory.viewed",
+          "healthcare_patient","",f"count:{len(rows)}")
     return [{"id":x.id,"patient_number":x.patient_number,
         "first_name":x.first_name,"last_name":x.last_name,
         "date_of_birth":x.date_of_birth.isoformat() if x.date_of_birth else None,
@@ -3364,7 +3367,8 @@ def create_healthcare_appointment(payload:HealthcareAppointmentIn,
 
 @router.get("/healthcare/appointments")
 def list_healthcare_appointments(membership=Depends(active_membership),
-    db:Session=Depends(get_db),limit:int=Query(default=100,ge=1,le=500)):
+    user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
     require_permission(membership,"read")
     q=db.query(HealthcareAppointment,HealthcarePatient).join(
         HealthcarePatient,HealthcarePatient.id==HealthcareAppointment.patient_id
@@ -3374,6 +3378,8 @@ def list_healthcare_appointments(membership=Depends(active_membership),
         if not allowed:return []
         q=q.filter(HealthcareAppointment.branch_id.in_(allowed))
     rows=q.order_by(HealthcareAppointment.starts_at.desc()).limit(limit).all()
+    audit(db,user.id,membership.organization_id,"healthcare.appointments.viewed",
+          "healthcare_appointment","",f"count:{len(rows)}")
     return [{"id":a.id,"appointment_number":a.appointment_number,
         "patient_id":p.id,"patient_number":p.patient_number,
         "patient_name":f"{p.first_name} {p.last_name}",
