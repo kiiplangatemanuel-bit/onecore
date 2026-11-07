@@ -471,10 +471,12 @@ def upsert_reorder_rule(payload:ReorderRuleIn,membership=Depends(active_membersh
 @router.get("/replenishment")
 def replenishment(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    rules=db.query(InventoryReorderRule).filter_by(organization_id=membership.organization_id,is_active=True).all()
+    rules=db.query(InventoryReorderRule).join(InventoryWarehouse,InventoryWarehouse.id==InventoryReorderRule.warehouse_id).filter(InventoryReorderRule.organization_id==membership.organization_id,InventoryReorderRule.is_active==True).all()
+    allowed=branch_scope_ids(membership)
     result=[]
     for rule in rules:
         wh=get_warehouse(db,membership.organization_id,rule.warehouse_id,membership)
+        if allowed is not None and wh.branch_id not in allowed: continue
         on_hand=warehouse_qty(db,membership.organization_id,wh,rule.product_id)
         reserved=active_reserved(db,membership.organization_id,wh.id,rule.product_id)
         available=on_hand-reserved
@@ -493,10 +495,13 @@ def demand_forecast(days:int=Query(default=30,ge=7,le=365),membership=Depends(ac
     cutoff=datetime.now(timezone.utc)-timedelta(days=days)
     products=db.query(InventoryProduct).filter_by(organization_id=membership.organization_id,is_active=True).all()
     result=[]
+    allowed=branch_scope_ids(membership)
     for product in products:
-        issues=db.query(func.coalesce(func.sum(-InventoryStockMovement.quantity_delta),0)).filter(
+        issue_query=db.query(func.coalesce(func.sum(-InventoryStockMovement.quantity_delta),0)).filter(
             InventoryStockMovement.organization_id==membership.organization_id,InventoryStockMovement.product_id==product.id,
-            InventoryStockMovement.quantity_delta<0,InventoryStockMovement.movement_type.in_(["issue","batch_issue","pos_sale","sale"]),InventoryStockMovement.created_at>=cutoff).scalar()
+            InventoryStockMovement.quantity_delta<0,InventoryStockMovement.movement_type.in_(["issue","batch_issue","pos_sale","sale"]),InventoryStockMovement.created_at>=cutoff)
+        if allowed is not None: issue_query=issue_query.filter(InventoryStockMovement.branch_id.in_(allowed)) if allowed else issue_query.filter(False)
+        issues=issue_query.scalar()
         daily=dec(issues or 0)/Decimal(days)
         result.append({"product_id":product.id,"sku":product.sku,"name":product.name,"historical_daily_demand":str(daily.quantize(Q3)),
             "forecast_next_30_days":str((daily*Decimal(30)).quantize(Q3)),"method":"simple_moving_average"})
@@ -542,7 +547,9 @@ def list_price_lists(branch_id:str|None=None,membership=Depends(active_membershi
 @router.get("/valuation")
 def inventory_valuation(method:str=Query(default="weighted_average",pattern=r"^(weighted_average|fifo)$"),membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    batches=db.query(InventoryBatch).filter_by(organization_id=membership.organization_id,status="available").all()
+    batches=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(InventoryBatch.organization_id==membership.organization_id,InventoryBatch.status=="available").all()
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: batches=[b for b in batches if db.query(InventoryWarehouse).filter_by(id=b.warehouse_id).first() and db.query(InventoryWarehouse).filter_by(id=b.warehouse_id).first().branch_id in allowed]
     by_product={}
     for b in batches:
         qty=dec(b.quantity_on_hand)
@@ -569,9 +576,11 @@ def inventory_dashboard(membership=Depends(active_membership),db:Session=Depends
     warehouses=[w for w in warehouses if can_access_branch(membership,w.branch_id)]
     products=db.query(InventoryProduct).filter_by(organization_id=membership.organization_id,is_active=True).count()
     low=0
-    rules=db.query(InventoryReorderRule).filter_by(organization_id=membership.organization_id,is_active=True).all()
+    rules=db.query(InventoryReorderRule).join(InventoryWarehouse,InventoryWarehouse.id==InventoryReorderRule.warehouse_id).filter(InventoryReorderRule.organization_id==membership.organization_id,InventoryReorderRule.is_active==True).all()
+    allowed=branch_scope_ids(membership)
     for rule in rules:
         wh=get_warehouse(db,membership.organization_id,rule.warehouse_id,membership)
+        if allowed is not None and wh.branch_id not in allowed: continue
         if warehouse_qty(db,membership.organization_id,wh,rule.product_id)-active_reserved(db,membership.organization_id,wh.id,rule.product_id) <= dec(rule.minimum_quantity):
             low += 1
     expired=db.query(InventoryBatch).filter(InventoryBatch.organization_id==membership.organization_id,
