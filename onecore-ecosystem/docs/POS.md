@@ -249,3 +249,37 @@ tenders are excluded until they are recorded as collected cash.
 This is a single-cashier shift control workflow. It does not yet provide physical
 cash drawer hardware integration, multi-cashier shared tills, bank deposit
 reconciliation or production till-count pilot sign-off.
+
+
+## Trusted devices, offline conflict handling and operations controls
+
+The POS completion API adds organization/branch-scoped device registration and a supervisor approval lifecycle. Device credentials are high-entropy random tokens; only SHA-256 hashes are stored, and the raw token is returned once at registration. Device APIs require the `X-POS-Device-Token` header. Revocation immediately rejects subsequent online device API calls. Approved devices receive a bounded 24-hour offline authorization lease which a manager can renew after the device reconnects. Re-enrolment uses a new device identity; revoked identities cannot be reactivated.
+
+- `POST /api/v1/pos/devices/register`, `POST /api/v1/pos/devices/{id}/approve`, `POST /api/v1/pos/devices/{id}/renew-offline`, `POST /api/v1/pos/devices/{id}/revoke`
+- `POST /api/v1/pos/devices/{id}/conflicts` records stale stock, closed shift, price change, duplicate transaction, revoked device, expired offline lease and unknown-product conflicts. Client and server snapshots are retained for supervisor review.
+- `GET /api/v1/pos/conflicts` and `POST /api/v1/pos/conflicts/{id}/resolve` provide a maker/reviewer queue. Decisions are auditable. Resolution deliberately does not replay a queued sale or payment: the cashier must first reconcile tender capture, preventing duplicate charges.
+- `POST /api/v1/pos/devices/{id}/sync-heartbeat` and `GET /api/v1/pos/sync/monitor` provide per-device sync status, last success, stale devices, failures and pending conflict counts.
+- `GET /api/v1/pos/operations/report` aggregates posted sales, sales by branch, shift states and unsettled tender counts across the caller's permitted branch scope.
+
+## Customer membership and loyalty
+
+- `POST /api/v1/pos/customers`, `GET /api/v1/pos/customers?q=...`, and `GET /api/v1/pos/customers/{id}/history` maintain tenant-owned customer membership and purchase history.
+- `POST /api/v1/pos/customers/{id}/sales` links an already-posted sale to a customer and earns one point per 100 currency units of sale value. The unique sale/ledger keys make repeat linking safe and prevent double earning.
+- `POST /api/v1/pos/customers/{id}/rewards/redeem` performs supervisor-authorized, idempotent point redemption and refuses negative balances. Redemption is a points ledger operation; it is not automatically a cash discount or tender allocation. A configured reward-to-currency policy and checkout discount integration remain required before points can reduce an invoice total.
+- Customer points and spend are tenant-scoped. Do not put payment-card data or sensitive identity documents in customer profile fields.
+
+## Cash drawer and receipt printer bridge
+
+- `POST /api/v1/pos/peripherals/commands` queues a receipt-print, test-print or drawer-open command for an approved device.
+- The local device bridge polls `GET /api/v1/pos/devices/{id}/peripherals/commands` using the device token and acknowledges through `POST /api/v1/pos/devices/{id}/peripherals/commands/{command_id}/ack`.
+- Commands are queued/delivered/completed/failed with device results. The API does not itself drive USB, Bluetooth, serial or network hardware; a signed local bridge/driver, supported printer model matrix, drawer kick-port configuration and physical acceptance test are required.
+
+## Settlement verification and operational limitations
+
+`POST /api/v1/pos/payments/{id}/verify-settlement` records a supervisor's manual settlement evidence and provider reference for an unsettled tender. This is an auditable manual verification step, not automated bank statement matching or gateway polling. M-Pesa settlement must continue through the Daraja callback verification flow; never mark an M-Pesa payment paid using the manual endpoint. Cash/card refund execution and card/acquirer integrations require the appropriate provider or physical cash controls; a recorded refund is not proof that cash was disbursed.
+
+## Offline security and acceptance boundaries
+
+The server-side device lease and revocation controls complement, but do not replace, a client-side offline session implementation. A device disconnected from the network cannot learn that its credentials were revoked until it reconnects; the 24-hour lease limits but cannot eliminate this risk. Secure offline restart recovery requires the POS client to persist an encrypted, bounded authorization envelope and queue metadata in managed device storage, revalidate it on every app start, and stop writes when the lease expires. Browser IndexedDB/WebCrypto is not hardware-backed device attestation.
+
+Before production sign-off, run a real device matrix covering browser/app restart during queue writes, 24+ hour offline windows, clock rollback, token theft/revocation, duplicate and out-of-order sync, concurrent stock sales, supervisor conflict decisions, payment callback races, printer paper-out/jam, drawer failure, network loss during command acknowledgement, and multi-terminal shift close. Run PostgreSQL concurrency/load and security tests plus pilot acceptance on each supported terminal/printer/drawer. Sandbox CI cannot verify live provider settlement or physical hardware.
