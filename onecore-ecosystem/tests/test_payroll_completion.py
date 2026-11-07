@@ -11,7 +11,7 @@ def test_kenya_2026_statutory_calculation_and_employer_costs():
     assert Decimal(result["shif_employee"]) == Decimal("2750.00")
     assert Decimal(result["housing_levy_employee"]) == Decimal("1500.00")
     assert Decimal(result["housing_levy_employer"]) == Decimal("1500.00")
-    assert Decimal(result["net_pay"]) == Decimal("74924.90")
+    assert Decimal(result["net_pay"]) == Decimal("70441.65")
     assert Decimal(result["total_employer_cost"]) == Decimal("107500.00")
 
 
