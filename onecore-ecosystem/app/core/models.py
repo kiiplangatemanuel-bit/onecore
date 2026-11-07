@@ -757,6 +757,97 @@ class CRMQuoteLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class CRMSalesOrder(Base):
+    __tablename__ = "crm_sales_orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("crm_quotes.id"), unique=True, index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"), index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True, index=True)
+    order_number: Mapped[str] = mapped_column(String(60))
+    currency: Mapped[str] = mapped_column(String(3))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(20), default="confirmed")
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_crm_sales_order_org_number", "organization_id", "order_number", unique=True),
+    )
+
+
+class CRMSalesOrderLine(Base):
+    __tablename__ = "crm_sales_order_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    sales_order_id: Mapped[int] = mapped_column(ForeignKey("crm_sales_orders.id"), index=True)
+    quote_line_id: Mapped[int] = mapped_column(ForeignKey("crm_quote_lines.id"), index=True)
+    description: Mapped[str] = mapped_column(String(240))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class CRMContactConsent(Base):
+    """Append-only evidence of a contact's channel-specific marketing consent."""
+    __tablename__ = "crm_contact_consents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"), index=True)
+    channel: Mapped[str] = mapped_column(String(16))
+    purpose: Mapped[str] = mapped_column(String(24), default="marketing")
+    decision: Mapped[str] = mapped_column(String(12))
+    source: Mapped[str] = mapped_column(String(80))
+    recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        Index("ix_crm_consent_org_contact_channel", "organization_id", "contact_id", "channel", "purpose", "id"),
+    )
+
+
+class CRMCampaign(Base):
+    __tablename__ = "crm_campaigns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    campaign_number: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(180))
+    channel: Mapped[str] = mapped_column(String(16))
+    purpose: Mapped[str] = mapped_column(String(24), default="marketing")
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_crm_campaign_org_number", "organization_id", "campaign_number", unique=True),
+    )
+
+
+class CRMCampaignRecipient(Base):
+    __tablename__ = "crm_campaign_recipients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("crm_campaigns.id"), index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"), index=True)
+    consent_id: Mapped[int] = mapped_column(ForeignKey("crm_contact_consents.id"), index=True)
+    channel: Mapped[str] = mapped_column(String(16))
+    address_snapshot: Mapped[str] = mapped_column(String(320))
+    status: Mapped[str] = mapped_column(String(16), default="prepared")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_crm_campaign_recipient_unique", "campaign_id", "contact_id", unique=True),
+    )
+
+
 class SchoolEnrollmentHistory(Base):
     """Append-only record of each learner's class placement change."""
     __tablename__ = "school_enrollment_history"

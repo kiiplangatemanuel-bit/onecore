@@ -81,3 +81,47 @@ conversion, contract, deposit or invoice automation is included. Forecast probab
 are fixed illustrative assumptions, not learned from historical conversion data.
 Campaigns, customer communication, consent management, advanced analytics, team
 forecasting, configurable pipeline probabilities and UAT remain outstanding.
+
+
+
+## Accepted quote to sales order conversion increment
+
+An accepted, unexpired CRM quote can be converted once into a confirmed sales order.
+Conversion snapshots every quote line, quantity, unit price, tax rate and calculated
+amount into order lines. The source quote is unique per sales order, so repeat requests
+return the existing order rather than creating duplicates. The generated default
+order number is `SO-{quote_number}`; callers may supply an organization-unique order
+number. All records are tenant-scoped and branch access is checked before conversion.
+
+### Additional API
+- `POST /api/v1/crm/quotes/{id}/convert-to-order`
+- `GET /api/v1/crm/orders`
+- `GET /api/v1/crm/orders/{id}`
+
+This is an internal order record only. It does not reserve or deduct inventory,
+create an invoice, collect a deposit, dispatch goods, or send a customer notification.
+Those require fulfillment, accounting and provider workflows. Migration
+`0020_crm_sales_orders` adds sales order headers and immutable line snapshots.
+
+
+
+## Marketing consent and campaign preparation increment
+
+- Contact consent is stored as append-only channel/purpose decisions. A later revocation
+  supersedes an earlier grant because campaign preparation evaluates the latest event
+  for each contact/channel/purpose.
+- Consent records capture the source, actor, timestamp and optional expiry.
+- Draft email/SMS/WhatsApp campaigns can be created and prepared by organization
+  managers. Preparation snapshots only contacts with current, unexpired granted
+  marketing consent and a usable channel address.
+- Branch access is applied to campaign and recipient selection. Campaign preparation
+  is idempotent after the campaign enters `ready`.
+- APIs: POST/GET `/crm/contacts/{id}/consents`, POST/GET `/crm/campaigns`,
+  GET `/crm/campaigns/{id}`, POST `/crm/campaigns/{id}/prepare`.
+
+Preparation does not send messages. No email/SMS/WhatsApp provider, unsubscribe
+webhook, delivery callback, campaign scheduling worker, suppression-list service,
+consent import evidence or delivery analytics is connected. A future dispatcher must
+re-check the latest consent immediately before every send; prepared recipient snapshots
+are not a permanent authorization to deliver. Review privacy and local legal obligations
+before enabling real campaigns.

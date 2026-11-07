@@ -658,3 +658,38 @@ compilation and pytest before merge.
 - Pending CI: migration upgrade/downgrade/re-upgrade, compilation and pytest.
 - Not included: bulk promotion, capacity/waitlists, guardian consent, eligibility
   rules, fee carry-forward, transcript migration or guardian notifications.
+
+
+
+## CRM accepted quote to sales order increment (7 November 2026)
+
+Implemented on branch `feature/crm-sales-order-conversion`:
+
+- Convert only accepted, unexpired tenant quotes into confirmed sales orders.
+- One order per source quote; repeat conversion is idempotent and returns the existing order.
+- Snapshot quote lines, quantities, prices, tax rates and calculated totals.
+- Tenant/branch-scoped conversion, listing and detail APIs with audit events.
+- Migration `0020_crm_sales_orders`; tests cover conversion request validation,
+  model registration and API route contracts.
+
+Boundaries: sales orders do not reserve/deduct stock, generate invoices, collect deposits,
+dispatch or notify customers. CI and reviewer acceptance are required before merge.
+
+
+
+## CRM marketing consent and campaign preparation increment (7 November 2026)
+
+Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order branch):
+
+- Append-only channel-specific marketing consent grants/revocations with source,
+  actor, timestamps and optional expiry.
+- Draft email/SMS/WhatsApp campaign creation and manager-only recipient preparation.
+- Recipient selection uses the latest consent decision, excludes expired/revoked
+  consent and contacts without a usable channel address.
+- Tenant/branch filters, address snapshots, unique campaign-contact constraint and
+  idempotent ready state.
+- Migration `0021_crm_consent_campaigns`, APIs, tests and documentation.
+
+Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
+unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
+unimplemented. A dispatch worker must re-check current consent immediately before send.
