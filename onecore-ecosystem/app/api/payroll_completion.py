@@ -174,7 +174,7 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
-    paye = max(ZERO, money(gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
+    paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
     other_deductions = money(extra.get("other_deductions", 0))
     net = money(gross - nssf - shif - ahl - paye - pension - other_deductions)
     if net < 0:
