@@ -652,7 +652,7 @@ compilation and pytest before merge.
 - Requires organization manage permission and access to both source and target
   branches; learner update, history record and audit event are committed together.
 - Added history retrieval with tenant and branch checks, schema/model/OpenAPI tests,
-  and School documentation.
+  a placement form/history viewer in the School workspace, and documentation.
 - Migration: `0019_school_learner_placements`.
 - Branch: `feature/school-learner-promotions`.
 - Pending CI: migration upgrade/downgrade/re-upgrade, compilation and pytest.
