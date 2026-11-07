@@ -517,3 +517,127 @@ def my_payroll_history(membership=Depends(active_membership), user=Depends(curre
     rows = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
             if r.data.get("employee_id") == employee.id]
     return sorted(rows, key=lambda x: x["period_end"], reverse=True)
+
+
+@router.post("/hr/payroll/runs/{run_id}/post-journal")
+def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                         user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
+    if not run or run.status != "approved":
+        raise HTTPException(409, "Only an approved payroll can be posted to accounting")
+    if _record(db, membership.organization_id, "payroll_journal").filter(Record.data["run_id"].as_integer() == run_id).first():
+        raise HTTPException(409, "Payroll journal already exists; use a reversal for corrections")
+    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
+    if not snaps:
+        raise HTTPException(409, "Payroll calculation snapshots are missing")
+    totals = {k: ZERO for k in ("gross_pay","net_pay","paye","nssf_employee","nssf_employer","shif_employee","housing_levy_employee","housing_levy_employer","employee_pension","other_deductions")}
+    for s in snaps:
+        c=s["calculation"]
+        for k in totals:
+            totals[k] += D(c.get(k,"0"))
+    mapping = payload.get("accounts", {})
+    keys = {"salary_expense","paye_payable","nssf_payable","shif_payable","housing_levy_payable","pension_payable","other_deductions_payable"}
+    if not keys.issubset(mapping):
+        raise HTTPException(422, {"message":"Map all required payroll accounts","required":sorted(keys)})
+    ids = {int(mapping[k]) for k in keys}
+    accounts = db.query(AccountingAccount).filter(AccountingAccount.organization_id==membership.organization_id,
+             AccountingAccount.is_active==True, AccountingAccount.id.in_(ids)).all()
+    if {a.id for a in accounts} != ids:
+        raise HTTPException(404, "One or more mapped accounts are not active tenant accounts")
+    credits = {
+        "paye_payable": totals["paye"],
+        "nssf_payable": totals["nssf_employee"] + totals["nssf_employer"],
+        "shif_payable": totals["shif_employee"],
+        "housing_levy_payable": totals["housing_levy_employee"] + totals["housing_levy_employer"],
+        "pension_payable": totals["employee_pension"],
+        "other_deductions_payable": totals["other_deductions"]
+    }
+    debit = totals["gross_pay"] + totals["nssf_employer"] + totals["housing_levy_employer"]
+    credit = totals["net_pay"] + sum(credits.values(), ZERO)
+    if money(debit) != money(credit):
+        raise HTTPException(409, f"Payroll journal does not balance: debit {money(debit)} credit {money(credit)}")
+    from app.core.models import AccountingJournal, AccountingJournalLine
+    journal = AccountingJournal(organization_id=membership.organization_id, branch_id=None,
+        journal_number="PAY-"+uuid.uuid4().hex[:14].upper(), reference=run.run_number,
+        memo=f"Payroll {run.period_start} to {run.period_end}", status="posted",
+        entry_date=datetime.combine(run.pay_date, datetime.min.time(), tzinfo=timezone.utc),
+        created_by=user.id, posted_by=user.id, posted_at=datetime.now(timezone.utc))
+    db.add(journal); db.flush()
+    db.add(AccountingJournalLine(organization_id=membership.organization_id, journal_id=journal.id,
+        account_id=int(mapping["salary_expense"]), description="Gross payroll expense", debit=money(debit-totals["nssf_employer"]-totals["housing_levy_employer"]), credit=ZERO))
+    if totals["nssf_employer"] > 0:
+        db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,account_id=int(mapping["salary_expense"]),description="Employer NSSF expense",debit=money(totals["nssf_employer"]),credit=ZERO))
+    if totals["housing_levy_employer"] > 0:
+        db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,account_id=int(mapping["salary_expense"]),description="Employer Housing Levy expense",debit=money(totals["housing_levy_employer"]),credit=ZERO))
+    for key, amount in credits.items():
+        if amount > 0:
+            db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+                account_id=int(mapping[key]),description=key.replace("_"," ").title(),debit=ZERO,credit=money(amount)))
+    _save_record(db,membership.organization_id,user.id,"payroll_journal",
+        {"key":str(run_id),"run_id":run_id,"journal_id":journal.id,"debit":str(money(debit)),
+         "credit":str(money(credit)),"posted_at":datetime.now(timezone.utc).isoformat()})
+    _audit(db,membership.organization_id,user.id,"hr.payroll.journal.posted","accounting_journal",journal.id,run.run_number)
+    db.commit()
+    return {"journal_id":journal.id,"journal_number":journal.journal_number,"status":"posted",
+            "debits":str(money(debit)),"credits":str(money(credit)),"balanced":True}
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/bank-reconcile")
+def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                   user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch=db.query(Record).filter_by(id=batch_id,organization_id=membership.organization_id,
+        module_key=MODULE,record_type="payment_batch").with_for_update().first()
+    if not batch or batch.data.get("method")!="bank":
+        raise HTTPException(404,"Bank payment batch not found")
+    statement=payload.get("transactions")
+    if not isinstance(statement,list):
+        raise HTTPException(422,"transactions must be a list of bank statement rows")
+    d=dict(batch.data); matched=[]; unmatched=[]
+    expected={f"PAY-{batch.id}-{r['employee_id']}":r for r in d["rows"]}
+    seen=set()
+    for tx in statement:
+        ref=str(tx.get("reference","")); row=expected.get(ref)
+        if not row or ref in seen or money(tx.get("amount",0)) != money(row["amount"]):
+            unmatched.append({"reference":ref,"amount":str(tx.get("amount","")),"reason":"unknown_duplicate_or_amount_mismatch"})
+            continue
+        seen.add(ref); row["status"]="paid"; row["provider_reference"]=ref
+        row["verified_at"]=datetime.now(timezone.utc).isoformat()
+        matched.append(ref)
+    d["bank_reconciliation"]={"matched":matched,"unmatched":unmatched,
+        "reconciled_by":user.id,"reconciled_at":datetime.now(timezone.utc).isoformat()}
+    d["status"]="paid" if all(x["status"]=="paid" for x in d["rows"]) else ("partial" if matched else "failed")
+    batch.data=d
+    _audit(db,membership.organization_id,user.id,"hr.payroll.bank.reconciled","payment_batch",batch.id,
+           f"matched:{len(matched)};unmatched:{len(unmatched)}")
+    db.commit()
+    return {"batch_id":batch.id,"matched":len(matched),"unmatched":unmatched,"status":d["status"]}
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/payments/{employee_id}/reverse")
+def reverse_salary_payment(batch_id: int, employee_id: int, payload: dict=Body(...),
+                           membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch=db.query(Record).filter_by(id=batch_id,organization_id=membership.organization_id,
+        module_key=MODULE,record_type="payment_batch").with_for_update().first()
+    if not batch:
+        raise HTTPException(404,"Payment batch not found")
+    d=dict(batch.data); row=next((x for x in d["rows"] if x["employee_id"]==employee_id),None)
+    if not row or row["status"]!="paid":
+        raise HTTPException(409,"Only a verified settled salary payment can be reversed")
+    if not payload.get("reason","").strip() or not payload.get("reversal_reference","").strip():
+        raise HTTPException(422,"Reason and external reversal reference are required")
+    if _record(db,membership.organization_id,"payment_reversal").filter(Record.data["batch_id"].as_integer()==batch_id).filter(Record.data["employee_id"].as_integer()==employee_id).first():
+        raise HTTPException(409,"Payment already has a reversal record")
+    reversal={"batch_id":batch_id,"employee_id":employee_id,"amount":row["amount"],
+        "original_reference":row["provider_reference"],"reversal_reference":payload["reversal_reference"],
+        "reason":payload["reason"],"created_by":user.id,"created_at":datetime.now(timezone.utc).isoformat()}
+    _save_record(db,membership.organization_id,user.id,"payment_reversal",reversal)
+    row["status"]="reversed"; row["reversal_reference"]=payload["reversal_reference"]
+    d["status"]="partial"
+    batch.data=d
+    _audit(db,membership.organization_id,user.id,"hr.payroll.payment.reversed","payment_batch",batch_id,
+           f"employee:{employee_id};reference:{payload['reversal_reference']}")
+    db.commit()
+    return {"batch_id":batch_id,"employee_id":employee_id,"status":"reversed","amount":row["amount"]}
