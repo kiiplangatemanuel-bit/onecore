@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import CRMQuote, CRMQuoteLine
-from app.core.schemas import CRMQuoteIn
+from app.core.models import CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine
+from app.core.schemas import CRMQuoteIn, CRMQuoteConvertIn
 from app.main import app
 
 
@@ -30,3 +30,17 @@ def test_crm_quote_models_and_routes_are_registered():
     assert "/api/v1/crm/quotes/{quote_id}/accept" in paths
     assert "/api/v1/crm/quotes/{quote_id}/reject" in paths
     assert "/api/v1/crm/forecast" in paths
+
+
+
+def test_crm_quote_conversion_contract_and_routes():
+    payload = CRMQuoteConvertIn(order_number="SO-QT-2026-001")
+    assert payload.order_number == "SO-QT-2026-001"
+    assert CRMSalesOrder.__tablename__ == "crm_sales_orders"
+    assert CRMSalesOrderLine.__tablename__ == "crm_sales_order_lines"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/crm/quotes/{quote_id}/convert-to-order" in paths
+    assert "/api/v1/crm/orders" in paths
+    assert "/api/v1/crm/orders/{order_id}" in paths
+    with pytest.raises(ValidationError):
+        CRMQuoteConvertIn(order_number="invalid order number with spaces")
