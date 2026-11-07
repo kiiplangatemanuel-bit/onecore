@@ -95,3 +95,53 @@ def test_procurement_workspace_exposes_requisition_controls():
     assert "/submit" in html
     assert "/approve" in html
     assert "/reject" in html
+
+
+def test_goods_receipt_inspection_payload_requires_full_accounting_and_reasons():
+    from app.core.schemas import GoodsReceiptIn, GoodsReceiptInspectionIn
+    valid_receipt = GoodsReceiptIn(lines=[
+        {"line_id": 1, "quantity": "5", "idempotency_key": "grn-receipt-0001"}
+    ])
+    assert valid_receipt.lines[0].quantity == Decimal("5")
+    with pytest.raises(ValidationError):
+        GoodsReceiptIn(lines=[
+            {"line_id": 1, "quantity": "1", "idempotency_key": "duplicate-0001"},
+            {"line_id": 1, "quantity": "1", "idempotency_key": "duplicate-0002"},
+        ])
+    valid_inspection = GoodsReceiptInspectionIn(lines=[
+        {"receipt_line_id": 1, "quantity_accepted": "4", "quantity_rejected": "1",
+         "rejection_reason": "Damaged packaging"}
+    ], note="Inspected on delivery")
+    assert valid_inspection.lines[0].quantity_accepted == Decimal("4")
+    with pytest.raises(ValidationError):
+        GoodsReceiptInspectionIn(lines=[
+            {"receipt_line_id": 1, "quantity_accepted": "0", "quantity_rejected": "1"}
+        ])
+    with pytest.raises(ValidationError):
+        GoodsReceiptInspectionIn(lines=[
+            {"receipt_line_id": 1, "quantity_accepted": "0", "quantity_rejected": "0"}
+        ])
+
+
+def test_grn_models_and_inspection_routes_are_registered():
+    from app.core.models import ProcurementGoodsReceipt, ProcurementGoodsReceiptLine
+    assert ProcurementGoodsReceipt.__tablename__ == "procurement_goods_receipts"
+    assert ProcurementGoodsReceiptLine.__tablename__ == "procurement_goods_receipt_lines"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/procurement/orders/{order_id}/goods-receipts" in paths
+    assert "/api/v1/procurement/goods-receipts" in paths
+    assert "/api/v1/procurement/goods-receipts/{receipt_id}" in paths
+    assert "/api/v1/procurement/goods-receipts/{receipt_id}/inspect" in paths
+
+
+def test_legacy_direct_goods_receipt_is_deprecated():
+    operation = app.openapi()["paths"]["/api/v1/procurement/orders/{order_id}/receive"]["post"]
+    assert operation.get("deprecated") is True
+
+
+def test_procurement_workspace_mentions_goods_receipt_inspection():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "procurement.html"
+    html = page.read_text(encoding="utf-8")
+    assert "goods-receipts" in html
+    assert "inspect" in html
