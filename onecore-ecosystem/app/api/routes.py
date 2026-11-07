@@ -1818,6 +1818,8 @@ def import_accounting_bank_statement(payload:AccountingBankStatementIn,membershi
     require_permission(membership,"manage")
     if payload.end_date<payload.start_date: raise HTTPException(422,"Statement end date must not precede start date")
     if payload.branch_id: _crm_branch_check(db,membership,payload.branch_id)
+    elif branch_scope_ids(membership) is not None:
+        raise HTTPException(403,"Branch-scoped users must select an authorized statement branch")
     account=_accounting_get_accounts(db,membership.organization_id,{payload.bank_account_id})[payload.bank_account_id]
     if account.account_type!="asset": raise HTTPException(422,"Bank statement must use an asset account")
     if sum((x.amount for x in payload.lines),Decimal("0"))+payload.opening_balance!=payload.closing_balance:
@@ -1852,7 +1854,7 @@ def list_accounting_bank_statements(membership=Depends(active_membership),db:Ses
     allowed=branch_scope_ids(membership)
     if allowed is not None:
         if not allowed:return []
-        q=q.filter((AccountingBankStatement.branch_id==None)|(AccountingBankStatement.branch_id.in_(allowed)))
+        q=q.filter(AccountingBankStatement.branch_id.in_(allowed))
     rows=q.order_by(AccountingBankStatement.id.desc()).limit(200).all()
     result=[]
     for x in rows:
@@ -1874,7 +1876,7 @@ def get_accounting_bank_statement(statement_id:int,membership=Depends(active_mem
     require_permission(membership,"read")
     statement=db.query(AccountingBankStatement).filter_by(
         id=statement_id,organization_id=membership.organization_id).first()
-    if not statement or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+    if not statement or (statement.branch_id is None and branch_scope_ids(membership) is not None) or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
         raise HTTPException(404,"Bank statement not found")
     lines=db.query(AccountingBankStatementLine).filter_by(
         organization_id=membership.organization_id,statement_id=statement.id).order_by(
@@ -1894,7 +1896,7 @@ def match_accounting_bank_statement_line(statement_id:int,payload:AccountingBank
     require_permission(membership,"manage")
     statement=db.query(AccountingBankStatement).filter_by(
         id=statement_id,organization_id=membership.organization_id,status="draft").with_for_update().first()
-    if not statement or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+    if not statement or (statement.branch_id is None and branch_scope_ids(membership) is not None) or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
         raise HTTPException(404,"Draft bank statement not found")
     line=db.query(AccountingBankStatementLine).filter_by(
         id=payload.statement_line_id,statement_id=statement.id,
