@@ -25,13 +25,17 @@ def test_sacco_models_and_tenant_idempotency_indexes():
 
 
 def test_sacco_member_and_kyc_contracts_normalize_and_validate():
-    member = SaccoMemberIn(member_number=" MEM-001 ", full_name="  Jane Member  ")
+    member = SaccoMemberIn(member_number="MEM-001", full_name="  Jane Member  ")
     assert member.full_name == "Jane Member"
-    assert member.member_number == " MEM-001 "
+    assert member.member_number == "MEM-001"
+    with pytest.raises(ValidationError):
+        SaccoMemberIn(member_number="bad number", full_name="Jane Member")
     decision = SaccoKYCDecisionIn(decision="verified", note="Documents checked")
     assert decision.decision == "verified"
     with pytest.raises(ValidationError):
         SaccoKYCDecisionIn(decision="pending", note="No")
+    with pytest.raises(ValidationError):
+        SaccoKYCDecisionIn(decision="verified", note="   ")
 
 
 def test_sacco_account_transaction_contracts():
