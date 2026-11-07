@@ -206,6 +206,13 @@ class POSRefundIn(BaseModel):
 class POSReturnIn(BaseModel):
     client_return_id: str = Field(min_length=8, max_length=100)
     reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def nonblank_reason(cls, value):
+        if len(value.strip()) < 5:
+            raise ValueError("Return reason must contain at least five non-space characters")
+        return value.strip()
     lines: list[POSReturnLineIn] = Field(min_length=1, max_length=100)
     refunds: list[POSRefundIn] = Field(min_length=1, max_length=20)
 
