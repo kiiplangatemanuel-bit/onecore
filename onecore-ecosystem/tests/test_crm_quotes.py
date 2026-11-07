@@ -65,3 +65,38 @@ def test_crm_consent_and_campaign_contracts_and_routes():
     assert "/api/v1/crm/contacts/{contact_id}/consents" in paths
     assert "/api/v1/crm/campaigns" in paths
     assert "/api/v1/crm/campaigns/{campaign_id}/prepare" in paths
+
+from datetime import date
+from app.core.models import HREmployee, HRLeaveRequest
+from app.core.schemas import HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
+from app.services.hr import business_days
+
+
+def test_hr_employee_and_leave_contracts():
+    employee = HREmployeeIn(employee_number="EMP-001", first_name="Amina",
+        last_name="Otieno", start_date="2026-11-02", employment_type="full_time")
+    assert employee.employee_number == "EMP-001"
+    request = HRLeaveRequestIn(employee_id=1, leave_type="annual",
+        start_date="2026-11-09", end_date="2026-11-13",
+        reason="Annual family leave")
+    assert request.end_date > request.start_date
+    assert HRLeaveDecisionIn(decision="approved").decision == "approved"
+    assert HREmployee.__tablename__ == "hr_employees"
+    assert HRLeaveRequest.__tablename__ == "hr_leave_requests"
+
+
+def test_hr_leave_business_days_excludes_weekends():
+    assert business_days(date(2026, 11, 9), date(2026, 11, 13)) == 5
+    assert business_days(date(2026, 11, 7), date(2026, 11, 9)) == 1
+    assert business_days(date(2026, 11, 9), date(2026, 11, 9)) == 1
+    with pytest.raises(ValueError):
+        business_days(date(2026, 11, 10), date(2026, 11, 9))
+
+
+def test_hr_routes_registered():
+    paths=set(app.openapi()["paths"])
+    assert "/api/v1/hr/employees" in paths
+    assert "/api/v1/hr/leave-requests" in paths
+    assert "/api/v1/hr/my-leave-requests" in paths
+    assert "/api/v1/hr/leave-requests/{request_id}/decision" in paths
+    assert "/hr" in paths
