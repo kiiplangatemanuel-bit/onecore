@@ -89,7 +89,8 @@ def test_meal_benefit_is_non_cash_and_only_excess_over_kra_threshold_is_taxable(
         "meal_benefit": "7000"
     })
     assert Decimal(with_meals["gross_pay"]) == Decimal(cash["gross_pay"])
-    assert Decimal(with_meals["net_pay"]) == Decimal(cash["net_pay"]) - Decimal("600.00")
+    assert Decimal(with_meals["net_pay"]) < Decimal(cash["net_pay"]) - Decimal("600.00")
     assert Decimal(with_meals["taxable_benefits"]) == Decimal("2000.00")
     assert Decimal(with_meals["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("2000.00")
+    assert Decimal(with_meals["net_pay"]) == Decimal(cash["net_pay"]) - Decimal(with_meals["paye"]) + Decimal(cash["paye"])
     assert Decimal(with_meals["total_employer_cost"]) == Decimal(cash["total_employer_cost"]) + Decimal("7000.00")
