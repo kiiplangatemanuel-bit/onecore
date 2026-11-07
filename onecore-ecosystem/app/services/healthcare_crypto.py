@@ -12,15 +12,15 @@ def _fernet():
         try:
             return Fernet(configured.encode("ascii"))
         except Exception:
-            raise RuntimeError("HEALTHCARE_ENCRYPTION_KEY must be a valid Fernet key")
+            raise HTTPException(503,"HEALTHCARE_ENCRYPTION_KEY must be a valid Fernet key")
     # Domain-separated derivation keeps development usable; production should set
     # a separately managed key and rotate it through a controlled re-encryption job.
     if (settings.app_env or "").lower() in {"production","prod"}:
-        raise RuntimeError("HEALTHCARE_ENCRYPTION_KEY must be configured separately in production")
+        raise HTTPException(503,"HEALTHCARE_ENCRYPTION_KEY must be configured separately in production")
     secret=(settings.secret_key or "").strip()
     if (not secret or len(secret)<32 or secret=="unsafe-development-key-change-me"
         or "replace-with" in secret.lower() or "change-me" in secret.lower()):
-        raise RuntimeError("Set a strong SECRET_KEY and HEALTHCARE_ENCRYPTION_KEY before storing health data")
+        raise HTTPException(503,"Set a strong SECRET_KEY and HEALTHCARE_ENCRYPTION_KEY before storing health data")
     seed=secret.encode("utf-8")
     digest=hashlib.sha256(b"onecore-healthcare-field-encryption-v1:"+seed).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
