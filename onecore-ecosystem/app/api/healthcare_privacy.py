@@ -210,7 +210,11 @@ def grant_patient_access(patient_id:int,payload:HealthcarePatientGrantIn,members
     target=db.query(Membership).filter_by(organization_id=membership.organization_id,
         user_id=payload.user_id,is_active=True).first()
     if not target:raise HTTPException(404,"Active organization member not found")
-    if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at<=datetime.now(timezone.utc)):
+    if patient.branch_id and (target.branch_scope or "").strip()!="*" and patient.branch_id not in {
+        x.strip() for x in (target.branch_scope or "").split(",") if x.strip()
+    }:
+        raise HTTPException(403,"Target user does not have membership scope for this patient branch")
+    if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at.utcoffset() is None or payload.expires_at<=datetime.now(timezone.utc)):
         raise HTTPException(422,"Grant expiry must be a future timezone-aware timestamp")
     row=HealthcarePatientAccessGrant(organization_id=membership.organization_id,patient_id=patient.id,
         user_id=payload.user_id,permissions=list(dict.fromkeys(payload.permissions)),
@@ -239,7 +243,7 @@ def revoke_patient_access(patient_id:int,grant_id:int,membership=Depends(active_
 def record_patient_consent(patient_id:int,payload:HealthcareConsentIn,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
     patient=_patient(db,membership,patient_id);_authorize(db,membership,user,"consent.manage",patient.branch_id)
-    if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at<=datetime.now(timezone.utc)):
+    if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at.utcoffset() is None or payload.expires_at<=datetime.now(timezone.utc)):
         raise HTTPException(422,"Consent expiry must be a future timezone-aware timestamp")
     row=HealthcarePatientConsent(organization_id=membership.organization_id,patient_id=patient.id,
         purpose=payload.purpose,decision=payload.decision,evidence_reference=payload.evidence_reference,
@@ -306,6 +310,10 @@ def create_appointment(patient_id:int,payload:HealthcareAppointmentIn,membership
     provider_membership=db.query(Membership).filter_by(
         organization_id=membership.organization_id,user_id=payload.provider_user_id,is_active=True).first()
     if not provider_membership:raise HTTPException(404,"Active provider membership not found")
+    if patient.branch_id and (provider_membership.branch_scope or "").strip()!="*" and patient.branch_id not in {
+        x.strip() for x in (provider_membership.branch_scope or "").split(",") if x.strip()
+    }:
+        raise HTTPException(403,"Provider is not assigned to the patient branch")
     provider_roles=db.query(HealthcareRoleAssignment).filter_by(
         organization_id=membership.organization_id,user_id=payload.provider_user_id,is_active=True).all()
     if not any(x.role in {"healthcare_admin","clinician","nurse"} and (x.branch_id is None or x.branch_id==patient.branch_id) for x in provider_roles):
@@ -386,9 +394,9 @@ def healthcare_audit(limit:int=Query(100,ge=1,le=500),patient_id:int|None=None,
         q=q.filter((HealthcareAccessAudit.patient_id.is_(None))|(HealthcarePatient.branch_id.in_(branches)))
     assignments=db.query(HealthcareRoleAssignment).filter_by(
         organization_id=membership.organization_id,user_id=user.id,is_active=True).all()
-    if not any(x.role=="healthcare_admin" and x.branch_id is None for x in assignments):
-        privacy_branches=[x.branch_id for x in assignments if x.role=="privacy_officer" and x.branch_id]
-        org_privacy=any(x.role=="privacy_officer" and x.branch_id is None for x in assignments)
+    if not any(x.role in {"healthcare_admin","privacy_officer"} and x.branch_id is None for x in assignments):
+        privacy_branches=[x.branch_id for x in assignments if x.role in {"healthcare_admin","privacy_officer"} and x.branch_id]
+        org_privacy=any(x.role in {"healthcare_admin","privacy_officer"} and x.branch_id is None for x in assignments)
         if not org_privacy:
             if not privacy_branches:
                 raise HTTPException(403,"No privacy officer assignment for this organization")
