@@ -14,6 +14,8 @@ from app.api.accounting_completion import router as accounting_completion_router
 from app.api.accounting_pos import router as accounting_pos_router
 from app.api.mpesa import router as mpesa_router
 from app.api.crm_campaigns import router as crm_campaigns_router
+from app.api.crm_automation import router as crm_automation_router
+from app.api.healthcare_privacy import router as healthcare_privacy_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,6 +41,8 @@ app.include_router(accounting_completion_router)
 app.include_router(accounting_pos_router)
 app.include_router(mpesa_router)
 app.include_router(crm_campaigns_router)
+app.include_router(crm_automation_router)
+app.include_router(healthcare_privacy_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
@@ -58,6 +62,16 @@ def pos_service_worker():
 @app.get("/procurement", response_class=HTMLResponse)
 def procurement_ui():
     page = Path(__file__).resolve().parent / "web" / "procurement.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/crm/automation", response_class=HTMLResponse)
+def crm_automation_ui():
+    page = Path(__file__).resolve().parent / "web" / "crm_automation.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/healthcare", response_class=HTMLResponse)
+def healthcare_ui():
+    page = Path(__file__).resolve().parent / "web" / "healthcare.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
 @app.get("/crm", response_class=HTMLResponse)
