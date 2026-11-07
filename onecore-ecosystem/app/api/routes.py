@@ -6128,14 +6128,14 @@ def decide_sacco_loan_collateral(loan_id: int, collateral_id: int,
     if not row:
         raise HTTPException(404, "Loan collateral not found")
     if row.status != "pending" and payload.decision != "released":
-        raise HTTPException(409, "Only pending collateral can be accepted or rejected")
-    if row.created_by == user.id and payload.decision in {"accepted", "rejected"}:
+        raise HTTPException(409, "Only pending collateral can be approved or rejected")
+    if row.created_by == user.id and payload.decision in {"approved", "rejected"}:
         raise HTTPException(403, "The registering officer cannot review their own collateral record")
-    if payload.decision == "released" and row.status != "accepted":
+    if payload.decision == "released" and row.status != "approved":
         raise HTTPException(409, "Only accepted collateral can be released")
-    if payload.decision == "accepted":
+    if payload.decision == "approved":
         if payload.assessed_value is None or not payload.valuation_reference.strip() or payload.valuation_date is None:
-            raise HTTPException(422, "Acceptance requires assessed value, valuation reference and valuation date")
+            raise HTTPException(422, "Approval requires assessed value, valuation reference and valuation date")
         row.assessed_value = payload.assessed_value
         row.valuation_reference = payload.valuation_reference.strip()
         row.valuation_date = payload.valuation_date
