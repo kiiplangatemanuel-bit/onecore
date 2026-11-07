@@ -117,3 +117,32 @@ penalties, restructure loans, apply non-performing-loan rules, issue notices,
 allocate recovery costs or create accounting journals. It does not reconcile
 receipts with bank/mobile-money settlement. Validate policies and regulatory
 ageing definitions with the SACCO before operational use.
+
+
+## Loan guarantor and collateral controls
+
+- Added persisted guarantor records linked to an active loan and a verified,
+  active SACCO member. A borrower cannot guarantee their own loan, and guarantor
+  registration requires a recorded consent reference.
+- Guarantor records move from pending to approved/rejected, and approved records
+  may later be released. The person who registers a guarantor cannot review it.
+- Added persisted collateral records with type, description, owner, identifier and
+  estimated value. Review may accept/reject pending collateral; acceptance requires
+  assessed value, valuation reference and valuation date. Accepted collateral may
+  later be released.
+- Read/write endpoints are organization-scoped and enforce the loan's branch access.
+  State changes record reviewer, timestamp, reason and an audit event.
+- Migration: `0022_sacco_guarantor_collateral`.
+
+Endpoints:
+- `POST/GET /api/v1/sacco/loans/{loan_id}/guarantors`
+- `POST /api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/review`
+- `POST/GET /api/v1/sacco/loans/{loan_id}/collateral`
+- `POST /api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/review`
+
+Boundaries: consent references are recorded evidence identifiers, not a digital
+signature or independently verified consent service. Collateral valuation data is
+captured but not independently verified, registered, insured, perfected or legally
+enforced. This increment does not calculate guarantee capacity, enforce aggregate
+guarantee limits, perform credit bureau checks, generate legal forms or post
+accounting entries. The SACCO must validate its policies and legal requirements.
