@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from fastapi import HTTPException
 
-from app.api.accounting_pos import POSAccountingMappingIn, _line, _money
+from app.api.accounting_pos import POSAccountingMappingIn, _currency_mismatch, _line, _money
 from app.core.models import POSAccountingMapping, POSAccountingLink
 from app.main import app
 
@@ -56,3 +56,23 @@ def test_pos_journal_line_rejects_double_sided_and_negative_amounts():
         _line([], 1, debit="1.00", credit="1.00")
     with pytest.raises(ValueError):
         _line([], 1, debit="-1.00")
+
+
+
+def test_pos_sale_and_return_currency_must_match_ledger_base_currency():
+    assert _currency_mismatch("KES", "KES") == ""
+    assert _currency_mismatch("USD", "KES") == (
+        "POS currency USD differs from accounting base currency KES"
+    )
+    assert _currency_mismatch(None, "KES") == ""
+
+
+def test_pos_return_requires_original_sale_journal_and_same_branch():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "app" / "api" / "accounting_pos.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'result.branch_id != sale.branch_id' in source
+    assert 'source_type="sale", source_id=sale.id' in source
+    assert 'original_link.status != "posted" or not original_link.journal_id' in source
+    assert 'status="posted"' in source

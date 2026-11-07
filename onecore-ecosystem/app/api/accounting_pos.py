@@ -78,6 +78,13 @@ def _mapping_error(db, org_id, values):
     return ""
 
 
+def _currency_mismatch(source_currency, base_currency):
+    """Return a durable explanation when a POS source is not in ledger base currency."""
+    if source_currency and base_currency and source_currency != base_currency:
+        return f"POS currency {source_currency} differs from accounting base currency {base_currency}"
+    return ""
+
+
 def _line(lines, account_id, debit=0, credit=0, description=""):
     debit, credit = _money(debit), _money(credit)
     if debit == 0 and credit == 0:
@@ -128,6 +135,22 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
         sale = db.query(POSSale).filter_by(id=result.sale_id, organization_id=org_id).first()
         if not sale:
             return None, None, "Original POS sale is missing"
+        if result.branch_id != sale.branch_id:
+            return None, None, "POS return branch does not match the original sale branch"
+        base_currency = db.query(Organization.currency).filter_by(id=org_id).scalar()
+        currency_error = _currency_mismatch(sale.currency, base_currency)
+        if currency_error:
+            return None, None, currency_error
+        original_link = db.query(POSAccountingLink).filter_by(
+            organization_id=org_id, source_type="sale", source_id=sale.id
+        ).first()
+        if not original_link or original_link.status != "posted" or not original_link.journal_id:
+            return None, None, "Original POS sale has not been posted to the general ledger"
+        original_journal = db.query(AccountingJournal).filter_by(
+            id=original_link.journal_id, organization_id=org_id, status="posted"
+        ).first()
+        if not original_journal:
+            return None, None, "Original POS sale journal is missing or not posted"
         returned_lines = db.query(POSReturnLine).filter_by(
             organization_id=org_id, return_id=result.id
         ).all()
@@ -189,11 +212,10 @@ def post_pos_source(db: Session, organization_id: int, branch_id: str,
             id=source_id, organization_id=organization_id
         ).scalar()
         organization_currency = db.query(Organization.currency).filter_by(id=organization_id).scalar()
-        if sale_currency and organization_currency and sale_currency != organization_currency:
+        currency_error = _currency_mismatch(sale_currency, organization_currency)
+        if currency_error:
             link.status = "pending"
-            link.failure_reason = (
-                f"POS currency {sale_currency} differs from accounting base currency {organization_currency}"
-            )
+            link.failure_reason = currency_error
             return link
     accounts = _mapping_dict(mapping)
     mapping_error = _mapping_error(db, organization_id, accounts)
