@@ -102,3 +102,26 @@ This is an internal order record only. It does not reserve or deduct inventory,
 create an invoice, collect a deposit, dispatch goods, or send a customer notification.
 Those require fulfillment, accounting and provider workflows. Migration
 `0020_crm_sales_orders` adds sales order headers and immutable line snapshots.
+
+
+
+## Marketing consent and campaign preparation increment
+
+- Contact consent is stored as append-only channel/purpose decisions. A later revocation
+  supersedes an earlier grant because campaign preparation evaluates the latest event
+  for each contact/channel/purpose.
+- Consent records capture the source, actor, timestamp and optional expiry.
+- Draft email/SMS/WhatsApp campaigns can be created and prepared by organization
+  managers. Preparation snapshots only contacts with current, unexpired granted
+  marketing consent and a usable channel address.
+- Branch access is applied to campaign and recipient selection. Campaign preparation
+  is idempotent after the campaign enters `ready`.
+- APIs: POST/GET `/crm/contacts/{id}/consents`, POST/GET `/crm/campaigns`,
+  GET `/crm/campaigns/{id}`, POST `/crm/campaigns/{id}/prepare`.
+
+Preparation does not send messages. No email/SMS/WhatsApp provider, unsubscribe
+webhook, delivery callback, campaign scheduling worker, suppression-list service,
+consent import evidence or delivery analytics is connected. A future dispatcher must
+re-check the latest consent immediately before every send; prepared recipient snapshots
+are not a permanent authorization to deliver. Review privacy and local legal obligations
+before enabling real campaigns.
