@@ -6,6 +6,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.models import (User, Membership, Branch, CRMLead, CRMForecastSetting,
     CRMSalesTarget, CRMForecastSnapshot, CRMContact, CRMCampaign, CRMCampaignAttribution,
     CRMSalesOrder, CRMWorkerHeartbeat, CRMCampaignSchedule, AuditEvent)
@@ -351,3 +352,15 @@ def scheduler_health(m=Depends(active_membership),db:Session=Depends(get_db)):
         "heartbeat_age_seconds":age,"last_processed":heartbeat.last_processed if heartbeat else 0,
         "last_error":heartbeat.last_error if heartbeat else "","due_schedules":due,"failed_schedules":failed,
         "stale_running_schedules":stale}
+
+@router.get("/providers/health")
+def provider_health(m=Depends(active_membership)):
+    require_permission(m,"read")
+    base=(settings.crm_public_base_url or "").strip()
+    return {"providers":{
+        "email":{"configured":bool(settings.integration_email_enabled and settings.email_host and settings.email_from)},
+        "sms":{"configured":bool(settings.integration_sms_enabled and settings.sms_base_url and settings.sms_api_key)},
+        "whatsapp":{"configured":bool(settings.integration_whatsapp_enabled and settings.whatsapp_base_url and settings.whatsapp_token and settings.whatsapp_phone_number_id)}},
+        "delivery_callbacks":{"shared_secret_configured":bool(settings.crm_delivery_callback_secret)},
+        "marketing_unsubscribe":{"public_https_url_configured":base.startswith("https://")},
+        "note":"Configuration presence is not a successful provider health check or proof of message delivery."}
