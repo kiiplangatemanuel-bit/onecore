@@ -93,7 +93,7 @@ def render_template_text(text, contact):
 def validate_template_text(text):
     import re
     allowed = {"first_name", "full_name", "company", "email", "phone"}
-    token = re.compile(r"{{\\s*([a-z_]+)\\s*}}")
+    token = re.compile(r"{{\s*([a-z_]+)\s*}}")
     for match in token.finditer(text or ""):
         if match.group(1) not in allowed:
             raise ValueError(f"Unsupported template variable: {match.group(1)}")
