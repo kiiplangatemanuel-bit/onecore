@@ -2260,6 +2260,78 @@ def create_accounting_period(payload:AccountingFiscalPeriodIn,membership=Depends
     return {"id":row.id,"code":row.code,"status":row.status}
 
 
+def _accounting_period_close_check(db, organization_id, period):
+    """Return unresolved work that must be cleared before a period is locked."""
+    start, end = period.start_date, period.end_date
+    draft_invoices = db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id == organization_id,
+        AccountingInvoice.status == "draft",
+        AccountingInvoice.issue_date >= start,
+        AccountingInvoice.issue_date <= end,
+    ).count()
+    pending_approvals = db.query(AccountingInvoiceApproval).join(
+        AccountingInvoice, AccountingInvoice.id == AccountingInvoiceApproval.invoice_id
+    ).filter(
+        AccountingInvoiceApproval.organization_id == organization_id,
+        AccountingInvoiceApproval.status == "pending",
+        AccountingInvoice.organization_id == organization_id,
+        AccountingInvoice.issue_date >= start,
+        AccountingInvoice.issue_date <= end,
+    ).count()
+    draft_credit_notes = db.query(AccountingCreditNote).filter(
+        AccountingCreditNote.organization_id == organization_id,
+        AccountingCreditNote.status == "draft",
+        AccountingCreditNote.issue_date >= start,
+        AccountingCreditNote.issue_date <= end,
+    ).count()
+    draft_journals = db.query(AccountingJournal).filter(
+        AccountingJournal.organization_id == organization_id,
+        AccountingJournal.status == "draft",
+        AccountingJournal.entry_date >= start,
+        AccountingJournal.entry_date <= end,
+    ).count()
+    unreconciled_bank_statements = db.query(AccountingBankStatement).filter(
+        AccountingBankStatement.organization_id == organization_id,
+        AccountingBankStatement.status != "reconciled",
+        AccountingBankStatement.start_date <= end,
+        AccountingBankStatement.end_date >= start,
+    ).count()
+    unbalanced_posted_journals = db.query(AccountingJournal.id).join(
+        AccountingJournalLine, AccountingJournalLine.journal_id == AccountingJournal.id
+    ).filter(
+        AccountingJournal.organization_id == organization_id,
+        AccountingJournal.status == "posted",
+        AccountingJournal.entry_date >= start,
+        AccountingJournal.entry_date <= end,
+    ).group_by(AccountingJournal.id).having(
+        func.coalesce(func.sum(AccountingJournalLine.debit), 0)
+        != func.coalesce(func.sum(AccountingJournalLine.credit), 0)
+    ).count()
+    counts = {
+        "draft_invoices": draft_invoices,
+        "pending_invoice_approvals": pending_approvals,
+        "draft_credit_notes": draft_credit_notes,
+        "draft_journals": draft_journals,
+        "unreconciled_bank_statements": unreconciled_bank_statements,
+        "unbalanced_posted_journals": unbalanced_posted_journals,
+    }
+    blockers = [{"code": key, "count": value} for key, value in counts.items() if value]
+    return {"period_id": period.id, "period_code": period.code,
+        "start_date": start.date().isoformat(), "end_date": end.date().isoformat(),
+        "ready_to_close": not blockers, "checks": counts, "blockers": blockers}
+
+
+@router.get("/accounting/fiscal-periods/{period_id}/close-check")
+def accounting_period_close_check(period_id: int, membership=Depends(active_membership),
+    db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    period = db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id, organization_id=membership.organization_id).first()
+    if not period:
+        raise HTTPException(404, "Fiscal period not found")
+    return _accounting_period_close_check(db, membership.organization_id, period)
+
+
 @router.post("/accounting/fiscal-periods/{period_id}/close")
 def close_accounting_period(period_id:int,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -2268,12 +2340,14 @@ def close_accounting_period(period_id:int,membership=Depends(active_membership),
         id=period_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Fiscal period not found")
     if row.status=="closed": raise HTTPException(409,"Fiscal period is already closed")
-    drafts=db.query(AccountingInvoice).filter(
-        AccountingInvoice.organization_id==membership.organization_id,
-        AccountingInvoice.status=="draft",
-        AccountingInvoice.issue_date>=row.start_date,
-        AccountingInvoice.issue_date<=row.end_date).count()
-    if drafts: raise HTTPException(409,"Post or cancel all draft invoices dated in this period before closing")
+    close_check = _accounting_period_close_check(db, membership.organization_id, row)
+    if not close_check["ready_to_close"]:
+        raise HTTPException(409, detail={
+            "message": "Fiscal period has unresolved close controls",
+            "period_id": row.id,
+            "blockers": close_check["blockers"],
+            "checks": close_check["checks"],
+        })
     row.status="closed";row.closed_by=user.id;row.closed_at=datetime.now(timezone.utc)
     db.commit();audit(db,user.id,membership.organization_id,"accounting.period.closed","accounting_period",row.id)
     return {"id":row.id,"code":row.code,"status":row.status,"closed_at":row.closed_at.isoformat()}
