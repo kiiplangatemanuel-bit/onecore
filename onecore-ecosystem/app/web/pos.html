@@ -65,7 +65,7 @@ $('returnForm').addEventListener('submit',async e=>{
 async function updateQueue(){const items=await queueRecords();$('queueCount').textContent=items.length+' transactions waiting to sync.';$('queueList').replaceChildren();items.forEach(x=>{const li=document.createElement('li');li.textContent=x.id; $('queueList').append(li);});}
 async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
 let cart=[];
-function cartLineTotal(item){const base=Number(item.product.sale_price)*Number(item.quantity),discount=base*Number(item.discount_percent||0)/100,taxable=base-discount,tax=taxable*Number(item.product.tax_rate||0)/100;return Math.round((taxable+tax)*100)/100;}
+function cartLineTotal(item){const subtotal=Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100,discount=Math.round(subtotal*Number(item.discount_percent||0))/100,taxable=subtotal-discount,tax=Math.round(taxable*Number(item.product.tax_rate||0))/100;return Math.round((taxable+tax)*100)/100;}
 function renderCart(){
  const box=$('cartList');box.replaceChildren();
  if(!cart.length){box.textContent='Cart is empty.';$('total').value='0.00';return;}
@@ -77,8 +77,8 @@ function renderCart(){
   const td=document.createElement('td'),remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>{cart.splice(index,1);renderCart();});td.append(remove);tr.append(td);table.append(tr);
  });box.append(table);
  const subtotal=cart.reduce((sum,item)=>sum+Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100,0);
- const discount=cart.reduce((sum,item)=>sum+Math.round(Number(item.product.sale_price)*Number(item.quantity)*Number(item.discount_percent||0))/100,0);
- const tax=cart.reduce((sum,item)=>{const base=Number(item.product.sale_price)*Number(item.quantity),net=base-base*Number(item.discount_percent||0)/100;return sum+Math.round(net*Number(item.product.tax_rate||0))/100;},0);
+ const discount=cart.reduce((sum,item)=>{const lineSubtotal=Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100;return sum+Math.round(lineSubtotal*Number(item.discount_percent||0))/100;},0);
+ const tax=cart.reduce((sum,item)=>{const lineSubtotal=Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100,discountAmount=Math.round(lineSubtotal*Number(item.discount_percent||0))/100;return sum+Math.round((lineSubtotal-discountAmount)*Number(item.product.tax_rate||0))/100;},0);
  const summary=document.createElement('p');summary.textContent='Subtotal KES '+subtotal.toFixed(2)+' · Discount KES '+discount.toFixed(2)+' · Tax KES '+tax.toFixed(2);box.append(summary);
  const total=cart.reduce((sum,item)=>sum+cartLineTotal(item),0);$('total').value=total.toFixed(2);
 }
