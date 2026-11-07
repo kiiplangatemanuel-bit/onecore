@@ -1,0 +1,105 @@
+from decimal import Decimal
+
+from app.api.payroll_completion import calculate_kenya_payroll, KENYA_2026_RULES, money
+
+
+def test_kenya_2026_statutory_calculation_and_employer_costs():
+    result = calculate_kenya_payroll(Decimal("100000"), {"resident_for_tax": True},
+                                    KENYA_2026_RULES)
+    assert Decimal(result["nssf_employee"]) == Decimal("6000.00")
+    assert Decimal(result["nssf_employer"]) == Decimal("6000.00")
+    assert Decimal(result["shif_employee"]) == Decimal("2750.00")
+    assert Decimal(result["housing_levy_employee"]) == Decimal("1500.00")
+    assert Decimal(result["housing_levy_employer"]) == Decimal("1500.00")
+    assert Decimal(result["net_pay"]) == Decimal("70441.65")
+    assert Decimal(result["total_employer_cost"]) == Decimal("107500.00")
+
+
+def test_nssf_upper_limit_and_salaried_shif_has_no_non_salaried_minimum():
+    high = calculate_kenya_payroll(Decimal("250000"), {}, KENYA_2026_RULES)
+    assert Decimal(high["nssf_employee"]) == Decimal("6480.00")
+    low = calculate_kenya_payroll(Decimal("5000"), {}, KENYA_2026_RULES)
+    # SHIF Regulation 16: 2.75% of salary. KES 300 minimum is for
+    # non-salaried households under Regulation 17, not employees.
+    assert Decimal(low["shif_employee"]) == Decimal("137.50")
+    assert Decimal(low["housing_levy_employee"]) == Decimal("75.00")
+    # KES 300 is a non-salaried household minimum and must never be applied here.
+    assert Decimal(KENYA_2026_RULES["parameters"]["shif"]["non_salaried_minimum"]) == Decimal("300")
+
+
+def test_nonresident_does_not_receive_personal_relief():
+    resident = calculate_kenya_payroll(Decimal("50000"), {"resident_for_tax": True}, KENYA_2026_RULES)
+    nonresident = calculate_kenya_payroll(Decimal("50000"), {"resident_for_tax": False}, KENYA_2026_RULES, {"insurance_premium": "50000"})
+    assert Decimal(resident["personal_relief"]) == Decimal("2400.00")
+    assert Decimal(nonresident["personal_relief"]) == Decimal("0.00")
+    assert Decimal(nonresident["insurance_relief"]) == Decimal("0.00")
+    assert Decimal(nonresident["paye"]) > Decimal(resident["paye"])
+
+
+def test_qualifying_pension_and_other_allowable_deductions_are_capped():
+    result = calculate_kenya_payroll(Decimal("150000"), {}, KENYA_2026_RULES, {
+        "employee_pension": "50000", "mortgage_interest": "40000",
+        "post_retirement_medical_fund": "20000", "insurance_premium": "50000"
+    })
+    assert Decimal(result["employee_pension"]) == Decimal("23520.00")
+    assert Decimal(result["mortgage_interest"]) == Decimal("30000.00")
+    assert Decimal(result["post_retirement_medical_fund"]) == Decimal("15000.00")
+    assert Decimal(result["insurance_relief"]) == Decimal("5000.00")
+
+
+def test_non_cash_taxable_benefit_increases_taxable_pay_not_cash_net():
+    cash = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES)
+    with_benefit = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                           {"taxable_benefits": "12000"})
+    assert Decimal(with_benefit["gross_pay"]) == Decimal(cash["gross_pay"])
+    assert Decimal(with_benefit["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("12000.00")
+    assert Decimal(with_benefit["net_pay"]) < Decimal(cash["net_pay"])
+
+
+def test_statutory_bases_exclude_irregular_pay_when_configured():
+    result = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES, {
+        "nssf_pensionable_base": "40000", "shif_contribution_base": "40000",
+        "housing_levy_contribution_base": "40000"
+    })
+    assert Decimal(result["nssf_employee"]) == Decimal("2400.00")
+    assert Decimal(result["shif_employee"]) == Decimal("1100.00")
+    assert Decimal(result["housing_levy_employee"]) == Decimal("600.00")
+    assert Decimal(result["gross_pay"]) == Decimal("100000.00")
+
+
+def test_non_cash_benefit_threshold_exempts_first_five_thousand():
+    result = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                     {"non_cash_benefits": "12000"})
+    assert Decimal(result["taxable_benefits"]) == Decimal("7000.00")
+    assert Decimal(result["taxable_pay"]) == Decimal("78800.00")
+
+
+
+def test_post_retirement_medical_fund_is_withheld_from_net_pay():
+    without = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES)
+    with_prmf = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES,
+                                        {"post_retirement_medical_fund": "10000"})
+    assert Decimal(with_prmf["post_retirement_medical_fund"]) == Decimal("10000.00")
+    assert Decimal(with_prmf["net_pay"]) < Decimal(without["net_pay"])
+    assert Decimal(with_prmf["taxable_pay"]) < Decimal(without["taxable_pay"])
+
+
+def test_kenya_2026_rule_pack_has_official_authority_sources_and_effective_date():
+    sources = KENYA_2026_RULES["sources"]
+    authorities = {source["authority"].lower() for source in sources}
+    assert any("kra" in authority for authority in authorities)
+    assert any("nssf" in authority for authority in authorities)
+    assert any("kenya law" in authority or "sha" in authority for authority in authorities)
+    assert KENYA_2026_RULES["effective_from"] == "2026-02-01"
+    assert KENYA_2026_RULES["status"] == "draft"
+
+
+
+def test_employer_meals_are_taxed_above_exemption_but_not_paid_as_cash():
+    without = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES)
+    with_meals = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                         {"meal_benefit": "8000"})
+    assert Decimal(with_meals["gross_pay"]) == Decimal(without["gross_pay"])
+    assert Decimal(with_meals["taxable_benefits"]) == Decimal("3000.00")
+    assert Decimal(with_meals["taxable_pay"]) == Decimal(without["taxable_pay"]) + Decimal("3000.00")
+    assert Decimal(with_meals["net_pay"]) < Decimal(without["net_pay"])

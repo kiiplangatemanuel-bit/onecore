@@ -2,16 +2,21 @@
   "category_number": 11,
   "name": "HR and Payroll",
   "scope_from_master_specification": "Employee profiles, recruitment/ATS, onboarding/contracts, departments/positions, attendance/biometrics, shifts, leave/overtime/timesheets, payroll, allowances/deductions/payslips/payments, configurable PAYE/NSSF/SHIF/AHL statutory rules, tax reports, appraisals, training, discipline, self-service and analytics.",
-  "status": "scaffold",
+  "status": "implemented_with_production_gates",
   "required_before_production": [
-    "domain schema and migrations",
-    "service layer and API contracts",
-    "tenant and branch authorization",
-    "validation and approval rules",
-    "audit events",
-    "frontend workflows",
-    "automated tests and UAT",
-    "monitoring, backup and recovery",
-    "operator and user documentation"
+    "Independent Kenyan payroll/tax professional approval of statutory rules and employee tax declarations",
+    "Secure employee bank-detail vault and bank-specific certified upload/API integration",
+    "Daraja sandbox and production callback-gateway UAT with credentials and live reconciliation",
+    "KRA iTax, SHA and NSSF return/remittance integrations and statutory payment reconciliation",
+    "Attendance-derived shift/overtime approval and roster integration",
+    "PostgreSQL concurrency/load testing, penetration testing, privacy review, backup/restore drills and customer payroll signoff"
+  ],
+  "implemented_features": [
+    "Employee directory, leave, attendance and effective-dated payroll profiles",
+    "Kenya versioned PAYE, NSSF, SHIF and Affordable Housing Levy rules with independent activation",
+    "Payroll allowances, taxable benefits, overtime, shifts, proration and immutable calculation snapshots",
+    "Maker-checker payroll approval, payment authorization, accounting journals and reversals",
+    "Bank CSV preparation, Safaricom Daraja B2C adapter, signed callbacks, retry and bank reconciliation",
+    "Employee payslip history, statutory workpapers, analytics and year-end reconciliation"
   ]
 }
