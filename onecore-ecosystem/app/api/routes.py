@@ -1,4 +1,4 @@
-import json, re, uuid
+import json, re, uuid, hashlib
 from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -1004,7 +1004,7 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             organization_id=membership.organization_id, product_id=line.product_id,
             branch_id=payload.branch_id, quantity_delta=-line.quantity,
             movement_type="issue", reference=payload.client_transaction_id,
-            idempotency_key=f"pos:{payload.client_transaction_id}:{index}",
+            idempotency_key=f"pos:{hashlib.sha256(payload.client_transaction_id.encode()).hexdigest()[:32]}:{index}",
             created_by=user.id
         ))
     for payment in payload.payments:
