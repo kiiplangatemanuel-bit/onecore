@@ -73,16 +73,18 @@ def _update(row, data, u, status=None):
 def _resource_list(db, m, kind, branch_id=None, patient_id=None, status=None, limit=500):
     q = db.query(HealthcareResource).filter_by(
         organization_id=m.organization_id, resource_type=kind)
+    global_kinds={"pharmacy_medicine","pharmacy_safety_rule","lab_test","lab_panel"}
     if branch_id is not None:
         if not can_access_branch(m, branch_id):
             raise HTTPException(404, "Resource not found")
         q = q.filter(HealthcareResource.branch_id == branch_id)
-    else:
+    elif kind not in global_kinds:
         allowed = branch_scope_ids(m)
         if allowed is not None:
             if not allowed:
                 return []
-            q = q.filter(HealthcareResource.branch_id.in_(allowed))
+            q = q.filter(or_(HealthcareResource.branch_id.is_(None),
+                             HealthcareResource.branch_id.in_(allowed)))
     if patient_id is not None:
         q = q.filter(HealthcareResource.patient_id == patient_id)
     if status is not None:
@@ -91,6 +93,11 @@ def _resource_list(db, m, kind, branch_id=None, patient_id=None, status=None, li
 
 
 def _get(db, m, rid, kind, lock=False):
+    if kind in {"pharmacy_medicine","pharmacy_safety_rule","lab_test","lab_panel"}:
+        q=db.query(HealthcareResource).filter_by(id=rid,organization_id=m.organization_id,resource_type=kind)
+        row=(q.with_for_update() if lock else q).first()
+        if not row:raise HTTPException(404,"Resource not found")
+        return row
     return _resource(db, m, rid, kind, lock=lock)
 
 
@@ -104,6 +111,18 @@ def _medicine(db, m, medicine_id):
 def _batch(db, m, batch_id, lock=False):
     row = _get(db, m, batch_id, "pharmacy_batch", lock=lock)
     return row, _payload(row)
+
+
+def _need_any(db,m,u,action):
+    allowed=branch_scope_ids(m)
+    branches=[None] if allowed is None else allowed
+    if not branches:raise HTTPException(403,"No branch access is assigned")
+    for branch in branches:
+        try:
+            return _need(db,m,u,action,branch)
+        except HTTPException as exc:
+            if exc.status_code!=403:raise
+    raise HTTPException(403,"Healthcare role does not grant this action in the assigned branches")
 
 
 def _patient_read(db, m, u, patient_id):
@@ -134,12 +153,12 @@ def _movement(db, m, u, product_id, branch_id, delta, kind, reference, key):
 
 
 def _controlled_event(db, m, u, medicine_id, batch_id, patient_id, event_type,
-                      quantity, reason, witness_id=None, parent_id=None):
+                      quantity, reason, witness_id=None, parent_id=None, branch_id=None):
     data = {"medicine_id": medicine_id, "batch_id": batch_id, "event_type": event_type,
         "quantity": str(quantity), "reason": reason, "actor_id": u.id,
         "witness_id": witness_id, "occurred_at": NOW().isoformat()}
     row = _create(db, m, u, "pharmacy_controlled_event", data,
-        branch_id=None, patient_id=patient_id, parent_id=parent_id,
+        branch_id=branch_id, patient_id=patient_id, parent_id=parent_id,
         status="recorded", idempotency_key=None)
     return row
 
@@ -227,7 +246,7 @@ def create_pharmacy_medicine(payload: dict, m=Depends(active_membership),
 @router.get("/pharmacy/medicines")
 def list_pharmacy_medicines(m=Depends(active_membership), u: User=Depends(current_user),
     db: Session=Depends(get_db), limit: int=Query(200, ge=1, le=1000)):
-    _need(db,m,u,"pharmacy.manage",None)
+    _need_any(db,m,u,"pharmacy.manage")
     rows = _resource_list(db,m,"pharmacy_medicine",status="active",limit=limit)
     return [{"id":x.id,**_payload(x)} for x in rows]
 
@@ -267,7 +286,7 @@ def receive_pharmacy_batch(medicine_id:int,payload:dict,m=Depends(active_members
     _movement(db,m,u,med["inventory_product_id"],branch_id,qty,"receipt",
         f"pharmacy-batch:{row.id}",f"pharm-batch:{hashlib.sha256(client.encode()).hexdigest()[:40]}")
     if med.get("is_controlled"):
-        _controlled_event(db,m,u,medicine_id,row.id,None,"received",qty,"Controlled batch receipt")
+        _controlled_event(db,m,u,medicine_id,row.id,None,"received",qty,"Controlled batch receipt",branch_id=branch_id)
     _audit_action(db,m,u,"pharmacy.batch.received","pharmacy_batch",row.id,f"qty:{qty};expiry:{expiry}")
     db.commit()
     return {"id":row.id,"status":"received","remaining_quantity":str(qty)}
@@ -296,7 +315,7 @@ def list_pharmacy_batches(medicine_id:int|None=None,branch_id:str|None=None,stat
     return result
 
 
-def _remove_batch_stock(db,m,u,membership,row,data,reason,event_type):
+def _remove_batch_stock(db,m,u,row,data,reason,event_type):
     qty=Decimal(data.get("remaining_quantity","0"))
     if qty>0:
         _movement(db,membership,u,data["inventory_product_id"],row.branch_id,-qty,"issue",
@@ -306,7 +325,7 @@ def _remove_batch_stock(db,m,u,membership,row,data,reason,event_type):
     medrow=_get(db,membership,data["medicine_id"],"pharmacy_medicine")
     med=_payload(medrow)
     if med.get("is_controlled"):
-        _controlled_event(db,membership,u,medrow.id,row.id,None,event_type,qty,reason)
+        _controlled_event(db,membership,u,medrow.id,row.id,None,event_type,qty,reason,branch_id=row.branch_id)
     return qty
 
 
@@ -316,7 +335,7 @@ def quarantine_pharmacy_batch(batch_id:int,payload:dict,m=Depends(active_members
     row,data=_batch(db,m,batch_id,lock=True);_need(db,m,u,"pharmacy.manage",row.branch_id)
     if row.status!="active":raise HTTPException(409,"Only active batches can be quarantined")
     reason=_required_text(payload,"reason",500)
-    qty=_remove_batch_stock(db,u,m,row,data,reason,"quarantined")
+    qty=_remove_batch_stock(db,m,u,row,data,reason,"quarantined")
     _audit_action(db,m,u,"pharmacy.batch.quarantined","pharmacy_batch",row.id,reason)
     db.commit()
     return {"id":row.id,"status":row.status,"quantity_removed":str(qty)}
@@ -330,7 +349,7 @@ def recall_pharmacy_batch(batch_id:int,payload:dict,m=Depends(active_membership)
     reason=_required_text(payload,"reason",500)
     qty=Decimal(data.get("remaining_quantity","0"))
     if row.status=="active":
-        qty=_remove_batch_stock(db,u,m,row,data,reason,"recalled")
+        qty=_remove_batch_stock(db,m,u,row,data,reason,"recalled")
     else:
         data["status"]="recalled";_update(row,data,u,status="recalled")
     _create(db,m,u,"pharmacy_recall",{"batch_id":row.id,"reason":reason,
@@ -350,7 +369,7 @@ def expire_pharmacy_batches(m=Depends(active_membership),u:User=Depends(current_
     for row in rows:
         data=_payload(row)
         if row.status=="active" and _date(data["expiry_date"],"expiry_date")<cutoff:
-            qty=_remove_batch_stock(db,u,m,row,data,"Expired batch removed from saleable inventory","expired")
+            qty=_remove_batch_stock(db,m,u,row,data,"Expired batch removed from saleable inventory","expired")
             count+=1;total+=qty
     _audit_action(db,m,u,"pharmacy.expiry.sweep","pharmacy_batch","expiry-sweep",
         f"as_of:{cutoff};count:{count};qty:{total}")
@@ -380,7 +399,7 @@ def adjust_pharmacy_batch(batch_id:int,payload:dict,m=Depends(active_membership)
         f"pharmacy-adjust:{row.id}",f"pharm-adjust:{row.id}:{uuid.uuid4().hex[:16]}")
     medrow=_get(db,m,data["medicine_id"],"pharmacy_medicine")
     if _payload(medrow).get("is_controlled"):
-        _controlled_event(db,m,u,medrow.id,row.id,None,"stock_adjustment",delta,reason,verifier_id)
+        _controlled_event(db,m,u,medrow.id,row.id,None,"stock_adjustment",delta,reason,verifier_id,branch_id=row.branch_id)
     _create(db,m,u,"pharmacy_stock_adjustment",{"batch_id":row.id,"delta":str(delta),
         "reason":reason,"verifier_id":verifier_id,"balance_after":str(new_qty)},
         branch_id=row.branch_id,parent_id=row.id,status="posted")
@@ -568,7 +587,7 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
             f"pharm-dispense:{disp.id}:{allocation['batch_id']}")
         if med.get("is_controlled"):
             _controlled_event(db,m,u,medicine_id,allocation["batch_id"],rx.patient_id,
-                "dispensed",Decimal(allocation["quantity"]),"Prescription dispense",verifier_id,disp.id)
+                "dispensed",Decimal(allocation["quantity"]),"Prescription dispense",verifier_id,disp.id,rx.branch_id)
     invoice=_create(db,m,u,"pharmacy_invoice",{"patient_id":rx.patient_id,
         "source_type":"pharmacy_dispense","source_id":disp.id,"amount":str(amount),
         "currency":"KES","status":"unpaid"},rx.branch_id,rx.patient_id,parent_id=disp.id,
@@ -708,7 +727,7 @@ def convert_pharmacy_replenishment(request_id:int,m=Depends(active_membership),
 @router.post("/lab/tests",status_code=201)
 def create_laboratory_test(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db)):
-    _need(db,m,u,"lab.manage",payload.get("branch_id"))
+    _need_any(db,m,u,"lab.manage")
     code=_required_text(payload,"code",40).upper()
     existing=_resource_list(db,m,"lab_test",limit=1000)
     if any(_payload(x).get("code")==code for x in existing):raise HTTPException(409,"Test code already exists")
@@ -725,7 +744,7 @@ def create_laboratory_test(payload:dict,m=Depends(active_membership),u:User=Depe
 @router.get("/lab/tests")
 def list_laboratory_tests(m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db),limit:int=Query(500,ge=1,le=1000)):
-    _need(db,m,u,"lab.manage",None)
+    _need_any(db,m,u,"lab.manage")
     rows=_resource_list(db,m,"lab_test",status="active",limit=limit)
     return [{"id":x.id,**_payload(x)} for x in rows]
 
