@@ -65,8 +65,7 @@ attestation.
 
 ## Remaining POS requirements
 
-- Multi-product cart controls in the cashier UI (the synchronization API accepts
-  multiple lines, but the current checkout form still submits one line).
+- Discount and tax calculation, customer accounts, receipt rendering/thermal printing and cash drawer integration.
 - Offline re-authentication/device registration, local authorization expiry/revocation
   and a robust 24-hour offline entitlement.
 - Discounts, tax calculation, customer accounts, receipt rendering/thermal printing
