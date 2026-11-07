@@ -2,16 +2,21 @@
   "category_number": 9,
   "name": "Pharmacy and Laboratory Management",
   "scope_from_master_specification": "Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock, suppliers, pricing and billing; lab catalogue, sample registration/tracking, processing, result validation, reports, doctor access, equipment, inventory and quality control.",
-  "status": "scaffold",
-  "required_before_production": [
-    "domain schema and migrations",
-    "service layer and API contracts",
-    "tenant and branch authorization",
-    "validation and approval rules",
-    "audit events",
-    "frontend workflows",
-    "automated tests and UAT",
-    "monitoring, backup and recovery",
-    "operator and user documentation"
+  "status": "partial",
+  "implemented": [
+    "Medicine catalogue linked to inventory products",
+    "Batch receipt, expiry visibility, quarantine and stock ledger integration",
+    "Laboratory test catalogue and encounter-linked test orders",
+    "Sample accession and collection tracking",
+    "Result entry with independent second-person validation"
+  ],
+  "remaining_before_production": [
+    "Prescription and FEFO dispensing",
+    "Controlled medicine governance and returns",
+    "Supplier and pharmacy billing integration",
+    "Multi-sample and recollection workflows",
+    "Lab instrument integration and quality control",
+    "Clinical result delivery and critical-value escalation",
+    "Granular clinical roles, privacy controls, security testing and UAT"
   ]
 }
