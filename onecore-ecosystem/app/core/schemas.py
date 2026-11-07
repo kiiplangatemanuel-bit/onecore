@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Any
 
 class LoginIn(BaseModel):
@@ -321,7 +321,14 @@ class AccountingBankStatementLineIn(BaseModel):
     transaction_date: date
     description: str = Field(min_length=1, max_length=240)
     reference: str = Field(default="", max_length=120)
-    amount: Decimal = Field(ne=0, ge=Decimal("-9999999999999999"), le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    amount: Decimal = Field(ge=Decimal("-9999999999999999"), le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("amount")
+    @classmethod
+    def amount_must_be_nonzero(cls, value):
+        if value == 0:
+            raise ValueError("Statement line amount must not be zero")
+        return value
 
 
 class AccountingBankStatementIn(BaseModel):
