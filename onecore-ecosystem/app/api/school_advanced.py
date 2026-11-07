@@ -34,8 +34,7 @@ def _rows(db: Session, m, kind: str):
 
 
 def _visible_rows(db: Session, m, kind: str):
-    return [x for x in _rows(db,m,kind)
-            if x.branch_id is None or can_access_branch(m,x.branch_id)]
+    return [x for x in _rows(db,m,kind) if can_access_branch(m,x.branch_id)]
 
 
 def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_id"):
@@ -44,7 +43,17 @@ def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_
         module_key=MODULE, record_type=kind
     ).first()
     branch_id = ((row.data or {}).get(branch_field) or row.branch_id) if row else None
-    if not row or (branch_id is not None and not can_access_branch(m, branch_id)):
+    if row and branch_id is None and (row.data or {}).get("learner_id"):
+        learner = db.query(SchoolLearner).filter_by(
+            id=int(row.data["learner_id"]), organization_id=m.organization_id
+        ).first()
+        branch_id = learner.branch_id if learner else None
+    if row and branch_id is None and (row.data or {}).get("class_id"):
+        cls = db.query(SchoolClass).filter_by(
+            id=int(row.data["class_id"]), organization_id=m.organization_id
+        ).first()
+        branch_id = cls.branch_id if cls else None
+    if not row or not can_access_branch(m, branch_id):
         raise HTTPException(404, f"{kind.replace('_', ' ').title()} not found")
     return row
 
