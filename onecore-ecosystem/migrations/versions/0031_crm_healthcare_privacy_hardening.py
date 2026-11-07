@@ -15,13 +15,15 @@ depends_on = None
 def upgrade():
     # CRM template versions and branch scope.
     op.drop_index("ix_crm_template_org_name", table_name="crm_communication_templates")
-    op.add_column("crm_communication_templates", sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=True))
-    op.add_column("crm_communication_templates", sa.Column("version", sa.Integer(), nullable=False, server_default="1"))
+    with op.batch_alter_table("crm_communication_templates") as batch:
+        batch.add_column(sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=True))
+        batch.add_column(sa.Column("version", sa.Integer(), nullable=False, server_default="1"))
     op.create_index("ix_crm_communication_templates_branch_id", "crm_communication_templates", ["branch_id"])
     op.create_index("ix_crm_template_org_name_version", "crm_communication_templates", ["organization_id", "name", "version"], unique=True)
 
     # Branch-scoped saved audiences.
-    op.add_column("crm_audience_segments", sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=True))
+    with op.batch_alter_table("crm_audience_segments") as batch:
+        batch.add_column(sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=True))
     op.create_index("ix_crm_audience_segments_branch_id", "crm_audience_segments", ["branch_id"])
 
     # Schedule recurrence, audience/template binding and lease recovery.
