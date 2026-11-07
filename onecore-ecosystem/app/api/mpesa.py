@@ -499,3 +499,28 @@ def mpesa_payment_status(sale_id: int, membership=Depends(active_membership),
              "phone_number": "••••" + row.phone_number[-4:], "status": row.status,
              "receipt": row.mpesa_receipt_number, "result_description": row.result_description}
             for row in rows]
+
+
+
+@router.get("/pos/sales/{sale_id}/refunds")
+def mpesa_refund_status(sale_id: int, membership=Depends(active_membership),
+                        db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    sale = db.query(POSSale).filter_by(
+        id=sale_id, organization_id=membership.organization_id
+    ).first()
+    if not sale or not can_access_branch(membership, sale.branch_id):
+        raise HTTPException(404, "POS sale not found")
+    rows = db.query(POSReturn, POSRefund, MpesaRefundIntent).join(
+        POSRefund, POSRefund.return_id == POSReturn.id
+    ).outerjoin(MpesaRefundIntent, MpesaRefundIntent.refund_id == POSRefund.id).filter(
+        POSReturn.organization_id == membership.organization_id,
+        POSReturn.sale_id == sale.id, POSRefund.method == "mpesa",
+    ).order_by(POSRefund.id).all()
+    return [{
+        "return_id": ret.id, "refund_id": refund.id,
+        "amount": str(refund.amount), "refund_status": refund.status,
+        "intent_status": intent.status if intent else None,
+        "receipt": intent.mpesa_receipt_number if intent else "",
+        "result_description": intent.result_description if intent else "",
+    } for ret, refund, intent in rows]
