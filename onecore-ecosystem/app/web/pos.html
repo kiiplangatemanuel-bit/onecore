@@ -21,6 +21,21 @@
 <form id="returnForm" hidden><h3>Supervisor return</h3><label>Reason<input name="reason" minlength="5" maxlength="500" required></label><label>Refund method<select name="refund_method"><option value="cash">Cash</option><option value="card">Card (record only)</option><option value="bank">Bank (record only)</option><option value="mpesa">M-Pesa B2C</option></select></label><label id="refundPhoneLabel" hidden>M-Pesa refund phone<input name="refund_phone" inputmode="tel" placeholder="07XXXXXXXX"></label><button>Record return and restock</button><p class="muted">Requires manage permission. This records the refund; it does not send money through a payment provider.</p></form></section>
 <section class="panel"><h2>Offline queue</h2><p id="queueCount" aria-live="polite">0 transactions waiting.</p><ul id="queueList"></ul><p class="muted">Queued transactions are encrypted with Web Crypto before storage in this browser's IndexedDB. Keep this browser profile and device safe. A still-active signed-in session and open shift are required to create offline sales; offline sign-in after a reload is not yet supported.</p></section>
 <p id="status" role="status" aria-live="polite"></p>
+<section class="panel" id="advancedOperations">
+<h2>POS supervisor operations</h2>
+<p class="muted">Trusted terminal approvals, offline conflict queue, synchronization health and multi-store totals. Requires supervisor permissions for changes.</p>
+<div class="row"><button type="button" id="refreshAdvanced" disabled>Refresh operations</button><span id="advancedUpdated" class="muted" aria-live="polite"></span></div>
+<h3>Registered terminals</h3><pre id="advancedDevices" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view terminals.</pre>
+<h3>Offline synchronization health</h3><pre id="advancedSync" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view sync status.</pre>
+<h3>Open offline conflicts</h3><pre id="advancedConflicts" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view conflicts.</pre>
+<form id="conflictResolutionForm">
+<label>Conflict ID<input name="conflict_id" type="number" min="1" required></label>
+<label>Resolution<select name="resolution"><option value="accept_server">Accept server state</option><option value="void">Void local transaction</option><option value="retry_after_refresh">Refresh and retry</option></select></label>
+<label>Supervisor note<input name="note" minlength="5" maxlength="500" required></label>
+<button>Resolve conflict</button>
+</form>
+<h3>Multi-store POS summary</h3><pre id="advancedReport" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view store totals.</pre>
+</section>
 </main><footer>Powered by OneCore Technologies Ltd</footer>
 <script>
 (()=> {
@@ -101,6 +116,30 @@ $('returnForm').addEventListener('submit',async e=>{
 async function updateQueue(){const items=await queueRecords();$('queueCount').textContent=items.length+' transactions waiting to sync.';$('queueList').replaceChildren();items.forEach(x=>{const li=document.createElement('li');li.textContent=x.id; $('queueList').append(li);});}
 async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
 let cart=[];
+async function loadAdvanced(){
+ if(!token)return;
+ $('refreshAdvanced').disabled=true;
+ try{
+  const [devices,conflicts,sync,report]=await Promise.all([
+   api('/pos/advanced/devices'),api('/pos/advanced/conflicts'),api('/pos/advanced/sync-dashboard'),api('/pos/advanced/operations-report')
+  ]);
+  $('advancedDevices').textContent=devices.length?devices.map(d=>'#'+d.id+' · '+d.name+' · '+d.branch_id+' · '+d.status+(d.last_seen_at?' · last seen '+d.last_seen_at:'')).join('\\n'):'No terminals registered.';
+  $('advancedConflicts').textContent=conflicts.length?conflicts.map(x=>'#'+x.id+' · '+x.conflict_type+' · '+x.client_transaction_id+' · '+x.status+' · branch '+x.branch_id).join('\\n'):'No open conflicts.';
+  $('advancedSync').textContent=JSON.stringify(sync.counts,null,2)+'\\nLast event: '+(sync.last_event_at||'none')+'\\n'+(sync.events||[]).slice(0,20).map(x=>x.state+' · '+x.transaction_id+' · attempt '+x.attempt+' · '+x.error_message).join('\\n');
+  $('advancedReport').textContent=JSON.stringify(report,null,2);
+  $('advancedUpdated').textContent='Updated '+new Date().toLocaleTimeString();
+  $('advancedDevices').dataset.items=JSON.stringify(devices);
+ }catch(err){status('Supervisor dashboard: '+err.message);}
+ finally{$('refreshAdvanced').disabled=false;}
+}
+$('refreshAdvanced').addEventListener('click',loadAdvanced);
+$('advancedDevices').addEventListener('click',async()=>{});
+$('conflictResolutionForm').addEventListener('submit',async e=>{
+ e.preventDefault();const data=Object.fromEntries(new FormData(e.currentTarget));const id=Number(data.conflict_id);delete data.conflict_id;
+ try{await api('/pos/advanced/conflicts/'+id+'/resolve',{method:'POST',body:JSON.stringify(data)});status('Conflict #'+id+' resolved.');e.currentTarget.reset();await loadAdvanced();}
+ catch(err){status('Conflict resolution: '+err.message);}
+});
+
 $('sale').elements.method.addEventListener('change',()=>{$('mpesaPhoneLabel').hidden=$('sale').elements.method.value!=='mpesa';});
 $('returnForm').elements.refund_method.addEventListener('change',()=>{$('refundPhoneLabel').hidden=$('returnForm').elements.refund_method.value!=='mpesa';});
 function cartLineTotal(item){const subtotal=Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100,discount=Math.round(subtotal*Number(item.discount_percent||0))/100,taxable=subtotal-discount,tax=Math.round(taxable*Number(item.product.tax_rate||0))/100;return Math.round((taxable+tax)*100)/100;}
@@ -123,7 +162,7 @@ function renderCart(){
 function renderCatalog(){const sel=$('sale').elements.product_id;sel.replaceChildren(new Option('Select product',''));catalog.forEach(p=>sel.add(new Option(p.sku+' · '+p.name+' · KES '+p.sale_price+' · tax '+(p.tax_rate||0)+'% · stock '+p.available_quantity,String(p.id))));renderCart();amount();}
 function amount(){const id=Number($('sale').elements.product_id.value),qty=Number($('sale').elements.quantity.value),p=catalog.find(x=>x.id===id);$('addToCart').disabled=!p||!Number.isFinite(qty)||qty<=0;return {p,qty};}
 async function refreshOnline(){catalog=await api('/pos/catalog?branch_id='+encodeURIComponent(branch));await saveCache();renderCatalog();shift=await api('/pos/shifts/current?branch_id='+encodeURIComponent(branch));$('shift').textContent=shift?'Open shift #'+shift.id:'No active shift.';$('openShift').disabled=!!shift;$('checkout').disabled=!shift;$('sync').disabled=false;$('refreshCash').disabled=!shift;if(shift)await refreshCash();}
-$('login').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:f.get('email'),password:f.get('password')})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Sign-in failed');if(!/^\d+$/.test(String(f.get('org'))))throw new Error('Organization ID must be numeric');if(!crypto.subtle||!indexedDB)throw new Error('This browser does not support secure local POS storage.');token=d.access_token;org=String(f.get('org'));branch=String(f.get('branch')).trim();db=await openDb();key=await cryptoKey();try{await refreshOnline();}catch(err){await loadCache();renderCatalog();shift=null;$('checkout').disabled=true;throw err;}await updateQueue();status('Signed in. POS catalogue and shift loaded.');}catch(err){status(err.message);}});
+$('login').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:f.get('email'),password:f.get('password')})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Sign-in failed');if(!/^\d+$/.test(String(f.get('org'))))throw new Error('Organization ID must be numeric');if(!crypto.subtle||!indexedDB)throw new Error('This browser does not support secure local POS storage.');token=d.access_token;org=String(f.get('org'));branch=String(f.get('branch')).trim();db=await openDb();key=await cryptoKey();try{await refreshOnline();}catch(err){await loadCache();renderCatalog();shift=null;$('checkout').disabled=true;throw err;}await updateQueue();status('Signed in. POS catalogue and shift loaded.');await loadAdvanced();}catch(err){status(err.message);}});
 $('openShift').addEventListener('click',async()=>{try{shift=await api('/pos/shifts/open',{method:'POST',body:JSON.stringify({branch_id:branch,opening_cash:'0.00'})});$('shift').textContent='Open shift #'+shift.id;$('openShift').disabled=true;$('checkout').disabled=false;await refreshCash();status('Cashier shift opened.');}catch(e){status(e.message);}});
 function activeShiftId(){return shift&&shift.id?shift.id:null;}
 async function refreshCash(){const id=activeShiftId();if(!id){$('cashExpected').textContent='No active shift.';return;}const x=await api('/pos/shifts/'+id+'/reconciliation');$('cashExpected').textContent='Expected till cash: KES '+x.expected_cash;$('cashSummary').textContent='Opening float '+x.opening_cash+' · Cash sales '+x.cash_sales+' · Cash refunds '+x.cash_refunds+' · Cash in '+x.cash_in+' · Cash out / safe drops '+x.cash_out_and_safe_drops+' · Counted '+(x.counted_cash||'not closed')+' · Variance '+(x.variance||'not closed')+' · Status '+x.reconciliation_status;$('cashMovementHistory').replaceChildren();(x.movements||[]).forEach(m=>{const p=document.createElement('p');p.textContent=m.type+' · KES '+m.amount+' · '+m.reason+ (m.reference?' · '+m.reference:'');$('cashMovementHistory').append(p);});$('refreshCash').disabled=false;}
