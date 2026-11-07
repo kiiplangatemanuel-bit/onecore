@@ -16,8 +16,10 @@ received the response; providers without idempotency support cannot guarantee
 exactly-once delivery after ambiguous network failures.
 
 Marketing dispatch is blocked unless CRM_PUBLIC_BASE_URL is a public HTTPS URL.
-Unsubscribe endpoints accept POST only, so link scanners and message-preview bots
-cannot unsubscribe a customer merely by fetching a link. Email includes both
+Unsubscribe GET requests render a confirmation page without changing consent; only
+an explicit POST (including RFC 8058 one-click POST) revokes consent. This prevents
+link scanners and message-preview bots from unsubscribing a customer merely by
+fetching a link. Email includes both
 List-Unsubscribe and RFC 8058 List-Unsubscribe-Post headers. One-click unsubscribe
 tokens are random, single-purpose bearer links stored only as SHA-256 digests.
 Unsubscribe appends a channel-specific revoked consent decision and suppresses that
