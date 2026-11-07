@@ -190,3 +190,52 @@ class POSSaleSyncIn(BaseModel):
     offline_created_at: datetime | None = None
     lines: list[POSSaleLineIn] = Field(min_length=1, max_length=100)
     payments: list[POSPaymentIn] = Field(min_length=1, max_length=20)
+
+
+class SchoolClassIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    stream: str = Field(default="", max_length=40)
+    academic_year: int = Field(ge=2000, le=2200)
+    branch_id: str | None = Field(default=None, max_length=36)
+
+
+class SchoolLearnerIn(BaseModel):
+    admission_number: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9/_-]+$")
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    class_id: int | None = Field(default=None, gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    guardian_name: str = Field(default="", max_length=180)
+    guardian_phone: str = Field(default="", max_length=32)
+
+
+class SchoolSubjectIn(BaseModel):
+    code: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=2, max_length=120)
+
+
+class SchoolAssessmentIn(BaseModel):
+    class_id: int = Field(gt=0)
+    subject_id: int = Field(gt=0)
+    title: str = Field(min_length=2, max_length=160)
+    academic_year: int = Field(ge=2000, le=2200)
+    term: str = Field(min_length=1, max_length=24)
+    maximum_score: Decimal = Field(gt=0, le=Decimal("999999"))
+    weight: Decimal = Field(default=Decimal("1"), gt=0, le=Decimal("100"))
+
+
+class SchoolMarkItemIn(BaseModel):
+    learner_id: int = Field(gt=0)
+    score: Decimal = Field(ge=0, le=Decimal("999999"))
+
+
+class SchoolMarksIn(BaseModel):
+    marks: list[SchoolMarkItemIn] = Field(min_length=1, max_length=500)
+
+
+class SchoolGradeBandIn(BaseModel):
+    scale_name: str = Field(default="default", min_length=1, max_length=80)
+    grade: str = Field(min_length=1, max_length=12)
+    minimum_percent: Decimal = Field(ge=0, le=100)
+    maximum_percent: Decimal = Field(ge=0, le=100)
+    points: Decimal = Field(default=Decimal("0"), ge=0, le=100)
