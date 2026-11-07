@@ -170,6 +170,8 @@ class AccountingAccount(Base):
     code: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(180))
     account_type: Mapped[str] = mapped_column(String(20))
+    is_cash_equivalent: Mapped[bool] = mapped_column(Boolean, default=False)
+    cash_flow_category: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -1093,6 +1095,22 @@ class AccountingCreditNoteLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AccountingInvoiceRefund(Base):
+    __tablename__ = "accounting_invoice_refunds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    payment_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    refund_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_refund_org_key", "organization_id", "idempotency_key", unique=True),)
+
+
 class AccountingFiscalPeriod(Base):
     __tablename__ = "accounting_fiscal_periods"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1533,6 +1551,7 @@ class ProcurementSupplierInvoice(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     matched_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accounting_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_invoices.id"), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_procurement_invoice_org_supplier_number", "organization_id", "supplier_id", "invoice_number", unique=True),)
 
