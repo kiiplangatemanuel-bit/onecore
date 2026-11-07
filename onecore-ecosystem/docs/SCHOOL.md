@@ -78,6 +78,8 @@ records for a tenant/date/learner. Migration `0013_school_attendance` is reversi
 Tests added: status and duplicate validation, model table contract and OpenAPI route
 registration. The attendance increment does not yet include period-by-period attendance,
 excused absence approval, guardian notifications, attendance thresholds, analytics,
-biometric/device integrations, bulk CSV import or a dedicated attendance UI. CI must
+biometric/device integrations, bulk CSV import or guardian notifications. The `/school` workspace now includes a
+class/date register loader, status and note controls, and batch save. It is a basic
+staff interface; role-specific approval and parent-facing workflows are not included. CI must
 pass the full migration downgrade/upgrade and pytest workflow before this increment is
 considered verified.
