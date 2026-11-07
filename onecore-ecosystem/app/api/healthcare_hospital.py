@@ -40,7 +40,7 @@ RESOURCE_TYPES = {
 ADMIN_ROLES = {"healthcare_admin"}
 ROLE_ACTIONS = {
     "hospital.manage": {"healthcare_admin"},
-    "admissions.manage": {"healthcare_admin", "clinician", "nurse", "receptionist", "ward_clerk"},
+    "admissions.manage": {"healthcare_admin", "clinician", "nurse", "ward_clerk"},
     "inpatient.clinical.manage": {"healthcare_admin", "clinician", "nurse"},
     "nursing.manage": {"healthcare_admin", "clinician", "nurse"},
     "observations.manage": {"healthcare_admin", "clinician", "nurse"},
@@ -86,7 +86,7 @@ def _patient_access(db, m, u, patient_id: int, permission="clinical.read", write
             db,m.organization_id,u.id,patient.id,"write"):
             raise HTTPException(403,"A write-level patient grant is required for this clinical workflow")
     if write and permission == "patient.read" and not emergency and "healthcare_admin" not in roles:
-        if not roles.intersection({"receptionist","ward_clerk"}) and not _has_access(
+        if "ward_clerk" not in roles and not _has_access(
             db,m.organization_id,u.id,patient.id,"write"):
             raise HTTPException(403,"A write-level patient grant is required for this clinical workflow")
     if write and not emergency and not _treatment_allowed(db, m.organization_id, patient.id):
