@@ -25,3 +25,11 @@ self.addEventListener("fetch", event => {
     })());
   }
 });
+
+self.addEventListener("sync", event => {
+  if (event.tag !== "onecore-pos-sync") return;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({type: "window", includeUncontrolled: true});
+    for (const client of windows) client.postMessage({type: "POS_SYNC_REQUEST"});
+  })());
+});
