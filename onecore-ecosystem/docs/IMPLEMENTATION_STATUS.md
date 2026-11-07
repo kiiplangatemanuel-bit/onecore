@@ -549,6 +549,9 @@ import/export, team assignment and UAT.
 - Added GRN list/detail/create/inspect APIs and procurement workspace forms.
 - Added tests for schema validation, model/API registration, legacy endpoint
   deprecation and workspace controls.
-- Verification status: pending GitHub Actions migration, compile and pytest result.
+- CI verification passed on commit `b541701e4fa3c509c2ffcca7cc2707c4e1a42b15`:
+  migration upgrade and downgrade/re-upgrade, Python compilation, and `64 passed`
+  pytest checks (5 dependency deprecation warnings). Follow-up documentation commit
+  triggered a separate workflow run.
 - Remaining gaps: supplier returns/credit notes, supplier invoices/three-way match,
   multi-level approval thresholds, RFQs, supplier performance and UAT.
