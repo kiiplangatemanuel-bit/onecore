@@ -533,3 +533,22 @@ import/export, team assignment and UAT.
 - Remaining gaps: configurable approval tiers/amount thresholds, delegation,
   requisition-to-PO conversion, multi-line UI editing, attachments and full UAT.
 
+
+
+## Procurement GRN inspection increment (7 November 2026)
+
+- Existing requisition workflow retained: draft, submit, manager approve/reject,
+  requester self-approval prevention, branch scope and audit events.
+- Added GRN header/line models and reversible migration
+  `0015_procurement_grn_inspection`.
+- Goods delivery creates a `pending_inspection` GRN and reserves the PO delivered
+  quantity. The old direct-to-inventory receipt endpoint now returns HTTP 410.
+- Manager inspection must account for every delivered unit as accepted or rejected;
+  rejection requires a reason. Accepted quantity alone posts to the inventory ledger
+  with a stable per-GRN-line idempotency key.
+- Added GRN list/detail/create/inspect APIs and procurement workspace forms.
+- Added tests for schema validation, model/API registration, legacy endpoint
+  deprecation and workspace controls.
+- Verification status: pending GitHub Actions migration, compile and pytest result.
+- Remaining gaps: supplier returns/credit notes, supplier invoices/three-way match,
+  multi-level approval thresholds, RFQs, supplier performance and UAT.
