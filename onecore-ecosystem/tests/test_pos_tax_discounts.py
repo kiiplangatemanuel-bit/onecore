@@ -93,6 +93,7 @@ def test_pos_and_inventory_workspaces_expose_tax_discount_controls():
     inventory = (root / "app" / "web" / "inventory.html").read_text(encoding="utf-8")
     assert 'name="discount_percent"' in pos
     assert "discount_percent:Number(item.discount_percent||0)" in pos
-    assert "data.tax_amount" not in pos
+    assert "data.tax_amount" in pos
+    assert "line.tax_amount" in pos
     assert 'name="tax_rate"' in inventory
     assert "/tax-rate" in inventory
