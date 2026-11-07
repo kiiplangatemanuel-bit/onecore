@@ -569,3 +569,20 @@ class AccountingFixedAsset(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_accounting_fixed_asset_org_code", "organization_id", "asset_code", unique=True),)
+
+
+class AccountingDepreciationEntry(Base):
+    __tablename__ = "accounting_depreciation_entries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("accounting_fixed_assets.id"), index=True)
+    period_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_depreciation_org_key", "organization_id", "idempotency_key", unique=True),
+        Index("ix_accounting_depreciation_asset_period", "organization_id", "asset_id", "period_date", unique=True),
+    )
