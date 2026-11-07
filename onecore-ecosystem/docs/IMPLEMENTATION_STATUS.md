@@ -409,3 +409,34 @@ suite. The SQLite CI environment is not a production database rehearsal.
 - The migration/test run uses CI SQLite. It does not establish PostgreSQL production
   compatibility, race-safety under real concurrent payments, statutory tax correctness,
   security certification or production readiness.
+
+
+### Accounting fiscal controls, budgets, fixed assets and statements (8 November 2026)
+
+Implemented on main:
+- Tenant fiscal periods with unique period codes, overlap prevention and close action.
+  Journal posting, invoice posting/settlement and fixed-asset journals reject dates
+  within a configured closed period. Closing blocks while draft invoices remain in
+  that period.
+- Period budgets with revenue/expense allocations, approval and actual-vs-budget
+  report; branch-specific budget lines supported.
+- Fixed asset register with acquisition journal, asset/salvage values, useful life and
+  ledger account mapping.
+- Monthly straight-line depreciation with per-asset/month uniqueness, idempotency,
+  depreciation journals and stop-at-salvage calculation.
+- Basic ledger-derived profit-and-loss and balance-sheet report.
+- Migrations 0009_accounting_controls and 0010_accounting_depreciation.
+- API, model, schema and tests added. Documentation updated in docs/ACCOUNTING.md.
+
+Verified code commit 6e42ff69a5f2fd9f692dab30b8629bad82fb41b8:
+GitHub Actions run 42364331566 passed migration upgrade, downgrade/re-upgrade,
+Python compilation and pytest: 50 passed, 5 warnings. The run used the CI SQLite
+environment, not production PostgreSQL.
+
+Remaining accounting gaps include bank statements/import and reconciliation,
+customer/supplier statements, credit/debit notes, refunds, recurring invoices,
+procurement three-way matching, cost centres, monthly budgets/encumbrances, asset
+disposal/revaluation/impairment, fiscal closing journals and retained-earnings
+roll-forward, cash-flow statement, multi-currency, statutory tax/eTIMS, production
+PostgreSQL rehearsal, concurrency/performance, finance UAT and security review.
+Period boundaries are only enforced where an organization has configured periods.
