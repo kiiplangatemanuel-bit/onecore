@@ -110,6 +110,7 @@ def test_healthcare_role_matrix_is_least_privilege():
     assert "clinical.write" in ROLE_PERMISSIONS["clinician"]
     assert "clinical.write" not in ROLE_PERMISSIONS["nurse"]
     assert "clinical.read" not in ROLE_PERMISSIONS["receptionist"]
+    assert "patient.read" not in ROLE_PERMISSIONS["receptionist"]
     assert "audit.read" in ROLE_PERMISSIONS["privacy_officer"]
     assert "patient.read" not in ROLE_PERMISSIONS["privacy_officer"]
     assert "breakglass" in ROLE_PERMISSIONS["clinician"]
