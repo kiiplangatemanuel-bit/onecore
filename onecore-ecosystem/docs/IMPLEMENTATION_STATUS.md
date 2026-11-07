@@ -836,3 +836,8 @@ Implemented on `feature/crm-healthcare-privacy-final`:
 - Added migration `0031_crm_healthcare_privacy_hardening`, CRM and healthcare workspaces, scheduler Docker service, tests and operator docs.
 
 Release boundary: CI migration/pytest checks and production UAT must pass before deployment. Set a separately managed `HEALTHCARE_PHI_ENCRYPTION_KEY` before storing patient data. MFA/step-up, managed key rotation/recovery, retention and data-subject request workflows, legal-hold policy, penetration testing, security monitoring and clinical/legal governance remain production requirements. These controls are not a regulatory certification.
+
+
+## CRM forecasting, targets, attribution and performance reporting
+
+Rebased on the current CRM automation and privacy-hardening base. Adds configurable stage probabilities and forecast scenarios; monthly/quarterly/yearly team and representative forecasts; target quotas and attainment; immutable forecast snapshots and historical variance against realized won-deal values; campaign-to-lead links with automatic quote acceptance and sales-order confirmation attribution; currency-aware ROI and conversion funnels; provider configuration health; scheduler heartbeat and container health. Migration: 0032_crm_forecast_attribution. CI verification for this rebased branch is required before merge. Provider UAT and accounting invoice/payment event publishing remain release gates.
