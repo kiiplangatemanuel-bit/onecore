@@ -32,3 +32,8 @@ class RecordOut(BaseModel):
     data: dict[str, Any]
     branch_id: str | None
     class Config: from_attributes = True
+
+class BranchIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    address: str = Field(default="", max_length=500)
