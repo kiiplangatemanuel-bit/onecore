@@ -1,5 +1,6 @@
 """Poll the authenticated CRM scheduler API and report health."""
 import json, logging, os, time
+from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 logging.basicConfig(level=os.getenv("LOG_LEVEL","INFO"))
@@ -23,5 +24,6 @@ def main():
                 log.error(json.dumps({"event":"crm_scheduler_error","error_type":error}))
                 try:client.post(base+"/scheduler/heartbeat",json={"worker_name":name,"processed":0,"error":error}).raise_for_status()
                 except Exception:pass
+            Path("/tmp/crm-scheduler-heartbeat").write_text(str(time.time()),encoding="ascii")
             time.sleep(interval)
 if __name__=="__main__":main()
