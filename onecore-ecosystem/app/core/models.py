@@ -396,6 +396,121 @@ class HealthcareEncounter(Base):
     __table_args__ = (Index("ix_healthcare_encounter_org_appointment", "organization_id", "appointment_id", unique=True),)
 
 
+class PharmacyMedicine(Base):
+    __tablename__ = "pharmacy_medicines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    inventory_product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    sku: Mapped[str] = mapped_column(String(80))
+    generic_name: Mapped[str] = mapped_column(String(180))
+    brand_name: Mapped[str] = mapped_column(String(180), default="")
+    strength: Mapped[str] = mapped_column(String(80), default="")
+    dosage_form: Mapped[str] = mapped_column(String(60))
+    route: Mapped[str] = mapped_column(String(40), default="oral")
+    unit: Mapped[str] = mapped_column(String(24), default="unit")
+    is_controlled: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_pharmacy_medicine_org_sku", "organization_id", "sku", unique=True),
+        Index("ix_pharmacy_medicine_org_product", "organization_id", "inventory_product_id", unique=True),
+    )
+
+
+class PharmacyBatch(Base):
+    __tablename__ = "pharmacy_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    medicine_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_medicines.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    batch_number: Mapped[str] = mapped_column(String(80))
+    client_batch_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    expiry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    remaining_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    received_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_pharmacy_batch_org_client_id", "organization_id", "client_batch_id", unique=True),
+        Index("ix_pharmacy_batch_org_medicine_branch_number", "organization_id", "medicine_id", "branch_id", "batch_number", unique=True),
+        Index("ix_pharmacy_batch_org_expiry", "organization_id", "expiry_date"),
+    )
+
+
+class LaboratoryTest(Base):
+    __tablename__ = "laboratory_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    unit: Mapped[str] = mapped_column(String(40), default="")
+    reference_range: Mapped[str] = mapped_column(String(180), default="")
+    turnaround_hours: Mapped[int] = mapped_column(Integer, default=24)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_test_org_code", "organization_id", "code", unique=True),)
+
+
+class LaboratoryOrder(Base):
+    __tablename__ = "laboratory_orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    encounter_id: Mapped[int] = mapped_column(ForeignKey("healthcare_encounters.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    ordering_provider_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    client_order_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="ordered")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_order_org_client_id", "organization_id", "client_order_id", unique=True),)
+
+
+class LaboratoryOrderLine(Base):
+    __tablename__ = "laboratory_order_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("laboratory_orders.id"), index=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("laboratory_tests.id"), index=True)
+    test_code: Mapped[str] = mapped_column(String(40))
+    test_name: Mapped[str] = mapped_column(String(180))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    result_unit: Mapped[str] = mapped_column(String(40), default="")
+    reference_range_snapshot: Mapped[str] = mapped_column(String(180), default="")
+    result_value: Mapped[str] = mapped_column(Text, default="")
+    result_notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    entered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    validated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_order_line_order_test", "organization_id", "order_id", "test_id", unique=True),)
+
+
+class LaboratorySample(Base):
+    __tablename__ = "laboratory_samples"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("laboratory_orders.id"), index=True)
+    accession_number: Mapped[str] = mapped_column(String(80))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), default="collected")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    collected_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    __table_args__ = (
+        Index("ix_lab_sample_org_accession", "organization_id", "accession_number", unique=True),
+        Index("ix_lab_sample_org_order", "organization_id", "order_id", unique=True),
+    )
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"
