@@ -87,7 +87,19 @@ def _validate_config(kind, config):
         if config.get("environment") == "production" and not config.get("certification_reference"):
             raise HTTPException(409, "Production integrations require a certification reference")
         # Secret material must be held in a secret manager, never in JSON config.
-        if any(re.search(r"(secret|password|private_key|client_secret|access_token)", str(k), re.I) for k in config):
+        forbidden = {"secret", "client_secret", "password", "private_key", "access_token", "api_secret"}
+        def contains_secret_key(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    normalized = str(key).lower()
+                    if normalized in forbidden or (normalized.endswith("_secret") and normalized != "secret_manager_ref"):
+                        return True
+                    if contains_secret_key(child):
+                        return True
+            elif isinstance(value, list):
+                return any(contains_secret_key(child) for child in value)
+            return False
+        if contains_secret_key(config):
             raise HTTPException(422, "Do not store credentials in config; use a secret-manager reference")
     if kind in {"dashboard_definition", "report_definition"}:
         metrics = config.get("metrics", [])
