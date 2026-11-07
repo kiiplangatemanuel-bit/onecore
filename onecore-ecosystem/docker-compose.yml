@@ -7,5 +7,20 @@ services:
     volumes:
       - onecore_data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  crm-scheduler:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "app.workers.crm_scheduler"]
+    volumes:
+      - onecore_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 volumes:
   onecore_data:
