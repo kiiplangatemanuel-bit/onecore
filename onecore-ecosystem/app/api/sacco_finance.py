@@ -133,7 +133,7 @@ def _account_balance(db, org_id, account_id):
         organization_id=org_id, account_id=account_id).all()
     total = Decimal("0.00")
     for kind, amount in rows:
-        total += -Decimal(amount) if kind == "withdrawal" else Decimal(amount)
+        total += -Decimal(amount) if kind in {"withdrawal", "reversal"} else Decimal(amount)
     return money(total)
 
 
@@ -457,7 +457,7 @@ def member_statement(member_id: int, membership=Depends(active_membership),
             SaccoTransaction.created_at, SaccoTransaction.id).all()
         balance = Decimal("0.00")
         for tx in txs:
-            delta = -Decimal(tx.amount) if tx.transaction_type == "withdrawal" else Decimal(tx.amount)
+            delta = -Decimal(tx.amount) if tx.transaction_type in {"withdrawal", "reversal"} else Decimal(tx.amount)
             balance = money(balance + delta)
             if (not start_date or tx.created_at.date() >= start_date) and (not end_date or tx.created_at.date() <= end_date):
                 entries.append({"date": tx.created_at.isoformat(), "type": tx.transaction_type,
@@ -765,7 +765,7 @@ def download_member_statement(member_id: int, membership=Depends(active_membersh
         for tx in txs:
             if start_date and tx.created_at.date() < start_date: continue
             if end_date and tx.created_at.date() > end_date: continue
-            withdrawal = tx.transaction_type == "withdrawal"
+            withdrawal = tx.transaction_type in {"withdrawal", "reversal"}
             writer.writerow([tx.created_at.isoformat(), tx.transaction_type, account.account_number,
                 tx.reference, str(tx.amount) if withdrawal else "0.00",
                 "0.00" if withdrawal else str(tx.amount), account.currency])
