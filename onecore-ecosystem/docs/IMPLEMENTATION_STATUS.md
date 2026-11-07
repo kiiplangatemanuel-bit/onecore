@@ -104,3 +104,52 @@ shared schema only; specialist product schemas and domain migrations remain unbu
 - Correction commit: `2663254`. Its CI run was queued at tracker update time;
   success is not yet verified. The earlier failed run is retained as evidence rather
   than being represented as a pass.
+
+
+## Inventory vertical slice (7 November 2026)
+
+Implemented on main:
+
+- Tenant-scoped inventory product catalogue with organization/SKU uniqueness.
+- Decimal-based append-only stock movement ledger and derived branch balances.
+- Receipt, issue and adjustment rules; negative resulting balances are rejected.
+- Branch ownership and membership branch-scope checks for inventory movement and
+  stock queries.
+- Per-tenant idempotency key with duplicate replay handling and conflicting-payload
+  rejection.
+- Audit events for product creation and stock movement posting.
+- API: GET/POST `/api/v1/inventory/products`, GET `/api/v1/inventory/stock`,
+  POST `/api/v1/inventory/movements`.
+- Accessible basic inventory UI at `/inventory`; bearer token held in page memory.
+- Migration `0002_inventory`; domain rules extracted to
+  `app/services/inventory.py`; documentation in `docs/INVENTORY.md`.
+- Automated tests cover movement direction, decimal balance arithmetic, negative
+  stock prevention, model/index contracts, input validation and route registration.
+
+Key commits: `7715fb8` (models), `34a674d` (decimal quantities), `cf7f8eb`
+(schemas), `80192aa` (migration), `67c7d8c` (API), `dc326a3` (domain service),
+`d956580` (service wiring), `66c15d2` and `8ec3360` (tests), `7794f11` and
+`c9f8535` (UI), `baf6757` (inventory documentation).
+
+Verification note: after correcting the CI working-directory mismatch, the workflow
+run for commit `4ef6b55` passed. Inventory-specific CI runs for commits
+`8ec3360` and `baf6757` were still running/queued when this status entry was
+written; do not treat the inventory test suite as verified until the latest run
+completes successfully.
+
+Inventory still incomplete: purchasing/procurement, supplier and purchase-order
+workflows, warehouse transfers, batch/lot/serial/expiry, reservations, costing and
+valuation, stocktakes, advanced reporting, full edit/deactivate UI, PostgreSQL
+concurrency/load testing, and end-to-end branch isolation tests.
+
+## Current scope decision
+
+The user requested full Accounting, CRM, Inventory, Procurement, POS, offline POS,
+School, Hospital, Pharmacy, Laboratory, SACCO, Microfinance, payment/provider
+integrations, identity, superadmin/subscriptions/workflows/analytics, operations,
+frontend, accessibility, security and UAT. These are separate large products and
+platform capabilities. This delivery implements only the inventory catalogue and
+stock-ledger slice above; all other listed areas remain unimplemented or partial
+unless independently evidenced elsewhere in this tracker. No M-Pesa, KRA eTIMS or
+SHA provider connection, provider certification, live payment, production hosting,
+TLS provisioning or UAT approval is claimed.
