@@ -838,3 +838,43 @@ repayment allocation, arrears, guarantors, collateral, interest accrual, account
 journals, member statements, regulatory reports, payment rails, granular roles,
 AML/KYC document verification and UAT remain outstanding. Products requiring a
 guarantor are blocked from application until guarantor capture is implemented.
+
+
+## SACCO loan disbursement and repayment increment (7 November 2026)
+
+Implemented on `feature/sacco-loan-servicing`, stacked on the SACCO member/savings
+foundation:
+
+- Approved loan applications can be recorded as disbursed loans; a unique loan
+  account is created and the application cannot be disbursed twice.
+- Flat and reducing-balance installment schedules are generated with decimal
+  arithmetic, month-end date handling and final-installment reconciliation.
+- Repayments allocate chronologically to earliest installments, interest before
+  principal; overpayments are rejected and idempotency keys prevent duplicates.
+- Loan balances and schedule paid amounts update atomically; fully settled loans
+  close. Added migration `0028_sacco_loan_servicing`, service arithmetic tests,
+  API routes and workspace actions.
+
+Boundaries: disbursement and repayment are internal records only; no external
+cash transfer, bank/M-Pesa confirmation or payment callback exists. No arrears,
+late fees, collateral/guarantor workflow, restructuring, early-settlement rebate,
+variable rates, accounting journal, prudential reporting or production UAT.
+
+
+## School term report card increment (7 November 2026)
+
+- Added `GET /api/v1/school/learners/{learner_id}/report-card` for weighted term
+  results based only on published assessments.
+- Calculates subject and overall percentages using assessment weights and the
+  configured grade-band scale.
+- A missing mark in any published assessment marks the subject and overall report
+  incomplete; no final grade is issued until all published assessment marks exist.
+- Uses learner placement history to locate class(es) for a historical academic year.
+- Optional attendance date bounds add present/late/absent/excused totals and a
+  recorded attendance rate (present + late divided by recorded days).
+- Added a school report-card workspace with browser print support and tests.
+
+Boundaries: no PDF generation, guardian portal/email delivery, principal sign-off,
+class ranking across all learners, report-card templates, competency narrative,
+CBC strands/learning outcomes, fee-clearance gating, transcript certification or
+UAT. Historical results depend on retained learner placement records.

@@ -72,3 +72,28 @@ only; it does not send or receive money through an external payment provider.
 Do not use this workflow as a live regulated financial service until the remaining
 controls, accounting integration, payment-provider verification, security review
 and jurisdiction-specific compliance are implemented and approved.
+
+
+## Loan disbursement and servicing increment
+
+- `POST /api/v1/sacco/loan-applications/{application_id}/disburse` records an
+  approved application as a loan and creates its installment schedule.
+- Flat schedules calculate simple interest over the approved term. Reducing-balance
+  schedules calculate monthly interest on the remaining principal. Currency values
+  are rounded to cents and the final installment reconciles the remaining principal
+  and interest.
+- `GET /api/v1/sacco/loans` lists loans; `GET
+  /api/v1/sacco/loans/{loan_id}/schedule` returns installment due dates, due/paid
+  amounts and status.
+- `POST /api/v1/sacco/loans/{loan_id}/repayments` records partial or full repayments.
+  Amounts are allocated to earliest unpaid installments, interest before principal.
+  Overpayments are rejected; idempotency keys prevent duplicate repayment entries.
+- `GET /api/v1/sacco/loans/{loan_id}/repayments` returns repayment allocations.
+- A loan closes when scheduled principal and interest are both fully repaid.
+
+**Disbursement boundary:** the endpoint records the disbursement instruction and
+creates a loan balance/schedule. It does not transfer funds to a member, savings
+account, bank or mobile-money wallet. Repayment endpoints record internal receipts;
+they do not verify external settlement. Interest is fixed at origination and no
+penalties, arrears accrual, rescheduling, early-settlement rebates or variable-rate
+recalculation are provided. No general-ledger journal is automatically posted.

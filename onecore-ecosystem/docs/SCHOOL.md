@@ -111,3 +111,25 @@ bulk promotion, promotion eligibility rules, transcript migration, fee carry-for
 or notifications. Effective dates are recorded as administrative history; the API
 does not backdate historical attendance or assessment membership. Review the school's
 approved promotion policy and safeguarding procedures before production use.
+
+
+## Term report cards
+
+- `GET /api/v1/school/learners/{learner_id}/report-card?academic_year=2026&term=Term%201`
+  returns the learner's subject and overall results from published assessments.
+- Draft assessments are excluded. Published assessments without a mark are counted
+  as missing and keep the subject and overall report incomplete; the endpoint does
+  not issue a final percentage or grade in that case.
+- Assessment scores are normalized to percentages and combined using their configured
+  weights. The tenant's selected grade-band scale (default `default`) supplies the
+  grade and points.
+- Learner placement history is used to locate class placements in the requested
+  academic year, so earlier years remain reportable after promotion or transfer.
+- Optional `attendance_start` and `attendance_end` query parameters must be supplied
+  together. Attendance totals and rate cover the inclusive UTC date range; the
+  displayed rate counts present and late records as attended.
+- The `/school` workspace can generate and browser-print the report card.
+
+Not included: PDF export, parent/guardian self-service or email delivery, head-teacher
+approval, class position, fee-clearance gating, narrative competencies, CBC strand
+mastery, certified transcript issuance or formal academic-policy validation.

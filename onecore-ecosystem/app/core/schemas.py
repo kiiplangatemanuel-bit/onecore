@@ -1024,6 +1024,24 @@ class SaccoLoanApplicationIn(BaseModel):
         return value
 
 
+class SaccoLoanDisbursementIn(BaseModel):
+    reference: str = Field(min_length=3, max_length=120)
+
+    @field_validator("reference")
+    @classmethod
+    def disbursement_reference_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A disbursement reference is required")
+        return value
+
+
+class SaccoLoanRepaymentIn(BaseModel):
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
 class SaccoLoanDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected)$")
     note: str = Field(min_length=3, max_length=500)

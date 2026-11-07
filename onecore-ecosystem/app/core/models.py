@@ -602,6 +602,60 @@ class SaccoLoanApplication(Base):
     __table_args__ = (Index("ix_sacco_loan_app_org_number", "organization_id", "application_number", unique=True),)
 
 
+class SaccoLoan(Base):
+    __tablename__ = "sacco_loans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("sacco_loan_applications.id"), unique=True, index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    loan_number: Mapped[str] = mapped_column(String(40))
+    principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    term_months: Mapped[int] = mapped_column(Integer)
+    interest_method: Mapped[str] = mapped_column(String(16))
+    total_interest: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    outstanding_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    outstanding_interest: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    disbursement_reference: Mapped[str] = mapped_column(String(120), default="")
+    disbursed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_org_number", "organization_id", "loan_number", unique=True),)
+
+
+class SaccoLoanSchedule(Base):
+    __tablename__ = "sacco_loan_schedules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    installment_number: Mapped[int] = mapped_column(Integer)
+    due_date: Mapped[date] = mapped_column(Date)
+    principal_due: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    interest_due: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    principal_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"))
+    interest_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    __table_args__ = (Index("ix_sacco_loan_schedule_number", "organization_id", "loan_id", "installment_number", unique=True),)
+
+
+class SaccoLoanRepayment(Base):
+    __tablename__ = "sacco_loan_repayments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    principal_component: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    interest_component: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_repayment_org_key", "organization_id", "idempotency_key", unique=True),)
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"
