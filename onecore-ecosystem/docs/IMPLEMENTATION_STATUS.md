@@ -896,3 +896,15 @@ Security and verification boundary:
   certification. Legal retention periods, clinical governance, privacy review,
   encryption key custody/rotation, MFA, penetration testing, backup/PITR restoration,
   disaster-recovery drills and clinical pilot acceptance remain deployment gates.
+
+
+## Pharmacy and Laboratory Management (category 9)
+
+The end-to-end pharmacy and laboratory API and workspace are implemented in the pharmacy/laboratory feature branch. See `docs/PHARMACY_LAB_OPERATIONS.md`.
+
+Delivered scope includes:
+- E-prescription issue/cancel lifecycle, prescriber and encounter validation, pharmacist second-person verification, partial dispensing/refills, FEFO batch allocation, controlled-drug event history, returns/disposition/reversal, allergy and configured interaction checks, batch expiry/recall/quarantine/adjustment and procurement replenishment.
+- Configurable laboratory tests and panels, encounter-linked orders, multi-sample accession and chain of custody, result entry and independent validation, critical threshold alerts, analyzer credentials and result ingestion, QC/calibration, secure result delivery, billing, insurance claim decision/settlement and traceability.
+- Tenant/branch/patient access controls, encrypted patient-linked resources, audit events, idempotency on stock and dispensing/return operations, shared inventory movement posting, and a pharmacy/laboratory workspace.
+
+The module is not production-certified by code completion alone. Vendor analyzer protocols, licensed/clinically governed drug-interaction data, real-time critical-result notification delivery, insurer/payment integrations, clinical UAT, security/privacy review, concurrency/load testing and operational acceptance remain explicit release gates. The module metadata is therefore marked `implemented_with_external_release_gates`, not production-ready.
