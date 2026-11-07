@@ -48,3 +48,11 @@ def test_crm_tables_and_routes_exist():
     assert "/api/v1/crm/leads" in paths
     assert "/api/v1/crm/activities" in paths
     assert "/crm" in paths
+
+
+def test_crm_campaign_audience_preview_is_registered_and_read_only_contract():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/crm/campaigns/{campaign_id}/preview"
+    assert endpoint in paths
+    assert "get" in paths[endpoint]
+    assert "post" not in paths[endpoint]
