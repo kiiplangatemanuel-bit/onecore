@@ -125,7 +125,7 @@ payment or statutory filing.
 - Every employee calculation stores an immutable SHA-256 snapshot with the full statutory rule version and component breakdown. Recalculation of the same run is rejected; create a new run for corrected payroll.
 - `GET /api/v1/hr/payroll/runs/{id}/snapshots` provides the review view.
 - `POST /api/v1/hr/payroll/runs/{id}/approve-calculation` enforces maker-checker separation and validates snapshot integrity/count.
-- `POST /api/v1/hr/payroll/runs/{id}/post-journal` posts a balanced accrual journal using explicit tenant-owned chart-of-account IDs. Map salary expense, salary payable, PAYE, NSSF, SHIF, Housing Levy, pension and other deduction liabilities. A duplicate payroll journal is rejected.
+- `POST /api/v1/hr/payroll/runs/{id}/post-journal` posts a balanced accrual journal using explicit tenant-owned chart-of-account IDs. Map salary expense, salary payable, PAYE, NSSF, SHIF, Housing Levy, employee pension, PRMF and other deduction liabilities. A duplicate payroll journal is rejected.
 - `GET /api/v1/hr/payroll/my-history` returns only the signed-in employee's approved/paid payroll snapshots.
 
 ### Payment processing and reconciliation
