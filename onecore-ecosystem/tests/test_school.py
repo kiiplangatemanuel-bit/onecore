@@ -124,3 +124,13 @@ def test_school_bulk_promotion_schema_and_route_contract():
     paths = app.openapi()["paths"]
     endpoint = "/api/v1/school/classes/{source_class_id}/bulk-promote"
     assert endpoint in paths and "post" in paths[endpoint]
+
+
+def test_school_workspace_exposes_bulk_promotion_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "school.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="bulkPromotionForm"' in html
+    assert 'id="bulkSourceClass"' in html
+    assert 'id="bulkLearnerSelection"' in html
+    assert "/bulk-promote" in html
