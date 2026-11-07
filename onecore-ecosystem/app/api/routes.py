@@ -2536,6 +2536,15 @@ def create_accounting_period(payload:AccountingFiscalPeriodIn,membership=Depends
     return {"id":row.id,"code":row.code,"status":row.status}
 
 
+def _require_organization_wide_period_close(membership):
+    """A period close is organization-wide; branch-scoped users cannot run it."""
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(
+            403,
+            "Fiscal-period close controls require organization-wide branch access",
+        )
+
+
 def _accounting_period_close_check(db, organization_id, period):
     """Return unresolved work that must be cleared before a period is locked."""
     start, end = period.start_date, period.end_date
@@ -2601,6 +2610,7 @@ def _accounting_period_close_check(db, organization_id, period):
 def accounting_period_close_check(period_id: int, membership=Depends(active_membership),
     db: Session = Depends(get_db)):
     require_permission(membership, "read")
+    _require_organization_wide_period_close(membership)
     period = db.query(AccountingFiscalPeriod).filter_by(
         id=period_id, organization_id=membership.organization_id).first()
     if not period:
@@ -2612,6 +2622,7 @@ def accounting_period_close_check(period_id: int, membership=Depends(active_memb
 def close_accounting_period(period_id:int,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_organization_wide_period_close(membership)
     row=db.query(AccountingFiscalPeriod).filter_by(
         id=period_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Fiscal period not found")
