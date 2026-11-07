@@ -25,6 +25,7 @@ def test_pos_completion_routes_registered():
         "/api/v1/pos/peripherals/commands",
         "/api/v1/pos/devices/{device_id}/peripherals/commands",
         "/api/v1/pos/payments/{payment_id}/verify-settlement",
+        "/api/v1/pos/refunds/{refund_id}/confirm-execution",
         "/api/v1/pos/operations/report",
     }
     assert expected <= paths
