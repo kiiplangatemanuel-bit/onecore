@@ -137,6 +137,7 @@ class InventoryProduct(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     unit: Mapped[str] = mapped_column(String(24), default="unit")
     sale_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -329,6 +330,9 @@ class POSSale(Base):
     client_transaction_id: Mapped[str] = mapped_column(String(100))
     request_hash: Mapped[str] = mapped_column(String(64))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    subtotal_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="KES")
     status: Mapped[str] = mapped_column(String(16), default="posted")
     offline_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -344,6 +348,10 @@ class POSSaleLine(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    discount_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     line_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
 
 
@@ -383,6 +391,8 @@ class POSReturnLine(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     line_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
 
 

@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,7 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
+from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -199,19 +199,21 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
         organization_id=membership.organization_id, is_active=True
     ).order_by(InventoryProduct.name).all()
     return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
-             "unit": p.unit, "sale_price": str(p.sale_price), "is_active": p.is_active} for p in rows]
+             "unit": p.unit, "sale_price": str(p.sale_price),
+             "tax_rate": str(p.tax_rate), "is_active": p.is_active} for p in rows]
 
 
 @router.post("/inventory/products", status_code=201)
 def create_inventory_product(payload: InventoryProductIn, membership=Depends(active_membership),
                              user: User = Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "create")
+    require_permission(membership, "manage" if payload.tax_rate > 0 else "create")
     sku = payload.sku.strip().upper()
     if db.query(InventoryProduct).filter_by(organization_id=membership.organization_id, sku=sku).first():
         raise HTTPException(409, "SKU already exists in this organization")
     row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
                            name=payload.name.strip(), description=payload.description,
-                           unit=payload.unit, sale_price=payload.sale_price, created_by=user.id)
+                           unit=payload.unit, sale_price=payload.sale_price,
+                           tax_rate=payload.tax_rate, created_by=user.id)
     db.add(row)
     try:
         db.commit()
@@ -221,7 +223,26 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
     db.refresh(row)
     audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
     return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
-            "unit": row.unit, "sale_price": str(row.sale_price), "is_active": row.is_active}
+            "unit": row.unit, "sale_price": str(row.sale_price),
+            "tax_rate": str(row.tax_rate), "is_active": row.is_active}
+
+
+@router.patch("/inventory/products/{product_id}/tax-rate")
+def update_inventory_product_tax_rate(product_id: int, payload: InventoryProductTaxRateIn,
+                                      membership=Depends(active_membership),
+                                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    product = db.query(InventoryProduct).filter_by(
+        id=product_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not product:
+        raise HTTPException(404, "Inventory product not found")
+    previous_rate = Decimal(str(product.tax_rate))
+    product.tax_rate = payload.tax_rate
+    db.commit()
+    audit(db, user.id, membership.organization_id, "inventory.product.tax_rate.updated",
+          "inventory_product", product.id, f"previous:{previous_rate};new:{payload.tax_rate}")
+    return {"id": product.id, "sku": product.sku, "tax_rate": str(product.tax_rate)}
 
 
 @router.get("/inventory/stock")
@@ -1390,6 +1411,7 @@ def pos_catalog(branch_id: str, membership=Depends(active_membership), db: Sessi
         ).scalar()
         result.append({"id": product.id, "sku": product.sku, "name": product.name,
                        "unit": product.unit, "sale_price": str(product.sale_price),
+                       "tax_rate": str(product.tax_rate),
                        "available_quantity": str(stock or 0)})
     return result
 
@@ -1431,14 +1453,25 @@ def close_pos_shift(shift_id: int, payload: POSShiftCloseIn,
     ).filter(POSSale.organization_id == membership.organization_id,
              POSSale.shift_id == shift.id, POSPayment.method == "cash",
              POSPayment.status == "recorded").scalar()
-    expected = Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
+    cash_refunds = db.query(func.coalesce(func.sum(POSRefund.amount), 0)).join(
+        POSReturn, POSReturn.id == POSRefund.return_id
+    ).join(POSSale, POSSale.id == POSReturn.sale_id).filter(
+        POSRefund.organization_id == membership.organization_id,
+        POSReturn.organization_id == membership.organization_id,
+        POSSale.organization_id == membership.organization_id,
+        POSSale.shift_id == shift.id,
+        POSRefund.method == "cash",
+        POSRefund.status == "recorded",
+    ).scalar()
+    expected = (Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
+                - Decimal(str(cash_refunds or 0)))
     shift.closing_cash = payload.closing_cash
     shift.status = "closed"
     shift.closed_at = datetime.now(timezone.utc)
     db.commit()
     variance = payload.closing_cash - expected
     audit(db, user.id, membership.organization_id, "pos.shift.closed",
-          "pos_shift", shift.id, f"expected:{expected};counted:{payload.closing_cash};variance:{variance}")
+          "pos_shift", shift.id, f"expected:{expected};cash_refunds:{cash_refunds};counted:{payload.closing_cash};variance:{variance}")
     return {"id": shift.id, "status": shift.status, "expected_cash": str(expected),
             "closing_cash": str(payload.closing_cash), "variance": str(variance)}
 
@@ -1472,19 +1505,32 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     product_map = {p.id: p for p in products}
     if set(product_map) != product_ids:
         raise HTTPException(404, "One or more POS products were not found")
+    if any(Decimal(str(line.discount_percent)) > 0 for line in payload.lines):
+        require_permission(membership, "manage")
+    subtotal_total = Decimal("0.00")
+    discount_total = Decimal("0.00")
+    tax_total = Decimal("0.00")
     total = Decimal("0.00")
     prepared = []
     aggregate_qty = {}
     for line in payload.lines:
         product = product_map[line.product_id]
         unit_price = money(Decimal(str(product.sale_price)))
-        line_total = money(unit_price * line.quantity)
+        if Decimal(str(product.tax_rate)) < 0 or Decimal(str(product.tax_rate)) > 100:
+            raise HTTPException(409, f"Product {product.sku} has an invalid configured tax rate")
+        subtotal, discount, tax, line_total = calculate_pos_line(
+            unit_price, line.quantity, Decimal(str(line.discount_percent)),
+            Decimal(str(product.tax_rate)))
         if line_total <= 0:
-            raise HTTPException(409, f"Product {product.sku} has no configured sale price")
+            raise HTTPException(409, f"Product {product.sku} has no configured sale price after discount")
+        subtotal_total += subtotal
+        discount_total += discount
+        tax_total += tax
         total += line_total
         aggregate_qty[line.product_id] = aggregate_qty.get(line.product_id, Decimal("0")) + line.quantity
-        prepared.append((line, unit_price, line_total))
-    total = money(total)
+        prepared.append((line, unit_price, subtotal, discount, Decimal(str(product.tax_rate)), tax, line_total))
+    subtotal_total, discount_total, tax_total, total = map(
+        money, (subtotal_total, discount_total, tax_total, total))
     validate_payment_total(total, payload.payments)
     for product_id, quantity in aggregate_qty.items():
         stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
@@ -1498,15 +1544,19 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         organization_id=membership.organization_id, branch_id=payload.branch_id,
         shift_id=shift.id, cashier_user_id=user.id,
         client_transaction_id=payload.client_transaction_id, request_hash=request_hash,
-        total_amount=total, currency=payload.currency, status="posted",
+        total_amount=total, subtotal_amount=subtotal_total,
+        discount_amount=discount_total, tax_amount=tax_total,
+        currency=payload.currency, status="posted",
         offline_created_at=payload.offline_created_at
     )
     db.add(sale)
     db.flush()
-    for index, (line, unit_price, line_total) in enumerate(prepared):
+    for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
                            product_id=line.product_id, quantity=line.quantity,
-                           unit_price=unit_price, line_total=line_total))
+                           unit_price=unit_price, discount_percent=line.discount_percent,
+                           discount_amount=discount, tax_rate=tax_rate,
+                           tax_amount=tax, line_total=line_total))
         db.add(InventoryStockMovement(
             organization_id=membership.organization_id, product_id=line.product_id,
             branch_id=payload.branch_id, quantity_delta=-line.quantity,
@@ -1554,23 +1604,40 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
         InventoryProduct, InventoryProduct.id == POSSaleLine.product_id
     ).filter(POSSaleLine.organization_id == membership.organization_id,
              POSSaleLine.sale_id == sale.id).order_by(POSSaleLine.id).all()
-    returned = db.query(POSReturnLine.sale_line_id, func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
-        POSReturn, POSReturn.id == POSReturnLine.return_id
-    ).filter(POSReturn.organization_id == membership.organization_id,
-             POSReturn.sale_id == sale.id).group_by(POSReturnLine.sale_line_id).all()
-    returned_map = {line_id: quantity for line_id, quantity in returned}
+    returned = db.query(
+        POSReturnLine.sale_line_id,
+        func.coalesce(func.sum(POSReturnLine.quantity), 0),
+        func.coalesce(func.sum(POSReturnLine.line_total), 0),
+    ).join(POSReturn, POSReturn.id == POSReturnLine.return_id).filter(
+        POSReturn.organization_id == membership.organization_id,
+        POSReturn.sale_id == sale.id
+    ).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {
+        line_id: (Decimal(str(quantity)), Decimal(str(value)))
+        for line_id, quantity, value in returned
+    }
     payments = db.query(POSPayment).filter_by(
         organization_id=membership.organization_id, sale_id=sale.id
     ).order_by(POSPayment.id).all()
     return {
         "id": sale.id, "branch_id": sale.branch_id, "shift_id": sale.shift_id,
         "currency": sale.currency, "status": sale.status,
-        "total_amount": str(sale.total_amount), "created_at": sale.created_at.isoformat(),
+        "total_amount": str(sale.total_amount),
+        "subtotal_amount": str(sale.subtotal_amount),
+        "discount_amount": str(sale.discount_amount),
+        "tax_amount": str(sale.tax_amount),
+        "created_at": sale.created_at.isoformat(),
         "lines": [{
             "id": line.id, "product_id": line.product_id, "sku": sku, "name": name,
-            "quantity": str(line.quantity), "returned_quantity": str(returned_map.get(line.id, 0)),
-            "returnable_quantity": str(Decimal(str(line.quantity)) - Decimal(str(returned_map.get(line.id, 0)))),
-            "unit_price": str(line.unit_price), "line_total": str(line.line_total),
+            "quantity": str(line.quantity),
+            "returned_quantity": str(returned_map.get(line.id, (Decimal("0"), Decimal("0")))[0]),
+            "returnable_quantity": str(Decimal(str(line.quantity)) - returned_map.get(line.id, (Decimal("0"), Decimal("0")))[0]),
+            "returnable_value": str(Decimal(str(line.line_total)) - returned_map.get(line.id, (Decimal("0"), Decimal("0")))[1]),
+            "unit_price": str(line.unit_price),
+            "discount_percent": str(line.discount_percent),
+            "discount_amount": str(line.discount_amount),
+            "tax_rate": str(line.tax_rate), "tax_amount": str(line.tax_amount),
+            "line_total": str(line.line_total),
         } for line, name, sku in lines],
         "payments": [{"method": p.method, "amount": str(p.amount), "status": p.status,
                       "provider_reference": p.provider_reference} for p in payments],
@@ -1605,23 +1672,41 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     line_map = {item.id: item for item in sale_lines}
     if set(line_map) != set(line_ids):
         raise HTTPException(404, "One or more original sale lines were not found")
-    already_returned = db.query(POSReturnLine.sale_line_id,
-        func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
-        POSReturn, POSReturn.id == POSReturnLine.return_id
-    ).filter(POSReturn.organization_id == membership.organization_id,
-             POSReturn.sale_id == sale.id,
-             POSReturnLine.sale_line_id.in_(line_ids)).group_by(POSReturnLine.sale_line_id).all()
-    returned_map = {line_id: Decimal(str(quantity)) for line_id, quantity in already_returned}
+    already_returned = db.query(
+        POSReturnLine.sale_line_id,
+        func.coalesce(func.sum(POSReturnLine.quantity), 0),
+        func.coalesce(func.sum(POSReturnLine.line_total), 0),
+        func.coalesce(func.sum(POSReturnLine.discount_amount), 0),
+        func.coalesce(func.sum(POSReturnLine.tax_amount), 0),
+    ).join(POSReturn, POSReturn.id == POSReturnLine.return_id).filter(
+        POSReturn.organization_id == membership.organization_id,
+        POSReturn.sale_id == sale.id,
+        POSReturnLine.sale_line_id.in_(line_ids)
+    ).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {
+        line_id: tuple(Decimal(str(value)) for value in (quantity, amount, discount, tax))
+        for line_id, quantity, amount, discount, tax in already_returned
+    }
     total = Decimal("0.00")
     prepared = []
     for item in payload.lines:
         original = line_map[item.sale_line_id]
-        remaining = Decimal(str(original.quantity)) - returned_map.get(original.id, Decimal("0"))
+        returned_qty, returned_value, returned_discount, returned_tax = returned_map.get(
+            original.id, (Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")))
+        remaining = Decimal(str(original.quantity)) - returned_qty
         if item.quantity > remaining:
             raise HTTPException(409, f"Return quantity exceeds remaining sold quantity for line {original.id}")
-        amount = money(Decimal(str(original.unit_price)) * item.quantity)
+        if item.quantity == remaining:
+            amount = money(Decimal(str(original.line_total)) - returned_value)
+            discount_amount = money(Decimal(str(original.discount_amount)) - returned_discount)
+            tax_amount = money(Decimal(str(original.tax_amount)) - returned_tax)
+        else:
+            ratio = Decimal(str(item.quantity)) / Decimal(str(original.quantity))
+            amount = money(Decimal(str(original.line_total)) * ratio)
+            discount_amount = money(Decimal(str(original.discount_amount)) * ratio)
+            tax_amount = money(Decimal(str(original.tax_amount)) * ratio)
         total += amount
-        prepared.append((original, item.quantity, amount))
+        prepared.append((original, item.quantity, amount, discount_amount, tax_amount))
     total = money(total)
     validate_return_refund_total(total, payload.refunds)
     original_tenders = db.query(POSPayment.method,
@@ -1650,10 +1735,11 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     db.add(result)
     db.flush()
     return_key = hashlib.sha256(payload.client_return_id.encode()).hexdigest()[:32]
-    for index, (original, quantity, amount) in enumerate(prepared):
+    for index, (original, quantity, amount, discount_amount, tax_amount) in enumerate(prepared):
         db.add(POSReturnLine(organization_id=membership.organization_id, return_id=result.id,
             sale_line_id=original.id, product_id=original.product_id, quantity=quantity,
-            unit_price=original.unit_price, line_total=amount))
+            unit_price=original.unit_price, discount_amount=discount_amount,
+            tax_amount=tax_amount, line_total=amount))
         db.add(InventoryStockMovement(organization_id=membership.organization_id,
             product_id=original.product_id, branch_id=sale.branch_id, quantity_delta=quantity,
             movement_type="receipt", reference=payload.client_return_id,
