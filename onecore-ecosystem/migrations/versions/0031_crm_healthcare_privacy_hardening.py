@@ -31,6 +31,7 @@ def upgrade():
     op.add_column("crm_campaign_schedules", sa.Column("next_run_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_campaign_schedules", sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_campaign_schedules", sa.Column("run_count", sa.Integer(), nullable=False, server_default="0"))
+    op.add_column("crm_campaign_schedules", sa.Column("last_run_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_campaign_schedules", sa.Column("last_run_campaign_id", sa.Integer(), nullable=True))
     with op.batch_alter_table("crm_campaign_schedules") as batch:
         batch.create_foreign_key("fk_crm_schedule_template", "crm_communication_templates", ["template_id"], ["id"])
@@ -128,6 +129,7 @@ def downgrade():
         batch.drop_constraint("fk_crm_schedule_segment", type_="foreignkey")
         batch.drop_constraint("fk_crm_schedule_template", type_="foreignkey")
     op.drop_column("crm_campaign_schedules", "last_run_campaign_id")
+    op.drop_column("crm_campaign_schedules", "last_run_at")
     op.drop_column("crm_campaign_schedules", "run_count")
     op.drop_column("crm_campaign_schedules", "lease_until")
     op.drop_column("crm_campaign_schedules", "next_run_at")
