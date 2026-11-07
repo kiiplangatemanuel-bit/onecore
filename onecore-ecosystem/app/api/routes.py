@@ -3858,7 +3858,7 @@ def list_my_hr_payslips(membership=Depends(active_membership),
     employee = db.query(HREmployee).filter_by(
         organization_id=membership.organization_id, user_id=user.id, status="active"
     ).first()
-    if not employee:
+    if not employee or not can_access_branch(membership, employee.branch_id):
         return []
     q = db.query(HRPayrollLine, HRPayrollRun).join(
         HRPayrollRun, HRPayrollRun.id == HRPayrollLine.run_id
