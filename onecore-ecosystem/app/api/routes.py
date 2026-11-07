@@ -1569,7 +1569,7 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             organization_id=membership.organization_id, sale_id=sale.id,
             method=payment.method, amount=money(payment.amount),
             provider_reference=payment.provider_reference,
-            status="unsettled" if payment.method == "credit" else "recorded"
+            status="unsettled" if payment.method in {"credit", "mpesa"} else "recorded"
         ))
     # Auto-post the source and journal in the same transaction. Missing mappings
     # create a durable pending bridge item without blocking checkout.
@@ -1754,7 +1754,7 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     for item in payload.refunds:
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
-            status="recorded"))
+            status="pending" if item.method == "mpesa" else "recorded"))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
