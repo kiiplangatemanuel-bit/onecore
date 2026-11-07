@@ -490,3 +490,25 @@ quote-to-order conversion, contracts, campaigns, consent/preference management,
 communication logs and provider delivery, segmentation, configurable stages and
 probabilities, conversion cohort analytics, forecasting models, contact merge,
 import/export, team assignment and UAT.
+
+
+## School attendance increment (7 November 2026)
+
+- Added `SchoolAttendance` tenant-owned records with branch/class/learner references,
+  daily status, note and recorder attribution.
+- Added validated batch register payload: `present|absent|late|excused` statuses and no
+  duplicate learner IDs per request.
+- Added `POST /api/v1/school/attendance` for create/correct and
+  `GET /api/v1/school/attendance?class_id=...&attendance_date=...` for retrieval.
+- Writes verify the class belongs to the active tenant and branch scope, and every
+  learner is active and enrolled in that class. A learner cannot have two entries
+  for the same tenant/date. Batch updates commit atomically and emit an audit event.
+- Added reversible migration `0013_school_attendance` after `0012_crm_quotes`.
+- Added schema, uniqueness, model and OpenAPI route tests; updated `docs/SCHOOL.md`.
+- CI run for test commit `35d2262c137307fdf6fdfc1139a5d321e8ffcf7f` passed:
+  dependencies, migration upgrade, downgrade/re-upgrade, compilation and pytest.
+  Documentation/status follow-up run was still in progress at status update time.
+- Follow-on gaps: attendance register UI, guardian notifications, attendance
+  analytics, timetable/period attendance, CSV import and production PostgreSQL
+  concurrency/UAT.
+
