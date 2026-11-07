@@ -159,8 +159,11 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     tier1 = min(nssf_base, D(str(nssf_cfg["lower_earnings_limit"])))
     tier2 = max(ZERO, nssf_base - D(str(nssf_cfg["lower_earnings_limit"])))
     nssf = money((tier1 + tier2) * D(str(nssf_cfg["rate"])))
+    # Regulation 16 applies 2.75% of gross salary to salaried households.
+    # The KES 300 floor belongs to non-salaried households under Regulation 17;
+    # applying it to an employee on a small/prorated salary over-deducts SHIF.
     shif_base = money(extra.get("shif_contribution_base", gross))
-    shif = max(D(str(cfg["shif"]["minimum"])), money(shif_base * D(str(cfg["shif"]["rate"])))) if shif_base > 0 else ZERO
+    shif = money(shif_base * D(str(cfg["shif"]["rate"])))
     ahl_base = money(extra.get("housing_levy_contribution_base", gross))
     ahl = money(ahl_base * D(str(cfg["housing_levy"]["employee_rate"])))
     employer_nssf = nssf
@@ -288,7 +291,7 @@ KENYA_2026_RULES = {
             "mortgage_monthly_limit": "30000", "prmf_monthly_limit": "15000"
         },
         "nssf": {"rate": "0.06", "lower_earnings_limit": "9000", "upper_earnings_limit": "108000"},
-        "shif": {"rate": "0.0275", "minimum": "300"},
+        "shif": {"rate": "0.0275", "salaried_minimum": "0", "non_salaried_minimum": "300"},
         "housing_levy": {"employee_rate": "0.015", "employer_rate": "0.015"}
     }
 }
