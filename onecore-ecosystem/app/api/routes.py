@@ -1632,23 +1632,41 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     line_map = {item.id: item for item in sale_lines}
     if set(line_map) != set(line_ids):
         raise HTTPException(404, "One or more original sale lines were not found")
-    already_returned = db.query(POSReturnLine.sale_line_id,
-        func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
-        POSReturn, POSReturn.id == POSReturnLine.return_id
-    ).filter(POSReturn.organization_id == membership.organization_id,
-             POSReturn.sale_id == sale.id,
-             POSReturnLine.sale_line_id.in_(line_ids)).group_by(POSReturnLine.sale_line_id).all()
-    returned_map = {line_id: Decimal(str(quantity)) for line_id, quantity in already_returned}
+    already_returned = db.query(
+        POSReturnLine.sale_line_id,
+        func.coalesce(func.sum(POSReturnLine.quantity), 0),
+        func.coalesce(func.sum(POSReturnLine.line_total), 0),
+        func.coalesce(func.sum(POSReturnLine.discount_amount), 0),
+        func.coalesce(func.sum(POSReturnLine.tax_amount), 0),
+    ).join(POSReturn, POSReturn.id == POSReturnLine.return_id).filter(
+        POSReturn.organization_id == membership.organization_id,
+        POSReturn.sale_id == sale.id,
+        POSReturnLine.sale_line_id.in_(line_ids)
+    ).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {
+        line_id: tuple(Decimal(str(value)) for value in (quantity, amount, discount, tax))
+        for line_id, quantity, amount, discount, tax in already_returned
+    }
     total = Decimal("0.00")
     prepared = []
     for item in payload.lines:
         original = line_map[item.sale_line_id]
-        remaining = Decimal(str(original.quantity)) - returned_map.get(original.id, Decimal("0"))
+        returned_qty, returned_value, returned_discount, returned_tax = returned_map.get(
+            original.id, (Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")))
+        remaining = Decimal(str(original.quantity)) - returned_qty
         if item.quantity > remaining:
             raise HTTPException(409, f"Return quantity exceeds remaining sold quantity for line {original.id}")
-        amount = money(Decimal(str(original.unit_price)) * item.quantity)
+        if item.quantity == remaining:
+            amount = money(Decimal(str(original.line_total)) - returned_value)
+            discount_amount = money(Decimal(str(original.discount_amount)) - returned_discount)
+            tax_amount = money(Decimal(str(original.tax_amount)) - returned_tax)
+        else:
+            ratio = Decimal(str(item.quantity)) / Decimal(str(original.quantity))
+            amount = money(Decimal(str(original.line_total)) * ratio)
+            discount_amount = money(Decimal(str(original.discount_amount)) * ratio)
+            tax_amount = money(Decimal(str(original.tax_amount)) * ratio)
         total += amount
-        prepared.append((original, item.quantity, amount))
+        prepared.append((original, item.quantity, amount, discount_amount, tax_amount))
     total = money(total)
     validate_return_refund_total(total, payload.refunds)
     original_tenders = db.query(POSPayment.method,
@@ -1677,10 +1695,11 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     db.add(result)
     db.flush()
     return_key = hashlib.sha256(payload.client_return_id.encode()).hexdigest()[:32]
-    for index, (original, quantity, amount) in enumerate(prepared):
+    for index, (original, quantity, amount, discount_amount, tax_amount) in enumerate(prepared):
         db.add(POSReturnLine(organization_id=membership.organization_id, return_id=result.id,
             sale_line_id=original.id, product_id=original.product_id, quantity=quantity,
-            unit_price=original.unit_price, line_total=amount))
+            unit_price=original.unit_price, discount_amount=discount_amount,
+            tax_amount=tax_amount, line_total=amount))
         db.add(InventoryStockMovement(organization_id=membership.organization_id,
             product_id=original.product_id, branch_id=sale.branch_id, quantity_delta=quantity,
             movement_type="receipt", reference=payload.client_return_id,
