@@ -128,3 +128,34 @@ class CRMActivityIn(BaseModel):
     subject: str = Field(min_length=2, max_length=180)
     notes: str = Field(default="", max_length=4000)
     due_at: datetime | None = None
+
+
+class ProcurementSupplierIn(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    tax_pin: str = Field(default="", max_length=24)
+
+
+class PurchaseOrderLineIn(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+
+
+class PurchaseOrderIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    notes: str = Field(default="", max_length=1000)
+    lines: list[PurchaseOrderLineIn] = Field(min_length=1, max_length=200)
+
+
+class PurchaseOrderReceiptLineIn(BaseModel):
+    line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class PurchaseOrderReceiptIn(BaseModel):
+    lines: list[PurchaseOrderReceiptLineIn] = Field(min_length=1, max_length=200)
