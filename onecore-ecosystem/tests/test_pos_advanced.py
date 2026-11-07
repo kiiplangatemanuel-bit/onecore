@@ -1,7 +1,7 @@
 from app.main import app
 from app.api.pos_advanced import (
     POSDevice, POSSyncConflict, POSSyncEvent, POSCustomer, POSLoyaltyEntry,
-    DeviceRegisterIn, ConflictIn, ConflictResolveIn, SyncEventIn,
+    DeviceRegisterIn, DeviceSessionIn, ConflictIn, ConflictResolveIn, SyncEventIn,
     LoyaltyAwardIn, LoyaltyRedeemIn, token_hash,
 )
 from pydantic import ValidationError
@@ -69,3 +69,12 @@ def test_device_secret_digest_is_one_way_and_deterministic():
     digest = token_hash("high-entropy-device-secret")
     assert digest == token_hash("high-entropy-device-secret")
     assert digest != "high-entropy-device-secret"
+
+
+
+def test_device_secret_is_submitted_as_body_not_url_parameter():
+    payload = DeviceSessionIn(device_secret="x" * 48)
+    assert len(payload.device_secret) == 48
+    operation = app.openapi()["paths"]["/api/v1/pos/advanced/devices/{device_id}/session"]["post"]
+    assert "requestBody" in operation
+    assert all(parameter["name"] != "device_secret" for parameter in operation.get("parameters", []))
