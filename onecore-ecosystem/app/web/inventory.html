@@ -16,6 +16,12 @@
 <section class="panel" aria-labelledby="tax-title"><h2 id="tax-title">Configure product tax</h2><p class="muted">Manager permission required. The configured rate is snapshotted on each new POS sale; historic receipts are unchanged.</p><form id="productTaxRate"><label>Product<select name="product_id" required><option value="">Load products after sign-in</option></select></label><label>Tax rate (%)<input name="tax_rate" type="number" min="0" max="100" step="0.0001" required></label><div><button type="submit">Update tax rate</button></div></form></section>
 <section class="panel" aria-labelledby="movement-title"><h2 id="movement-title">Record stock movement</h2><form id="movement"><label>Product<select name="product_id" required><option value="">Load products after sign-in</option></select></label><label>Movement<select name="movement_type"><option value="receipt">Receive stock</option><option value="issue">Issue stock</option><option value="adjustment">Adjustment</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" required></label><label>Adjustment direction<select name="adjustment_direction"><option value="increase">Increase</option><option value="decrease">Decrease</option></select></label><label>Branch ID (optional)<input name="branch_id" maxlength="36"></label><label>Reference<input name="reference" maxlength="120"></label><div><button type="submit">Post movement</button></div></form><p class="muted">Receipts add stock; issues subtract stock. A unique request key prevents duplicate posting on retries.</p></section>
 <section class="panel" aria-labelledby="stock-title"><h2 id="stock-title">Stock balances</h2><button id="refresh" type="button">Refresh balances</button><div style="overflow-x:auto"><table><thead><tr><th>SKU</th><th>Product</th><th>Branch</th><th>Quantity</th></tr></thead><tbody id="stock"><tr><td colspan="4">Sign in to view stock.</td></tr></tbody></table></div></section>
+<section class="panel" aria-labelledby="ops-title"><h2 id="ops-title">Inventory operations and controls</h2>
+<p class="muted">Warehouse transfers, stock reservations, batch/expiry controls, stocktakes, replenishment, demand forecast, valuation, price lists and store-level alerts are available through the secured Inventory API.</p>
+<div id="inventoryMetrics" aria-live="polite">Sign in to load inventory metrics.</div>
+<button id="refreshOperations" type="button">Refresh dashboards and alerts</button>
+<div style="overflow-x:auto"><table><thead><tr><th>Alert</th><th>Product / batch</th><th>Location</th><th>Details</th></tr></thead><tbody id="inventoryAlerts"><tr><td colspan="4">Sign in to view alerts.</td></tr></tbody></table></div>
+<p><a href="/docs#/Inventory%20completion" target="_blank" rel="noopener">Open Inventory API documentation</a></p></section>
 <p id="status" role="status" aria-live="polite"></p>
 </main>
 <footer>Powered by OneCore Technologies Ltd</footer>
@@ -61,6 +67,15 @@ $('movement').addEventListener('submit',async e=>{e.preventDefault();if(!token)r
  const delta=type==='issue'?-qty:type==='adjustment'&&f.get('adjustment_direction')==='decrease'?-qty:qty;
  try{await api('/inventory/movements',{method:'POST',body:JSON.stringify({product_id:Number(f.get('product_id')),branch_id:f.get('branch_id')||null,quantity_delta:delta.toFixed(3),movement_type:type,reference:f.get('reference'),idempotency_key:crypto.randomUUID()})});status('Stock movement posted.');e.currentTarget.elements.quantity.value='';await refresh();}catch(err){status(err.message);}
 });
+async function refreshOperations(){
+ const [dashboard,alerts]=await Promise.all([api('/inventory/dashboard'),api('/inventory/alerts')]);
+ const metrics=$('inventoryMetrics');metrics.replaceChildren();
+ Object.entries(dashboard).forEach(([key,value])=>{const span=document.createElement('span');span.style.marginRight='18px';span.textContent=key.replaceAll('_',' ')+': '+value;metrics.append(span);});
+ const body=$('inventoryAlerts');body.replaceChildren();
+ if(!alerts.length){const tr=body.insertRow();const td=tr.insertCell();td.colSpan=4;td.textContent='No active inventory alerts.';}
+ alerts.forEach(a=>{const tr=body.insertRow();[a.type,a.product_id||a.batch_id||'',a.warehouse_id||'',a.available||a.quantity||a.expiry_date||'Review required'].forEach(v=>{const td=tr.insertCell();td.textContent=String(v);});});
+}
+$('refreshOperations').addEventListener('click',async()=>{if(!token)return status('Sign in first.');try{await refreshOperations();status('Inventory dashboard and alerts refreshed.');}catch(err){status(err.message);}});
 $('refresh').addEventListener('click',async()=>{if(!token)return status('Sign in first.');try{await refresh();status('Balances refreshed.');}catch(err){status(err.message);}});
 })();
 </script>
