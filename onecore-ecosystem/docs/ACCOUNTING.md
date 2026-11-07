@@ -184,3 +184,40 @@ The response includes counterparty identity, currency, opening balance, dated
 invoice/payment transactions and closing balance. This is a ledger-subledger
 statement, not a PDF/email delivery or external customer portal. It currently
 uses the organization's base currency when there are no invoices in the period.
+
+
+## Invoice approval and credit note increment
+
+- A draft invoice can be submitted for approval. The submitter cannot approve their
+  own invoice; an organization manager/admin with manage permission records an
+  explicit approval or rejection and a decision note.
+- Posting is blocked when an approval record exists and is not approved. Existing
+  invoices with no approval record retain the legacy direct-post path for backward
+  compatibility; organizations should enforce approval operationally for new invoices.
+- Credit notes are posted against an existing posted receivable/payable invoice.
+  Each credit note references invoice lines and quantities, calculates proportional
+  net and tax amounts from the original invoice line, and creates a balanced reversal
+  journal using the same revenue/expense, tax and AR/AP control accounts.
+- Credited quantities cannot exceed original invoice-line quantities after previous
+  posted credit notes. Credit note number and idempotency key are unique per tenant.
+- Credit notes cannot exceed the invoice's currently outstanding balance. Customer
+  refunds and supplier credit balances are not implemented in this increment.
+- Posting a credit note reduces the invoice's remaining subtotal, tax and total;
+  posted credit notes are included as separate negative movements in customer and
+  supplier statements so the statement preserves the original invoice and credit
+  history.
+- Credit-note dates are rejected when they fall inside a configured closed fiscal
+  period. Credit notes are branch-scoped and audited.
+
+### Additional API
+
+- POST /api/v1/accounting/invoices/{id}/submit-for-approval
+- GET /api/v1/accounting/invoices/{id}/approval
+- POST /api/v1/accounting/invoices/{id}/approval-decision
+- POST /api/v1/accounting/invoices/{id}/credit-notes
+- GET /api/v1/accounting/credit-notes?invoice_id={id}
+
+This increment adds approval and credit-note persistence in migration
+0017_accounting_approvals_credit_notes. It does not yet include multi-level
+accounting approvals, PDF/email credit-note delivery, a dedicated approval
+dashboard, or refund/disbursement processing.
