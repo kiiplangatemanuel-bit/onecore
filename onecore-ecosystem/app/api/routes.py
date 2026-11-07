@@ -1628,6 +1628,9 @@ def approve_accounting_budget(budget_id:int,membership=Depends(active_membership
         id=budget_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Budget not found")
     if row.status!="draft": raise HTTPException(409,"Only draft budgets can be approved")
+    period=db.query(AccountingFiscalPeriod).filter_by(
+        id=row.fiscal_period_id,organization_id=membership.organization_id,status="open").first()
+    if not period: raise HTTPException(409,"Budget fiscal period is closed")
     row.status="approved";row.approved_by=user.id;row.approved_at=datetime.now(timezone.utc)
     db.commit();audit(db,user.id,membership.organization_id,"accounting.budget.approved","accounting_budget",row.id)
     return {"id":row.id,"status":row.status}
@@ -1652,8 +1655,9 @@ def accounting_budget_performance(budget_id:int,membership=Depends(active_member
             AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
             AccountingJournalLine.organization_id==membership.organization_id,
             AccountingJournalLine.account_id==item.account_id,
-            AccountingJournalLine.branch_id==item.branch_id,
             AccountingJournal.entry_date>=period.start_date,AccountingJournal.entry_date<=period.end_date)
+        if item.branch_id is not None:
+            q=q.filter(AccountingJournalLine.branch_id==item.branch_id)
         allowed=branch_scope_ids(membership)
         if allowed is not None:
             if item.branch_id is not None and item.branch_id not in allowed: continue
