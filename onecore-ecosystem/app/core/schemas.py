@@ -661,3 +661,97 @@ class CRMCampaignIn(BaseModel):
         if len(value) < 2:
             raise ValueError("Campaign name and message must not be blank")
         return value
+
+
+
+class HREmployeeIn(BaseModel):
+    employee_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    user_id: int | None = Field(default=None, gt=0)
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    branch_id: str | None = Field(default=None, max_length=36)
+    department: str = Field(default="", max_length=120)
+    job_title: str = Field(default="", max_length=120)
+    employment_type: str = Field(default="full_time", pattern=r"^(full_time|part_time|contractor|intern)$")
+    start_date: date
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def employee_names_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Employee name is required")
+        return value
+
+
+class HRLeaveRequestIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    leave_type: str = Field(pattern=r"^(annual|sick|compassionate|unpaid|parental|other)$")
+    start_date: date
+    end_date: date
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @model_validator(mode="after")
+    def valid_leave_range(self):
+        if self.end_date < self.start_date:
+            raise ValueError("Leave end date cannot precede start date")
+        if len(self.reason.strip()) < 5:
+            raise ValueError("Leave reason must contain at least five non-space characters")
+        return self
+
+
+class HRLeaveDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
+
+
+
+class HRPayrollProfileIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    base_period_pay: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    effective_from: date
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def valid_effective_period(self):
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValueError("Profile end date cannot precede its effective date")
+        return self
+
+
+class HRPayrollRunIn(BaseModel):
+    period_start: date
+    period_end: date
+    pay_date: date
+
+    @model_validator(mode="after")
+    def valid_period(self):
+        if self.period_end < self.period_start:
+            raise ValueError("Payroll period end cannot precede its start")
+        if self.pay_date < self.period_end:
+            raise ValueError("Pay date cannot precede the payroll period end")
+        return self
+
+
+class HRPayrollItemIn(BaseModel):
+    client_item_id: str = Field(min_length=8, max_length=100)
+    employee_id: int = Field(gt=0)
+    item_type: str = Field(pattern=r"^(earning|deduction)$")
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    description: str = Field(min_length=2, max_length=180)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("description")
+    @classmethod
+    def payroll_description_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Payroll item description is required")
+        return value
+
+
+class HRPayrollApproveIn(BaseModel):
+    note: str = Field(default="", max_length=500)

@@ -17,3 +17,11 @@ Scaffold only. This folder reserves the domain boundary; it is not a claim of pr
 - Add unit, integration, security and end-to-end tests.
 - Add monitoring, retention, backup/restore and operational documentation.
 - Complete sandbox/UAT and release approval for external dependencies.
+
+
+## Payroll preparation
+
+The HR payroll slice supports effective-dated base pay per complete pay period,
+draft run generation, explicit one-time earning/deduction items, manager approval
+and approved payslip snapshots. It does not calculate statutory obligations or
+execute payroll payments. See `docs/HR.md` for API contracts and boundaries.

@@ -693,3 +693,71 @@ Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order 
 Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
 unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
 unimplemented. A dispatch worker must re-check current consent immediately before send.
+
+
+
+## HR employee directory and leave workflow increment (7 November 2026)
+
+Implemented on branch `feature/hr-employees-leave` (based on CRM campaign branch):
+
+- Tenant/branch-scoped employee directory with organization-unique employee numbers,
+  optional linked organization users, contact details, department, role and employment type.
+- Employee self-service leave request when employee profile is linked to the signed-in user;
+  HR managers can also submit on behalf of staff.
+- Leave types: annual, sick, compassionate, unpaid, parental and other.
+- Working days calculated inclusively excluding weekends; overlapping pending or
+  approved requests are rejected.
+- HR managers can review and approve/reject pending requests; employees cannot decide
+  their own leave. Sensitive changes create audit events.
+- Migration `0022_hr_employee_leave`, HR APIs, starter workspace and tests.
+
+Boundaries: no leave entitlements/accrual ledger, holiday calendar, balance deduction,
+payroll, payslips, statutory deductions, attendance integration or employee document
+management. Public holidays are not excluded from the current working-day calculation.
+
+
+## HR attendance and timekeeping increment (7 November 2026)
+
+Implemented on branch `feature/hr-attendance-timekeeping`:
+
+- Server-timestamped clock-in/clock-out for the active employee profile linked to
+  the signed-in user; employee self-service is tenant and branch scoped.
+- One attendance session per employee per UTC calendar day, protected by a unique
+  database index and explicit conflict responses for duplicate punches.
+- Clock-out calculates elapsed whole minutes; attendance rows retain UTC timestamps.
+- Employee attendance history and manager team report with branch scope filtering.
+- Audit events for clock-in and clock-out; migration `0023_hr_attendance`.
+- Added accessible attendance controls and tables to the HR workspace plus contract
+  and duration tests.
+
+Boundaries: no organization timezone configuration, shift calendars, breaks, overtime,
+geolocation/biometrics, offline punches, manager correction workflow, multiple daily
+sessions or payroll integration. UTC-day attendance is not a local payroll timesheet.
+
+
+## HR payroll preparation and approval increment (7 November 2026)
+
+Implemented on branch `feature/hr-payroll-runs`, stacked on HR employee/leave and
+attendance work:
+
+- Added effective-dated employee payroll profiles with tenant/branch scope and
+  overlap rejection. Base pay is explicitly the amount for one complete pay period.
+- Added draft payroll runs that include active eligible employees with exactly one
+  profile covering the full period; mixed-currency and overlapping periods are
+  rejected.
+- Added one-time earning/deduction items with decimal arithmetic, tenant-unique
+  idempotency keys and canonical request hashes.
+- Gross, deductions and net totals are recalculated from the base period pay and
+  explicit items; deductions greater than gross are rejected.
+- Added manager approval with creator self-approval prevention and immutable
+  approved run snapshots.
+- Added employee self-service retrieval of approved payslips and a basic HR payroll
+  workspace.
+- Added migration `0024_hr_payroll`, payroll schemas/services, tests and HR docs.
+
+Boundaries: no PAYE, NSSF, SHIF, housing levy, pension, benefits tax, reliefs,
+overtime premium, leave-pay or employer-contribution engine; no bank/M-Pesa payout,
+payslip PDF/email, payroll journal or accounting posting. Payroll figures are
+operator-entered and are not a statutory calculation or payment instruction.
+CI and professional jurisdiction-specific validation are required before any
+operational payroll use.

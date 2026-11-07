@@ -57,6 +57,11 @@ def crm_ui():
     page = Path(__file__).resolve().parent / "web" / "crm.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
+@app.get("/hr", response_class=HTMLResponse)
+def hr_ui():
+    page = Path(__file__).resolve().parent / "web" / "hr.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
 @app.get("/accounting", response_class=HTMLResponse)
 def accounting_ui():
     page = Path(__file__).resolve().parent / "web" / "accounting.html"
