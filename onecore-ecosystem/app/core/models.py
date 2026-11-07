@@ -60,3 +60,40 @@ class AuditEvent(Base):
     resource_id: Mapped[str] = mapped_column(String(100), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class CustomDomain(Base):
+    __tablename__ = "custom_domains"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    hostname: Mapped[str] = mapped_column(String(253), unique=True, index=True)
+    verification_token: Mapped[str] = mapped_column(String(100), unique=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending_verification")
+    tls_status: Mapped[str] = mapped_column(String(30), default="not_provisioned")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class SystemNotice(Base):
+    __tablename__ = "system_notices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    message: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20), default="info")
+    audience: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+class NoticeDismissal(Base):
+    __tablename__ = "notice_dismissals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    notice_id: Mapped[int] = mapped_column(ForeignKey("system_notices.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    dismissed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_notice_dismissal_user_notice", "user_id", "notice_id", unique=True),)
