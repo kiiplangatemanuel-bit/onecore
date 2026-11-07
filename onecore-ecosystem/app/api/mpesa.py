@@ -94,7 +94,9 @@ def _post(path: str, payload: dict) -> dict:
             detail = exc.response.json().get("errorMessage") or exc.response.json().get("ResponseDescription") or detail
         except Exception:
             pass
-        raise HTTPException(502, detail[:300]) from exc
+        status_code = 503 if exc.response.status_code >= 500 else 502
+        message = "Daraja returned a server error; provider outcome may be uncertain" if status_code == 503 else detail[:300]
+        raise HTTPException(status_code, message) from exc
     except httpx.RequestError as exc:
         raise HTTPException(503, "Could not reach Safaricom Daraja; retry after checking provider status") from exc
 
@@ -139,7 +141,7 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
     existing = db.query(MpesaPaymentIntent).filter_by(
         organization_id=membership.organization_id, payment_id=payment.id
     ).order_by(MpesaPaymentIntent.id.desc()).first()
-    if existing and existing.status in {"initiating", "pending", "success"}:
+    if existing and existing.status in {"initiating", "pending", "success", "unknown"}:
         return {"intent_id": existing.id, "status": existing.status,
                 "checkout_request_id": existing.checkout_request_id,
                 "message": "An M-Pesa request already exists for this tender"}
@@ -160,8 +162,11 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
     )
     db.add(intent)
     db.flush()
+    # Persist before the network call to avoid duplicate charges after a timeout.
+    db.commit()
     shortcode = settings.mpesa_shortcode
-    response = _post("mpesa/stkpush/v1/processrequest", {
+    try:
+        response = _post("mpesa/stkpush/v1/processrequest", {
         "BusinessShortCode": shortcode,
         "Password": stk_password(shortcode, settings.mpesa_passkey, timestamp),
         "Timestamp": timestamp, "TransactionType": "CustomerPayBillOnline",
@@ -169,7 +174,12 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         "PhoneNumber": phone, "CallBackURL": _callback_url("stk", callback_token),
         "AccountReference": f"OC-{sale.id}"[:12],
         "TransactionDesc": f"OneCore POS sale {sale.id}"[:13],
-    })
+        })
+    except HTTPException as exc:
+        intent.status = "unknown" if exc.status_code == 503 else "failed"
+        intent.result_description = str(exc.detail)[:500]
+        db.commit()
+        raise
     if response.get("ResponseCode") != "0" or not response.get("CheckoutRequestID"):
         intent.status = "failed"
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja did not accept STK request")[:500]
@@ -201,7 +211,7 @@ def _stk_callback(db: Session, token: str, body: dict):
     code = callback.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
     intent.result_description = str(callback.get("ResultDesc") or "")[:500]
-    if code == 0:
+    if str(code) == "0":
         items = ((callback.get("CallbackMetadata") or {}).get("Item") or [])
         metadata = {str(item.get("Name")): item.get("Value") for item in items if isinstance(item, dict)}
         try:
@@ -325,8 +335,10 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         )
         db.add(intent)
     db.flush()
-    base = settings.mpesa_base_url.rstrip("/") + "/"
-    response = _post("mpesa/b2c/v1/paymentrequest", {
+    # Persist before the network call to avoid duplicate payouts after a timeout.
+    db.commit()
+    try:
+        response = _post("mpesa/b2c/v1/paymentrequest", {
         "InitiatorName": settings.mpesa_initiator_name,
         "SecurityCredential": settings.mpesa_security_credential,
         "CommandID": "BusinessPayment", "Amount": int(amount),
@@ -335,7 +347,12 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         "QueueTimeOutURL": urljoin(settings.mpesa_b2c_timeout_url.rstrip("/") + "/", callback_token),
         "ResultURL": urljoin(settings.mpesa_b2c_result_url.rstrip("/") + "/", callback_token),
         "Occasion": f"POS-{result.id}"[:20],
-    })
+        })
+    except HTTPException as exc:
+        intent.status = "unknown" if exc.status_code == 503 else "failed"
+        intent.result_description = str(exc.detail)[:500]
+        db.commit()
+        raise
     if response.get("ResponseCode") != "0":
         intent.status = "failed"
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
@@ -367,7 +384,7 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
     code = result.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
     intent.result_description = str(result.get("ResultDesc") or ("Provider timeout" if timeout else ""))[:500]
-    if not timeout and code == 0:
+    if not timeout and str(code) == "0":
         params = ((result.get("ResultParameters") or {}).get("ResultParameter") or [])
         metadata = {str(item.get("Key")): item.get("Value") for item in params if isinstance(item, dict)}
         receipt = str(metadata.get("TransactionReceipt") or "")
