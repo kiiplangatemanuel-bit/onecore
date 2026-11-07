@@ -24,5 +24,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+  crm-scheduler:
+    build: .
+    command: ["python", "-m", "app.workers.crm_scheduler_poller"]
+    env_file:
+      - .env
+    environment:
+      CRM_SCHEDULER_API_URL: ${CRM_SCHEDULER_API_URL:-http://api:8000/api/v1/crm}
+      CRM_SCHEDULER_BEARER_TOKEN: ${CRM_SCHEDULER_BEARER_TOKEN:-}
+      CRM_SCHEDULER_INTERVAL_SECONDS: ${CRM_SCHEDULER_INTERVAL_SECONDS:-30}
+      CRM_SCHEDULER_WORKER_NAME: ${CRM_SCHEDULER_WORKER_NAME:-crm-scheduler}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
 volumes:
   onecore_data:
