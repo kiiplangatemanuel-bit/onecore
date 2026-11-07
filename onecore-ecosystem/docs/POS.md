@@ -270,8 +270,8 @@ Client sync telemetry is append-only and idempotent:
 Customer membership and loyalty:
 - `POST /customers` creates/updates organization-scoped customer membership records.
 - `GET /customers`, `GET /customers/{id}/history`, `POST /customers/{id}/loyalty/award` and `POST /customers/{id}/loyalty/redeem`.
-- Loyalty awards and redemptions use organization-scoped idempotency keys and row locks; awards are supervisor-controlled and must be called by the sale/checkout workflow or an authorized manager.
-- The current history endpoint exposes the loyalty ledger. Existing POS sale records do not yet carry a customer foreign key, so it does not fabricate purchase history by matching phone numbers.
+- Checkout accepts an optional `customer_ref` on the POS sync payload and stores a tenant-scoped customer foreign key on the sale. Customer history returns linked posted sales and loyalty ledger entries; it never infers a customer from a phone-number match.
+- Loyalty awards and redemptions use organization-scoped idempotency keys and row locks. Awards are supervisor-controlled; automatic earning rules and redemption-as-checkout-discount remain a separate pricing-policy integration.
 
 Multi-store reporting:
 - `GET /operations-report` aggregates posted sale counts, gross totals and distinct shifts by branch within the caller's branch scope.
