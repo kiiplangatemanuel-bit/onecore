@@ -71,3 +71,34 @@ of the migration chain.
 
 Do not use this inventory ledger as a substitute for financial accounting or
 provider-certified tax/payment workflows.
+## Inventory completion workflows (migration 0033)
+
+The extended inventory API adds:
+
+- Tenant/branch-scoped warehouses and transfer orders with dispatch, tracking references, in-transit state and receipt confirmation. Source stock is deducted at dispatch and destination stock is added only on receipt; idempotent movement keys prevent duplicate ledger postings.
+- Sales-order and POS-order stock reservations with expiry timestamps, idempotency keys, release and an expiry sweep endpoint. Active unexpired reservations reduce available-to-promise quantities.
+- Lot/batch/serial receipt, expiry metadata, FEFO/FIFO batch issuing, and damaged/expired/quarantined disposition with audit events.
+- Stocktakes with captured expected and counted quantities, maker-checker approval and append-only variance adjustments.
+- Per-warehouse reorder thresholds, lead-time-aware suggested quantities, idempotent draft procurement requisition generation from reorder rules, simple moving-average demand forecasts, multi-store dashboard and inventory alerts.
+- Organization and branch-specific price lists with per-product prices and promotion percentages.
+- Inventory valuation for batch and non-batch stock using recorded batch receipt costs and configurable product default cost, with FIFO and weighted-average reporting modes.
+
+### API entry points
+
+- `GET/POST /api/v1/inventory/warehouses`
+- `POST /api/v1/inventory/transfers`, `POST /api/v1/inventory/transfers/{id}/dispatch`, `POST /api/v1/inventory/transfers/{id}/receive`
+- `POST /api/v1/inventory/reservations`, `POST /api/v1/inventory/reservations/{id}/release`, `POST /api/v1/inventory/reservations/{id}/consume`, `POST /api/v1/inventory/reservations/expire`
+- `POST /api/v1/inventory/batches/receive`, `POST /api/v1/inventory/batches/issue`, `PATCH /api/v1/inventory/batches/{id}/status`
+- `POST /api/v1/inventory/stocktakes`, `POST /api/v1/inventory/stocktakes/{id}/approve`
+- `PUT /api/v1/inventory/reorder-rules`, `GET /api/v1/inventory/replenishment`, `POST /api/v1/inventory/replenishment/draft-requisitions`, `GET /api/v1/inventory/forecast`
+- `GET /api/v1/inventory/warehouses/{id}/stock`, `GET /api/v1/inventory/valuation`, `GET /api/v1/inventory/dashboard`, `GET /api/v1/inventory/alerts`
+- `POST /api/v1/inventory/price-lists`, `PUT /api/v1/inventory/price-lists/{id}/prices`, `GET /api/v1/inventory/price-lists/{id}/prices`
+
+### Operational constraints still requiring deployment/UAT
+
+- Reservations expire when the expiry sweep is run; schedule that endpoint through the deployment's trusted job runner for automatic periodic expiry.
+- Replenishment returns suggested purchase quantities; procurement order creation and supplier fulfillment remain separate approval-controlled procurement actions.
+- The demand forecast is a transparent simple moving average, not a trained predictive model; tune its window and seasonality against real business data.
+- Legacy branch-level movements without a warehouse are attributed to the sole active warehouse at that branch. Where a branch has multiple warehouses, opening stock must be assigned through controlled warehouse opening-balance movements before warehouse-level availability is reliable.
+- Provider/carrier GPS tracking is not included; transfer tracking references are entered by staff.
+- Validate costing policy, tax treatment, serial/lot regulatory requirements, concurrency and performance with PostgreSQL production-like data before go-live.

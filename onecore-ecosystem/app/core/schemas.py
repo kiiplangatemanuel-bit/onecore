@@ -49,6 +49,7 @@ class InventoryProductIn(BaseModel):
     description: str = Field(default="", max_length=4000)
     unit: str = Field(default="unit", min_length=1, max_length=24)
     sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    cost_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("99999999999999.9999"))
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, multiple_of=Decimal("0.0001"))
 
 
@@ -59,6 +60,7 @@ class InventoryProductTaxRateIn(BaseModel):
 class InventoryMovementIn(BaseModel):
     product_id: int = Field(gt=0)
     branch_id: str | None = Field(default=None, min_length=1, max_length=36)
+    warehouse_id: int | None = Field(default=None, gt=0)
     quantity_delta: Decimal = Field(gt=Decimal("-1000000000"), lt=Decimal("1000000000"))
     movement_type: str = Field(pattern=r"^(receipt|issue|adjustment)$")
     reference: str = Field(default="", max_length=120)

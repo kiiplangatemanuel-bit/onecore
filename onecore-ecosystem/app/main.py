@@ -11,6 +11,7 @@ from app.core.database import SessionLocal
 from app.core.models import User
 from app.core.security import hash_password
 from app.api.routes import router
+from app.api.inventory_completion import router as inventory_completion_router
 from app.api.platform_routes import router as platform_router
 from app.api.accounting_statements import router as accounting_statements_router
 from app.api.accounting_completion import router as accounting_completion_router
@@ -51,6 +52,7 @@ app.state.login_rate_limiter = LoginRateLimiter(
     window_seconds=settings.login_rate_limit_window_seconds,
 )
 app.include_router(router)
+app.include_router(inventory_completion_router)
 app.include_router(platform_router)
 app.include_router(accounting_statements_router)
 app.include_router(accounting_completion_router)

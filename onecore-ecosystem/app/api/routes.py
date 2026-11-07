@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.inventory_models import InventoryWarehouse, InventoryReservation
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
@@ -199,20 +200,20 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
         organization_id=membership.organization_id, is_active=True
     ).order_by(InventoryProduct.name).all()
     return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
-             "unit": p.unit, "sale_price": str(p.sale_price),
+             "unit": p.unit, "sale_price": str(p.sale_price), "cost_price": str(p.cost_price),
              "tax_rate": str(p.tax_rate), "is_active": p.is_active} for p in rows]
 
 
 @router.post("/inventory/products", status_code=201)
 def create_inventory_product(payload: InventoryProductIn, membership=Depends(active_membership),
                              user: User = Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "manage" if payload.tax_rate > 0 else "create")
+    require_permission(membership, "manage" if payload.tax_rate > 0 or payload.cost_price > 0 else "create")
     sku = payload.sku.strip().upper()
     if db.query(InventoryProduct).filter_by(organization_id=membership.organization_id, sku=sku).first():
         raise HTTPException(409, "SKU already exists in this organization")
     row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
                            name=payload.name.strip(), description=payload.description,
-                           unit=payload.unit, sale_price=payload.sale_price,
+                           unit=payload.unit, sale_price=payload.sale_price, cost_price=payload.cost_price,
                            tax_rate=payload.tax_rate, created_by=user.id)
     db.add(row)
     try:
@@ -223,7 +224,7 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
     db.refresh(row)
     audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
     return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
-            "unit": row.unit, "sale_price": str(row.sale_price),
+            "unit": row.unit, "sale_price": str(row.sale_price), "cost_price": str(row.cost_price),
             "tax_rate": str(row.tax_rate), "is_active": row.is_active}
 
 
@@ -286,16 +287,32 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
             organization_id=membership.organization_id, is_active=True).first()
         if not branch or not can_access_branch(membership, branch.id):
             raise HTTPException(404, "Stock location not found")
-    elif branch_scope_ids(membership) not in (None, []):
-        raise HTTPException(422, "A branch-scoped user must select an authorized branch")
-    elif branch_scope_ids(membership) == []:
+    elif branch_scope_ids(membership) not in (None, []) and not payload.warehouse_id:
+        raise HTTPException(422, "A branch-scoped user must select an authorized branch or warehouse")
+    elif branch_scope_ids(membership) == [] and not payload.warehouse_id:
         raise HTTPException(403, "No branch access is assigned")
+
+    if payload.warehouse_id:
+        warehouse = db.query(InventoryWarehouse).filter_by(id=payload.warehouse_id,
+            organization_id=membership.organization_id,is_active=True).first()
+        if not warehouse or not can_access_branch(membership,warehouse.branch_id):
+            raise HTTPException(404,"Warehouse not found")
+        if payload.branch_id and payload.branch_id != warehouse.branch_id:
+            raise HTTPException(422,"Warehouse does not belong to the selected branch")
+        payload.branch_id = warehouse.branch_id
+    elif payload.branch_id:
+        warehouse_rows = db.query(InventoryWarehouse).filter_by(
+            organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True).all()
+        if len(warehouse_rows) == 1:
+            payload.warehouse_id = warehouse_rows[0].id
+        elif len(warehouse_rows) > 1:
+            raise HTTPException(422,"Select a warehouse when the branch has multiple warehouses")
 
     duplicate = db.query(InventoryStockMovement).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
     if duplicate:
-        if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id
+        if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id or duplicate.warehouse_id != payload.warehouse_id
                 or duplicate.quantity_delta != payload.quantity_delta
                 or duplicate.movement_type != payload.movement_type or duplicate.reference != payload.reference):
             raise HTTPException(409, "Idempotency key was already used for a different movement")
@@ -307,15 +324,39 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
     ).with_for_update().first()
     if not product:
         raise HTTPException(404, "Product not found")
-    current = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+    balance_query = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
         InventoryStockMovement.organization_id == membership.organization_id,
         InventoryStockMovement.product_id == product.id,
-        InventoryStockMovement.branch_id == payload.branch_id
-    ).scalar()
+        InventoryStockMovement.branch_id == payload.branch_id)
+    if payload.warehouse_id:
+        warehouse_count = db.query(InventoryWarehouse).filter_by(
+            organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True).count()
+        if warehouse_count == 1:
+            balance_query = balance_query.filter((InventoryStockMovement.warehouse_id == payload.warehouse_id) | (InventoryStockMovement.warehouse_id.is_(None)))
+        else:
+            balance_query = balance_query.filter(InventoryStockMovement.warehouse_id == payload.warehouse_id)
+    current = balance_query.scalar()
     new_balance = resulting_balance(Decimal(str(current or 0)), payload.quantity_delta)
+    if payload.quantity_delta < 0 and payload.branch_id:
+        reserved_rows = db.query(InventoryReservation).join(InventoryWarehouse,
+            InventoryWarehouse.id == InventoryReservation.warehouse_id).filter(
+                InventoryReservation.organization_id == membership.organization_id,
+                InventoryReservation.product_id == product.id,
+                InventoryWarehouse.branch_id == payload.branch_id,
+                InventoryReservation.status == "active").all()
+        if payload.warehouse_id:
+            reserved_rows = [r for r in reserved_rows if r.warehouse_id == payload.warehouse_id]
+        reserved = Decimal("0")
+        now_utc = datetime.now(timezone.utc)
+        for reservation in reserved_rows:
+            expiry = reservation.expires_at if reservation.expires_at.tzinfo else reservation.expires_at.replace(tzinfo=timezone.utc)
+            if expiry > now_utc:
+                reserved += Decimal(str(reservation.quantity))
+        if new_balance < reserved:
+            raise HTTPException(409, "Movement would consume stock reserved for sales or POS orders")
     row = InventoryStockMovement(
         organization_id=membership.organization_id, product_id=product.id,
-        branch_id=payload.branch_id, quantity_delta=payload.quantity_delta,
+        branch_id=payload.branch_id, warehouse_id=payload.warehouse_id, quantity_delta=payload.quantity_delta,
         movement_type=payload.movement_type, reference=payload.reference,
         idempotency_key=payload.idempotency_key, created_by=user.id
     )
@@ -327,7 +368,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
         duplicate = db.query(InventoryStockMovement).filter_by(
             organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
         ).first()
-        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type and duplicate.reference == payload.reference:
+        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.warehouse_id == payload.warehouse_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type and duplicate.reference == payload.reference:
             return {"id": duplicate.id, "status": "already_applied",
                     "quantity_delta": str(duplicate.quantity_delta)}
         raise HTTPException(409, "Stock movement conflicts with an existing request")
@@ -1594,14 +1635,48 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     subtotal_total, discount_total, tax_total, total = map(
         money, (subtotal_total, discount_total, tax_total, total))
     validate_payment_total(total, payload.payments)
+    warehouse_allocations = {}
+    branch_warehouses = db.query(InventoryWarehouse).filter_by(
+        organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True
+    ).order_by(InventoryWarehouse.id).all()
     for product_id, quantity in aggregate_qty.items():
-        stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
-            InventoryStockMovement.organization_id == membership.organization_id,
-            InventoryStockMovement.product_id == product_id,
-            InventoryStockMovement.branch_id == payload.branch_id
-        ).scalar()
-        if Decimal(str(stock or 0)) < quantity:
-            raise HTTPException(409, f"Insufficient stock for product {product_map[product_id].sku}")
+        remaining = Decimal(str(quantity))
+        allocations = []
+        if branch_warehouses:
+            for warehouse in branch_warehouses:
+                balance_query = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+                    InventoryStockMovement.organization_id==membership.organization_id,
+                    InventoryStockMovement.product_id==product_id,
+                    InventoryStockMovement.branch_id==payload.branch_id)
+                if len(branch_warehouses)==1:
+                    balance_query=balance_query.filter((InventoryStockMovement.warehouse_id==warehouse.id)|(InventoryStockMovement.warehouse_id.is_(None)))
+                else:
+                    balance_query=balance_query.filter(InventoryStockMovement.warehouse_id==warehouse.id)
+                on_hand=Decimal(str(balance_query.scalar() or 0))
+                reservations=db.query(InventoryReservation).filter_by(
+                    organization_id=membership.organization_id,warehouse_id=warehouse.id,
+                    product_id=product_id,status="active").all()
+                reserved=Decimal("0")
+                now_utc=datetime.now(timezone.utc)
+                for reservation in reservations:
+                    exp=reservation.expires_at if reservation.expires_at.tzinfo else reservation.expires_at.replace(tzinfo=timezone.utc)
+                    if exp>now_utc: reserved+=Decimal(str(reservation.quantity))
+                available=max(Decimal("0"),on_hand-reserved)
+                take=min(available,remaining)
+                if take>0: allocations.append([warehouse.id,take]);remaining-=take
+                if remaining<=0: break
+        else:
+            stock=db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+                InventoryStockMovement.organization_id==membership.organization_id,
+                InventoryStockMovement.product_id==product_id,
+                InventoryStockMovement.branch_id==payload.branch_id,
+                InventoryStockMovement.warehouse_id.is_(None)).scalar()
+            available=Decimal(str(stock or 0))
+            take=min(available,remaining)
+            if take>0: allocations.append([None,take]);remaining-=take
+        if remaining>0:
+            raise HTTPException(409, f"Insufficient unreserved stock for product {product_map[product_id].sku}")
+        warehouse_allocations[product_id]=allocations
     sale = POSSale(
         organization_id=membership.organization_id, branch_id=payload.branch_id,
         shift_id=shift.id, cashier_user_id=user.id,
@@ -1613,19 +1688,30 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     )
     db.add(sale)
     db.flush()
+    movement_index=0
     for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
                            product_id=line.product_id, quantity=line.quantity,
                            unit_price=unit_price, discount_percent=line.discount_percent,
                            discount_amount=discount, tax_rate=tax_rate,
                            tax_amount=tax, line_total=line_total))
-        db.add(InventoryStockMovement(
-            organization_id=membership.organization_id, product_id=line.product_id,
-            branch_id=payload.branch_id, quantity_delta=-line.quantity,
-            movement_type="issue", reference=payload.client_transaction_id,
-            idempotency_key=f"pos:{hashlib.sha256(payload.client_transaction_id.encode()).hexdigest()[:32]}:{index}",
-            created_by=user.id
-        ))
+        line_remaining=Decimal(str(line.quantity))
+        allocations=warehouse_allocations.get(line.product_id,[])
+        while line_remaining>0 and allocations:
+            warehouse_id,allocated=allocations[0]
+            take=min(line_remaining,allocated)
+            db.add(InventoryStockMovement(
+                organization_id=membership.organization_id, product_id=line.product_id,
+                branch_id=payload.branch_id, warehouse_id=warehouse_id, quantity_delta=-take,
+                movement_type="issue", reference=payload.client_transaction_id,
+                idempotency_key=f"pos:{hashlib.sha256(payload.client_transaction_id.encode()).hexdigest()[:32]}:{movement_index}",
+                created_by=user.id
+            ))
+            movement_index+=1
+            line_remaining-=take
+            allocations[0][1]-=take
+            if allocations[0][1]<=0: allocations.pop(0)
+        if line_remaining>0: raise HTTPException(409,"Unable to allocate POS sale stock to warehouses")
     for payment in payload.payments:
         db.add(POSPayment(
             organization_id=membership.organization_id, sale_id=sale.id,
