@@ -44,7 +44,7 @@ def test_inventory_completion_routes_are_registered():
         "/api/v1/inventory/batches/issue", "/api/v1/inventory/batches/{batch_id}/status", "/api/v1/inventory/stocktakes",
         "/api/v1/inventory/stocktakes/{stocktake_id}/approve", "/api/v1/inventory/replenishment",
         "/api/v1/inventory/forecast", "/api/v1/inventory/valuation",
-        "/api/v1/inventory/price-lists", "/api/v1/inventory/dashboard", "/api/v1/inventory/alerts",
+        "/api/v1/inventory/price-lists", "/api/v1/inventory/price-lists/{price_list_id}/prices", "/api/v1/inventory/warehouses/{warehouse_id}/stock", "/api/v1/inventory/dashboard", "/api/v1/inventory/alerts",
     }
     assert expected <= paths
 
