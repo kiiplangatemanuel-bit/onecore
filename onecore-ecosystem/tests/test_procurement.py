@@ -145,3 +145,5 @@ def test_procurement_workspace_mentions_goods_receipt_inspection():
     html = page.read_text(encoding="utf-8")
     assert "goods-receipts" in html
     assert "inspect" in html
+    assert "/receive" not in html
+    assert "pending inspection" in html
