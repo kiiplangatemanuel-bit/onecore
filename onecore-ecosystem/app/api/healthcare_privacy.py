@@ -19,14 +19,19 @@ from cryptography.fernet import Fernet, InvalidToken
 router=APIRouter(prefix="/api/v1/healthcare",tags=["Healthcare privacy"])
 ROLE_PERMISSIONS={
     "healthcare_admin":{"patient.register","patient.read","patient.write","clinical.read","clinical.write",
-        "appointment.manage","access.manage","consent.manage","audit.read","breakglass"},
-    "clinician":{"patient.read","clinical.read","clinical.write","appointment.manage","breakglass"},
-    "nurse":{"patient.read","clinical.read","appointment.manage","breakglass"},
-    "receptionist":{"patient.register","appointment.manage"},
+        "appointment.manage","access.manage","consent.manage","audit.read","breakglass",
+        "hospital.manage","admissions.manage","nursing.manage","observations.manage","orders.manage","billing.manage","insurance.manage","pharmacy.manage","lab.manage","emergency.manage","theatre.manage","documents.manage","privacy.monitor","retention.manage","recovery.manage"},
+    "clinician":{"patient.read","clinical.read","clinical.write","appointment.manage","breakglass","admissions.manage","nursing.manage","observations.manage","orders.manage","emergency.manage","theatre.manage","documents.manage"},
+    "nurse":{"patient.read","clinical.read","appointment.manage","breakglass","nursing.manage","observations.manage","admissions.manage","emergency.manage"},
+    "receptionist":{"patient.register","appointment.manage","admissions.manage","emergency.manage"},
     "privacy_officer":{"access.manage","consent.manage","audit.read"},
     "clinical_auditor":{"patient.read","clinical.read","audit.read"},
-    "lab_technician":{"patient.read","clinical.read"},
-    "pharmacist":{"patient.read","clinical.read"},
+    "lab_technician":{"patient.read","clinical.read","lab.manage"},
+    "pharmacist":{"patient.read","clinical.read","pharmacy.manage"},
+    "billing_officer":{"patient.read","billing.manage"},
+    "insurance_officer":{"patient.read","billing.manage","insurance.manage"},
+    "ward_clerk":{"patient.read","admissions.manage"},
+    "theatre_staff":{"patient.read","clinical.read","theatre.manage"},
 }
 CONSENT_TYPES={"treatment","data_processing","data_sharing","research","marketing"}
 

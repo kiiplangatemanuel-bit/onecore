@@ -1487,3 +1487,48 @@ class CRMWorkerHeartbeat(Base):
     last_processed: Mapped[int] = mapped_column(default=0)
     last_error: Mapped[str] = mapped_column(String(500), default="")
     __table_args__ = (Index("ix_crm_worker_org_name", "organization_id", "worker_name", unique=True),)
+
+
+class HealthcareResource(Base):
+    """Tenant- and branch-scoped hospital workflow record; clinical payloads are encrypted."""
+    __tablename__ = "healthcare_resources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_id: Mapped[int | None] = mapped_column(ForeignKey("healthcare_patients.id"), nullable=True, index=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("healthcare_resources.id"), nullable=True, index=True)
+    resource_type: Mapped[str] = mapped_column(String(40), index=True)
+    external_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_health_resource_org_type_external", "organization_id", "resource_type", "external_key", unique=True),
+        Index("ix_health_resource_org_type_idem", "organization_id", "resource_type", "idempotency_key", unique=True),
+        Index("ix_health_resource_org_patient_type", "organization_id", "patient_id", "resource_type"),
+    )
+
+
+class HealthcareEvent(Base):
+    """Append-only clinical and patient-movement event ledger."""
+    __tablename__ = "healthcare_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    resource_id: Mapped[int | None] = mapped_column(ForeignKey("healthcare_resources.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(60))
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    encrypted_detail: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_health_event_org_idempotency", "organization_id", "idempotency_key", unique=True),
+        Index("ix_health_event_patient_time", "organization_id", "patient_id", "occurred_at"),
+    )

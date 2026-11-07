@@ -22,6 +22,7 @@ from app.api.crm_campaigns import router as crm_campaigns_router
 from app.api.crm_automation import router as crm_automation_router
 from app.api.crm_analytics import router as crm_analytics_router
 from app.api.healthcare_privacy import router as healthcare_privacy_router
+from app.api.healthcare_hospital import router as healthcare_hospital_router
 from app.api.procurement_workflows import router as procurement_workflows_router
 from app.api.school_advanced import router as school_advanced_router
 
@@ -65,6 +66,7 @@ app.include_router(crm_campaigns_router)
 app.include_router(crm_automation_router)
 app.include_router(crm_analytics_router)
 app.include_router(healthcare_privacy_router)
+app.include_router(healthcare_hospital_router)
 app.include_router(procurement_workflows_router)
 app.include_router(school_advanced_router)
 
@@ -117,6 +119,11 @@ def crm_automation_ui():
 @app.get("/crm/forecast", response_class=HTMLResponse)
 def crm_forecast_ui():
     page = Path(__file__).resolve().parent / "web" / "crm_forecast.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
+
+@app.get("/healthcare/hospital", response_class=HTMLResponse)
+def healthcare_hospital_ui():
+    page = Path(__file__).resolve().parent / "web" / "healthcare_hospital.html"
     return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
 
 @app.get("/healthcare", response_class=HTMLResponse)
