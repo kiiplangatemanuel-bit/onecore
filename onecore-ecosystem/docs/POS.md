@@ -171,7 +171,7 @@ credential, and registered result and timeout callback URLs.
 - `INTEGRATION_MPESA_ENABLED=true`
 - `MPESA_BASE_URL=https://sandbox.safaricom.co.ke` (or approved production Daraja host)
 - `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`
-- `MPESA_SHORTCODE`, `MPESA_PASSKEY`
+- `MPESA_SHORTCODE`, `MPESA_PASSKEY`, and `MPESA_TRANSACTION_TYPE` (`CustomerPayBillOnline` or `CustomerBuyGoodsOnline`)
 - `MPESA_CALLBACK_URL=https://your-public-host/api/v1/integrations/mpesa/callbacks`
 - For B2C: `MPESA_INITIATOR_NAME`, `MPESA_SECURITY_CREDENTIAL` (Safaricom-encrypted),
   `MPESA_B2C_RESULT_URL`, and `MPESA_B2C_TIMEOUT_URL`.
