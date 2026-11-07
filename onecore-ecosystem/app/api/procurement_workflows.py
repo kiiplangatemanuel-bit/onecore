@@ -1084,7 +1084,8 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
     ).with_for_update().first()
     if not statement or not line:
         raise HTTPException(404, "Open supplier statement line not found")
-    if line.matched_invoice_id or line.matched_payment_id or line.matched_credit_note_id:
+    if (line.matched_invoice_id or line.matched_payment_id
+            or line.matched_credit_note_id or line.matched_settlement_id):
         raise HTTPException(409, "Statement line is already matched")
     if payload.invoice_id:
         target = db.query(AccountingInvoice).filter_by(
