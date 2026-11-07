@@ -1,7 +1,9 @@
-# HR employee directory and leave workflow
+# HR, attendance and payroll
 
-This is the first HR vertical slice. It provides employee master records and a basic
-leave request/approval workflow. It is not a payroll or statutory-compliance system.
+This module provides employee master records, leave requests, attendance/timekeeping,
+effective-dated payroll profiles, controlled payroll runs, Kenya statutory calculations,
+payslips, accounting journal posting and salary payment preparation. See the Kenya
+payroll sections below for the statutory calculation and integration boundaries.
 
 ## Employee directory
 - `POST /api/v1/hr/employees` — manager-only employee creation.
@@ -21,18 +23,12 @@ are counted inclusively excluding Saturdays and Sundays. Overlapping pending or
 approved requests for the same employee are rejected. Decisions require manager
 permission; an employee cannot approve their own request.
 
-## Explicit limitations
-- No leave entitlement, accrual, carry-forward, balance ledger or automatic deduction.
+## Remaining HR limitations
+- Leave entitlement, accrual, carry-forward, balance ledger and automatic leave deduction are not implemented.
 - Public holidays are not excluded; no organization holiday calendar is implemented.
-- No employee document store, contract management, attendance/time tracking, shifts,
-  performance, recruitment, training, expense claims or disciplinary workflow.
-- No payroll run, payslip, statutory tax, pension, social-security or health-insurance
-  calculations, payment file or payroll accounting integration.
-- No manager delegation, multi-step approvals, notifications, mobile employee portal,
-  PostgreSQL concurrency testing, security review or customer UAT.
-
-Do not use this module to calculate or pay statutory payroll obligations until
-jurisdiction-specific rules and professional validation are implemented.
+- Employee document store, contract management, performance, recruitment, training, expense claims and disciplinary workflows remain outstanding.
+- Attendance is currently a basic clock-in/out record. Overtime and shift pay are calculated only from HR-approved inputs; attendance-driven overtime approval and shift roster integration remain outstanding.
+- Payroll provider, statutory filing, bank account vaulting, full reversal accounting and independent production assurance limitations are listed in the payroll completion section below.
 
 
 ## Attendance and timekeeping
