@@ -9,6 +9,26 @@ def money(value: Decimal) -> Decimal:
     return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def calculate_pos_line(unit_price: Decimal, quantity: Decimal,
+                       discount_percent: Decimal, tax_rate: Decimal):
+    """Return gross subtotal, discount, tax and final line amount."""
+    subtotal = money(Decimal(unit_price) * Decimal(quantity))
+    discount = money(subtotal * Decimal(discount_percent) / Decimal("100"))
+    taxable = subtotal - discount
+    tax = money(taxable * Decimal(tax_rate) / Decimal("100"))
+    return subtotal, discount, tax, money(taxable + tax)
+
+
+def allocate_return_amounts(original, quantity: Decimal, prior_returned_amount: Decimal):
+    """Allocate discounts and tax proportionally; final return absorbs rounding residue."""
+    original_qty = Decimal(str(original.quantity))
+    remaining_qty = original_qty - Decimal(str(prior_returned_amount[0]))
+    remaining_total = Decimal(str(original.line_total)) - Decimal(str(prior_returned_amount[1]))
+    if quantity == remaining_qty:
+        return remaining_total
+    return money(Decimal(str(original.line_total)) * Decimal(quantity) / original_qty)
+
+
 def validate_payment_total(total: Decimal, payments) -> None:
     paid = sum((money(Decimal(str(p.amount))) for p in payments), Decimal("0.00"))
     if money(total) != paid:
@@ -21,7 +41,8 @@ def canonical_request_hash(payload) -> str:
         "shift_id": payload.shift_id,
         "currency": payload.currency,
         "lines": sorted([
-            {"product_id": line.product_id, "quantity": str(line.quantity)}
+            {"product_id": line.product_id, "quantity": str(line.quantity),
+             "discount_percent": str(line.discount_percent)}
             for line in payload.lines
         ], key=lambda x: (x["product_id"], x["quantity"])),
         "payments": sorted([
