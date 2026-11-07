@@ -5,7 +5,7 @@ from app.core.models import CustomDomain, Organization
 
 def organization_for_host(db: Session, hostname: str):
     host=(hostname or "").split(":")[0].strip().lower().rstrip(".")
-    if host in {"localhost","127.0.0.1","onecore.co.ke","www.onecore.co.ke"}:
+    if host in {"localhost","127.0.0.1","onecore.co.ke"} or host.endswith(".onecore.co.ke"):
         return None
     domain=db.query(CustomDomain).filter_by(hostname=host,status="active",tls_status="active").first()
     if not domain:
