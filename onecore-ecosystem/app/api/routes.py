@@ -2232,9 +2232,9 @@ def create_accounting_credit_note(invoice_id:int,payload:AccountingCreditNoteIn,
         subtotal+=line_sub;tax_total+=line_tax
         allocations.append((source,item.quantity,line_sub,line_tax,line_sub+line_tax))
     total=subtotal+tax_total
-    outstanding=Decimal(invoice.total)-Decimal(invoice.amount_paid)
-    if total>outstanding:
-        raise HTTPException(409,"Credit exceeds the outstanding invoice balance; customer refunds and supplier credit balances are not yet supported")
+    remaining_invoice_value = Decimal(invoice.total)
+    if total > remaining_invoice_value:
+        raise HTTPException(409,"Credit exceeds the remaining uncredited invoice value")
     note=AccountingCreditNote(organization_id=membership.organization_id,invoice_id=invoice.id,
         branch_id=invoice.branch_id,credit_note_number=payload.credit_note_number.strip().upper(),
         issue_date=datetime.combine(payload.issue_date,time.min,tzinfo=timezone.utc),
@@ -2448,6 +2448,12 @@ def _accounting_period_close_check(db, organization_id, period):
         func.coalesce(func.sum(AccountingJournalLine.debit), 0)
         != func.coalesce(func.sum(AccountingJournalLine.credit), 0)
     ).count()
+    unposted_procurement_supplier_invoices = db.query(ProcurementSupplierInvoice).filter(
+        ProcurementSupplierInvoice.organization_id == organization_id,
+        ProcurementSupplierInvoice.status == "matched",
+        ProcurementSupplierInvoice.invoice_date >= start,
+        ProcurementSupplierInvoice.invoice_date <= end,
+    ).count()
     counts = {
         "draft_invoices": draft_invoices,
         "pending_invoice_approvals": pending_approvals,
@@ -2455,6 +2461,7 @@ def _accounting_period_close_check(db, organization_id, period):
         "draft_journals": draft_journals,
         "unreconciled_bank_statements": unreconciled_bank_statements,
         "unbalanced_posted_journals": unbalanced_posted_journals,
+        "unposted_procurement_supplier_invoices": unposted_procurement_supplier_invoices,
     }
     blockers = [{"code": key, "count": value} for key, value in counts.items() if value]
     return {"period_id": period.id, "period_code": period.code,
