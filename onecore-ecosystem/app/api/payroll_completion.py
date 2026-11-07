@@ -126,8 +126,11 @@ def _validate_rule_parameters(parameters):
             raise ValueError("Invalid NSSF contribution limits or rate")
         shif = parameters["shif"]
         housing = parameters["housing_levy"]
-        if not (D("0") <= D(str(shif["rate"])) <= D("1") and D(str(shif["minimum"])) >= 0):
-            raise ValueError("Invalid SHIF rate or minimum")
+        salaried_minimum = D(str(shif.get("salaried_minimum", "0")))
+        non_salaried_minimum = D(str(shif.get("non_salaried_minimum", "300")))
+        if not (D("0") <= D(str(shif["rate"])) <= D("1")
+                and salaried_minimum == 0 and non_salaried_minimum >= 0):
+            raise ValueError("Invalid SHIF rate or minimum; salaried minimum must be zero")
         if not (D("0") <= D(str(housing["employee_rate"])) <= D("1") and D("0") <= D(str(housing["employer_rate"])) <= D("1")):
             raise ValueError("Invalid Housing Levy rates")
     except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
