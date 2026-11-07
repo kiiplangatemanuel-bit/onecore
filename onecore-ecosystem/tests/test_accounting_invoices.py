@@ -50,3 +50,30 @@ def test_ar_ap_models_and_routes_are_registered():
     assert "/api/v1/accounting/invoices/{invoice_id}/post" in paths
     assert "/api/v1/accounting/invoices/{invoice_id}/payments" in paths
     assert "/api/v1/accounting/aging" in paths
+
+
+def test_period_budget_fixed_asset_models_and_routes_are_registered():
+    from app.core.models import AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry
+    from app.core.schemas import AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn
+    assert AccountingFiscalPeriod.__tablename__ == "accounting_fiscal_periods"
+    assert AccountingBudget.__tablename__ == "accounting_budgets"
+    assert AccountingBudgetLine.__tablename__ == "accounting_budget_lines"
+    assert AccountingFixedAsset.__tablename__ == "accounting_fixed_assets"
+    assert AccountingDepreciationEntry.__tablename__ == "accounting_depreciation_entries"
+    assert AccountingFiscalPeriodIn(code="FY2026", start_date="2026-01-01", end_date="2026-12-31").code == "FY2026"
+    assert AccountingBudgetIn(fiscal_period_id=1, name="FY budget",
+        lines=[{"account_id":1,"amount":"1200.00"}]).name == "FY budget"
+    assert AccountingDepreciationIn(period_date="2026-11-08", idempotency_key="depreciation-1").period_date.day == 8
+    with pytest.raises(ValidationError):
+        AccountingFixedAssetIn(asset_code="FA-01",name="Laptop",acquisition_date="2026-01-01",
+            cost="100.00",salvage_value="100.00",useful_life_months=36,
+            asset_account_id=1,accumulated_depreciation_account_id=2,
+            depreciation_expense_account_id=3,payment_account_id=4)
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/accounting/fiscal-periods" in paths
+    assert "/api/v1/accounting/fiscal-periods/{period_id}/close" in paths
+    assert "/api/v1/accounting/budgets" in paths
+    assert "/api/v1/accounting/budgets/{budget_id}/performance" in paths
+    assert "/api/v1/accounting/fixed-assets" in paths
+    assert "/api/v1/accounting/fixed-assets/{asset_id}/depreciation" in paths
+    assert "/api/v1/accounting/financial-statements" in paths
