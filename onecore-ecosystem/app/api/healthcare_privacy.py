@@ -146,7 +146,7 @@ def assign_role(payload:dict,m=Depends(active_membership),u:User=Depends(current
         organization_id=m.organization_id,user_id=uid,branch_id=branch_id,role=role,is_active=True).first()
     if duplicate:raise HTTPException(409,"An active healthcare role assignment already exists")
     row=HealthcareRoleAssignment(organization_id=m.organization_id,user_id=uid,branch_id=branch_id,
-        role=role,assigned_by=u.id,is_active=True)
+        role=role,scope_key=branch_id or "*",assigned_by=u.id,is_active=True)
     db.add(row)
     try:db.commit()
     except IntegrityError:db.rollback();raise HTTPException(409,"Healthcare role assignment already exists")
