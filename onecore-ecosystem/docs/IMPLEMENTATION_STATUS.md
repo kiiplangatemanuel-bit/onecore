@@ -153,3 +153,13 @@ stock-ledger slice above; all other listed areas remain unimplemented or partial
 unless independently evidenced elsewhere in this tracker. No M-Pesa, KRA eTIMS or
 SHA provider connection, provider certification, live payment, production hosting,
 TLS provisioning or UAT approval is claimed.
+
+
+### Inventory CI regression and correction
+
+- Inventory CI run `42361756874` completed with 24 passing tests and one failure.
+  The failure was in the new route-registration test: current FastAPI exposes a lazy
+  included-router object without a direct `.path` attribute.
+- Updated the test to inspect the generated OpenAPI path map instead. Correction
+  commit: `68b7904`. Its CI result is pending; verify before treating the inventory
+  slice as passing.
