@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
@@ -3160,6 +3160,11 @@ def accept_crm_quote(quote_id:int,membership=Depends(active_membership),
         row.status="expired";db.commit()
         raise HTTPException(409,"Quote validity has expired")
     row.status="accepted";row.accepted_at=datetime.now(timezone.utc)
+    lead=db.query(CRMLead).filter_by(id=row.lead_id,organization_id=membership.organization_id).first() if row.lead_id else None
+    if lead and lead.source_campaign_id:
+        db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
+            contact_id=row.contact_id,lead_id=lead.id,event_type="quote_accepted",revenue_amount=Decimal("0"),
+            currency=row.currency,idempotency_key="quote-accepted-%s"%row.id,occurred_at=row.accepted_at,created_by=user.id))
     db.commit();audit(db,user.id,membership.organization_id,"crm.quote.accepted","crm_quote",row.id)
     return {"id":row.id,"status":row.status,"accepted_at":row.accepted_at.isoformat()}
 
@@ -3233,6 +3238,13 @@ def convert_crm_quote_to_order(quote_id: int, payload: CRMQuoteConvertIn,
                 "quote_id":quote.id,"status":existing.status,"already_converted":True}
         raise HTTPException(409, "Sales order number already exists in this organization")
     db.refresh(order)
+    lead=db.query(CRMLead).filter_by(id=order.lead_id,organization_id=membership.organization_id).first() if order.lead_id else None
+    if lead and lead.source_campaign_id:
+        db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
+            contact_id=order.contact_id,lead_id=lead.id,sales_order_id=order.id,event_type="sales_order_confirmed",
+            revenue_amount=Decimal("0"),currency=order.currency,idempotency_key="order-confirmed-%s"%order.id,
+            occurred_at=order.confirmed_at,created_by=user.id))
+        db.commit()
     audit(db,user.id,membership.organization_id,"crm.quote.converted_to_order",
           "crm_sales_order",order.id,f"quote:{quote.id};order:{order.order_number}")
     return {"id":order.id,"order_number":order.order_number,"quote_id":quote.id,
