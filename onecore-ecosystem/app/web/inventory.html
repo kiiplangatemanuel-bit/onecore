@@ -36,7 +36,9 @@ async function refresh(){
  const [products,stock]=await Promise.all([api('/inventory/products'),api('/inventory/stock')]);
  const select=$('movement').elements.product_id;
  select.replaceChildren(new Option('Select a product',''));
- products.forEach(p=>select.add(new Option(p.sku+' — '+p.name,String(p.id))));
+ const taxSelect=$('productTaxRate').elements.product_id;
+ taxSelect.replaceChildren(new Option('Select a product',''));
+ products.forEach(p=>{select.add(new Option(p.sku+' — '+p.name,String(p.id)));taxSelect.add(new Option(p.sku+' — '+p.name+' · '+p.tax_rate+'%',String(p.id));});
  const body=$('stock');body.replaceChildren();
  if(!stock.length){const tr=body.insertRow();const td=tr.insertCell();td.colSpan=4;td.textContent='No stock movements yet.';}
  stock.forEach(row=>{const tr=body.insertRow();[row.sku,row.name,row.branch_id||'Unassigned',row.quantity].forEach(v=>{const td=tr.insertCell();td.textContent=String(v);});});
