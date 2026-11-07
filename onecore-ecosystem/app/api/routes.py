@@ -5634,8 +5634,6 @@ def create_sacco_loan_application(payload: SaccoLoanApplicationIn,
     ).first()
     if not product:
         raise HTTPException(404, "Active loan product not found")
-    if product.requires_guarantor:
-        raise HTTPException(422, "This product requires guarantor capture, which is not yet supported")
     principal = Decimal(str(payload.requested_principal)).quantize(Decimal("0.01"))
     if principal < product.minimum_principal or principal > product.maximum_principal:
         raise HTTPException(422, "Requested principal is outside loan product limits")
@@ -5734,7 +5732,14 @@ def disburse_sacco_loan(application_id: int, payload: SaccoLoanDisbursementIn,
     if not product:
         raise HTTPException(409, "The originating loan product is no longer active")
     if product.requires_guarantor:
-        raise HTTPException(409, "Guarantor verification is not available for this product")
+        approved_guarantees = db.query(func.coalesce(func.sum(SaccoLoanGuarantor.guaranteed_amount), 0)).filter(
+            SaccoLoanGuarantor.organization_id == membership.organization_id,
+            SaccoLoanGuarantor.loan_id == db.query(SaccoLoan.id).filter_by(
+                organization_id=membership.organization_id, application_id=application.id).scalar_subquery(),
+            SaccoLoanGuarantor.status == "approved",
+        ).scalar()
+        if Decimal(str(approved_guarantees or 0)) < Decimal(str(application.requested_principal)):
+            raise HTTPException(409, "Approved guarantor coverage must equal or exceed the requested principal")
     disbursed_at = datetime.now(timezone.utc)
     first_due_date = add_months(disbursed_at.date(), 1)
     try:
