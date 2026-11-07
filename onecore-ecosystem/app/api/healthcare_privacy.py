@@ -33,10 +33,15 @@ def _branch_ok(membership,branch_id):
 
 
 def _roles(db,membership,user,branch_id):
-    _branch_ok(membership,branch_id)
+    if branch_id is not None:
+        _branch_ok(membership,branch_id)
     q=db.query(HealthcareRoleAssignment).filter_by(
         organization_id=membership.organization_id,user_id=user.id,is_active=True)
     rows=q.all()
+    allowed=(membership.branch_scope or "").strip()
+    if branch_id is None and allowed!="*":
+        branch_ids={x.strip() for x in allowed.split(",") if x.strip()}
+        return {x.role for x in rows if x.branch_id is None or x.branch_id in branch_ids}
     return {x.role for x in rows if x.branch_id is None or x.branch_id==branch_id}
 
 
