@@ -54,6 +54,6 @@ TEMPLATE_VARIABLES={"first_name","last_name","full_name","email","phone","compan
 
 def validate_template_content(subject,body):
     for text in (subject or "",body or ""):
-        for variable in re.findall(r"{{\\s*([a-z_]+)\\s*}}",text):
+        for variable in re.findall(r"{{\s*([a-z_]+)\s*}}",text):
             if variable not in TEMPLATE_VARIABLES:
                 raise HTTPException(422,"Unsupported template variable: "+variable)
