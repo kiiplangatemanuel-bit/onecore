@@ -95,8 +95,8 @@ def activate_domain(domain_id:int,user:User=Depends(require_platform_admin),db:S
 @router.post("/domains/{domain_id}/primary")
 def set_primary_domain(domain_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
-    row=db.query(CustomDomain).filter_by(id=domain_id,organization_id=membership.organization_id,status="verified").first()
-    if not row: raise HTTPException(409,"Only verified domains can be primary")
+    row=db.query(CustomDomain).filter_by(id=domain_id,organization_id=membership.organization_id,status="active",tls_status="active").first()
+    if not row: raise HTTPException(409,"Only active HTTPS domains can be primary")
     db.query(CustomDomain).filter_by(organization_id=membership.organization_id).update({"is_primary":False})
     row.is_primary=True; db.commit()
     _audit(db,user.id,membership.organization_id,"domain.primary_changed","custom_domain",row.id,row.hostname)
