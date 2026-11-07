@@ -1062,6 +1062,66 @@ class SaccoLoanRepaymentIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
+
+class SaccoLoanGuarantorIn(BaseModel):
+    member_id: int = Field(gt=0)
+    guaranteed_amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    consent_reference: str = Field(min_length=3, max_length=120)
+
+    @field_validator("consent_reference")
+    @classmethod
+    def consent_reference_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A recorded guarantor consent reference is required")
+        return value
+
+
+class SaccoLoanCollateralIn(BaseModel):
+    collateral_type: str = Field(min_length=2, max_length=32, pattern=r"^[a-z_]+$")
+    description: str = Field(min_length=5, max_length=500)
+    owner_name: str = Field(min_length=2, max_length=180)
+    identifier: str = Field(default="", max_length=120)
+    estimated_value: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("description", "owner_name")
+    @classmethod
+    def collateral_text_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Collateral description and owner are required")
+        return value
+
+
+class SaccoLoanGuarantorReviewIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected|released)$")
+    note: str = Field(min_length=3, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def guarantor_review_note_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A meaningful review note is required")
+        return value
+
+
+class SaccoLoanCollateralReviewIn(BaseModel):
+    decision: str = Field(pattern=r"^(accepted|rejected|released)$")
+    assessed_value: Decimal | None = Field(default=None, gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    valuation_reference: str = Field(default="", max_length=120)
+    valuation_date: date | None = None
+    note: str = Field(min_length=3, max_length=500)
+
+    @model_validator(mode="after")
+    def accepted_collateral_requires_valuation(self):
+        if self.decision == "accepted" and (self.assessed_value is None or not self.valuation_reference.strip() or self.valuation_date is None):
+            raise ValueError("Accepted collateral requires assessed value, valuation reference and valuation date")
+        if len(self.note.strip()) < 3:
+            raise ValueError("A meaningful review note is required")
+        return self
+
+
 class SaccoLoanDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected)$")
     note: str = Field(min_length=3, max_length=500)
