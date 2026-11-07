@@ -153,3 +153,33 @@ def test_school_fee_contracts_and_routes():
     assert "/api/v1/school/fee-structures/{structure_id}/bill" in paths
     assert "/api/v1/school/learners/{learner_id}/fee-account" in paths
     assert "/api/v1/school/learners/{learner_id}/fee-payments" in paths
+
+
+def test_healthcare_patient_and_appointment_contracts():
+    from datetime import datetime, timezone, timedelta
+    from app.core.models import HealthcarePatient, HealthcareAppointment
+    from app.core.schemas import HealthcarePatientIn, HealthcareAppointmentIn
+
+    patient = HealthcarePatientIn(patient_number="PAT-001",
+        first_name="Asha", last_name="Njeri", phone="+254700000000")
+    assert patient.patient_number == "PAT-001"
+    start = datetime(2026, 11, 9, 9, 0, tzinfo=timezone.utc)
+    appointment = HealthcareAppointmentIn(patient_id=1,
+        appointment_number="APT-001", starts_at=start,
+        ends_at=start + timedelta(minutes=30), reason="General consultation")
+    assert appointment.ends_at > appointment.starts_at
+    with pytest.raises(ValidationError):
+        HealthcareAppointmentIn(patient_id=1, appointment_number="APT-002",
+            starts_at="2026-11-09T09:00:00",
+            ends_at="2026-11-09T09:30:00", reason="Consult")
+    with pytest.raises(ValidationError):
+        HealthcareAppointmentIn(patient_id=1, appointment_number="APT-003",
+            starts_at=start, ends_at=start, reason="Consult")
+    assert HealthcarePatient.__tablename__ == "healthcare_patients"
+    assert HealthcareAppointment.__tablename__ == "healthcare_appointments"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/healthcare/patients" in paths
+    assert "/api/v1/healthcare/appointments" in paths
+    assert "/api/v1/healthcare/appointments/{appointment_id}/cancel" in paths
+    assert "/api/v1/healthcare/appointments/{appointment_id}/complete" in paths
+    assert "/healthcare" in paths
