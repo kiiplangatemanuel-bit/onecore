@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,6 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
+from app.services.hr import business_days
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -3260,6 +3261,153 @@ def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
           "crm_campaign",campaign.id,f"recipients:{prepared}")
     return {"id":campaign.id,"status":campaign.status,"recipient_count":prepared,
             "delivery_started":False,"message":"Recipients prepared; no messages were sent"}
+
+
+
+@router.post("/hr/employees",status_code=201)
+def create_hr_employee(payload:HREmployeeIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    _crm_branch_check(db,membership,payload.branch_id)
+    if payload.user_id and not db.query(Membership).filter_by(
+        user_id=payload.user_id,organization_id=membership.organization_id,is_active=True
+    ).first():
+        raise HTTPException(404,"Linked user is not an active member of this organization")
+    if db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,
+        employee_number=payload.employee_number.strip().upper()).first():
+        raise HTTPException(409,"Employee number already exists in this organization")
+    row=HREmployee(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        user_id=payload.user_id,employee_number=payload.employee_number.strip().upper(),
+        first_name=payload.first_name,last_name=payload.last_name,
+        email=str(payload.email).lower() if payload.email else None,
+        phone=payload.phone.strip() if payload.phone else None,
+        department=payload.department.strip(),job_title=payload.job_title.strip(),
+        employment_type=payload.employment_type,status="active",
+        start_date=payload.start_date,created_by=user.id)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Employee number conflicts with an existing employee")
+    db.refresh(row)
+    audit(db,user.id,membership.organization_id,"hr.employee.created","hr_employee",row.id)
+    return {"id":row.id,"employee_number":row.employee_number,
+        "name":f"{row.first_name} {row.last_name}","branch_id":row.branch_id,"status":row.status}
+
+
+@router.get("/hr/employees")
+def list_hr_employees(membership=Depends(active_membership),db:Session=Depends(get_db),
+                      limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(HREmployee).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(HREmployee.branch_id.in_(allowed))
+    rows=q.order_by(HREmployee.id.desc()).limit(limit).all()
+    return [{"id":x.id,"employee_number":x.employee_number,
+        "name":f"{x.first_name} {x.last_name}","email":x.email,"phone":x.phone,
+        "department":x.department,"job_title":x.job_title,
+        "employment_type":x.employment_type,"status":x.status,
+        "start_date":x.start_date.isoformat(),"branch_id":x.branch_id} for x in rows]
+
+
+@router.post("/hr/leave-requests",status_code=201)
+def create_hr_leave_request(payload:HRLeaveRequestIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    employee=db.query(HREmployee).filter_by(
+        id=payload.employee_id,organization_id=membership.organization_id,status="active"
+    ).first()
+    if not employee or not can_access_branch(membership,employee.branch_id):
+        raise HTTPException(404,"Active employee not found")
+    if employee.user_id==user.id:
+        require_permission(membership,"create")
+    else:
+        require_permission(membership,"manage")
+    days=business_days(payload.start_date,payload.end_date)
+    if days<=0:
+        raise HTTPException(422,"Leave period must include at least one working day")
+    overlap=db.query(HRLeaveRequest).filter(
+        HRLeaveRequest.organization_id==membership.organization_id,
+        HRLeaveRequest.employee_id==employee.id,
+        HRLeaveRequest.status.in_(["pending","approved"]),
+        HRLeaveRequest.start_date<=payload.end_date,
+        HRLeaveRequest.end_date>=payload.start_date,
+    ).first()
+    if overlap:
+        raise HTTPException(409,"Leave dates overlap an existing pending or approved request")
+    row=HRLeaveRequest(organization_id=membership.organization_id,
+        employee_id=employee.id,branch_id=employee.branch_id,leave_type=payload.leave_type,
+        start_date=payload.start_date,end_date=payload.end_date,
+        working_days=Decimal(days),reason=payload.reason.strip(),status="pending",
+        requested_by=user.id)
+    db.add(row);db.commit();db.refresh(row)
+    audit(db,user.id,membership.organization_id,"hr.leave.requested",
+          "hr_leave_request",row.id,f"employee:{employee.id};days:{days}")
+    return {"id":row.id,"employee_id":employee.id,"start_date":row.start_date.isoformat(),
+        "end_date":row.end_date.isoformat(),"working_days":str(row.working_days),"status":row.status}
+
+
+@router.get("/hr/my-leave-requests")
+def list_my_hr_leave_requests(membership=Depends(active_membership),
+                              user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    employee=db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,status="active"
+    ).first()
+    if not employee:return []
+    rows=db.query(HRLeaveRequest).filter_by(
+        organization_id=membership.organization_id,employee_id=employee.id
+    ).order_by(HRLeaveRequest.id.desc()).limit(200).all()
+    return [{"id":x.id,"leave_type":x.leave_type,"start_date":x.start_date.isoformat(),
+        "end_date":x.end_date.isoformat(),"working_days":str(x.working_days),
+        "reason":x.reason,"status":x.status,"decision_note":x.decision_note} for x in rows]
+
+
+@router.get("/hr/leave-requests")
+def list_hr_leave_requests(membership=Depends(active_membership),db:Session=Depends(get_db),
+                           limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"manage")
+    q=db.query(HRLeaveRequest).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(HRLeaveRequest.branch_id.in_(allowed))
+    rows=q.order_by(HRLeaveRequest.id.desc()).limit(limit).all()
+    result=[]
+    for x in rows:
+        employee=db.query(HREmployee).filter_by(
+            id=x.employee_id,organization_id=membership.organization_id).first()
+        result.append({"id":x.id,"employee_id":x.employee_id,
+            "employee_name":f"{employee.first_name} {employee.last_name}" if employee else "Unknown",
+            "employee_number":employee.employee_number if employee else "",
+            "leave_type":x.leave_type,"start_date":x.start_date.isoformat(),
+            "end_date":x.end_date.isoformat(),"working_days":str(x.working_days),
+            "reason":x.reason,"status":x.status,"decision_note":x.decision_note})
+    return result
+
+
+@router.post("/hr/leave-requests/{request_id}/decision")
+def decide_hr_leave_request(request_id:int,payload:HRLeaveDecisionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(HRLeaveRequest).filter_by(
+        id=request_id,organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404,"Leave request not found")
+    employee=db.query(HREmployee).filter_by(
+        id=row.employee_id,organization_id=membership.organization_id).first()
+    if employee and employee.user_id==user.id:
+        raise HTTPException(403,"Employees cannot approve or reject their own leave")
+    if row.status!="pending":
+        raise HTTPException(409,"Only pending leave requests can be decided")
+    row.status=payload.decision;row.decided_by=user.id
+    row.decided_at=datetime.now(timezone.utc);row.decision_note=payload.note.strip()
+    db.commit()
+    audit(db,user.id,membership.organization_id,f"hr.leave.{payload.decision}",
+          "hr_leave_request",row.id)
+    return {"id":row.id,"status":row.status,"decided_at":row.decided_at.isoformat()}
 
 
 @router.get("/crm/forecast")
