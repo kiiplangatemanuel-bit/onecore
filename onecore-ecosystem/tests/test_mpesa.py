@@ -43,6 +43,7 @@ def test_mpesa_intent_models_and_api_routes_are_registered():
     assert "/api/v1/integrations/mpesa/callbacks/b2c/result/{token}" in paths
     assert "/api/v1/integrations/mpesa/callbacks/b2c/timeout/{token}" in paths
     assert "/api/v1/integrations/mpesa/pos/sales/{sale_id}/payments" in paths
+    assert "/api/v1/integrations/mpesa/pos/sales/{sale_id}/refunds" in paths
 
 
 def test_pos_workspace_exposes_m_pesa_collection_and_refund_controls():
@@ -54,6 +55,9 @@ def test_pos_workspace_exposes_m_pesa_collection_and_refund_controls():
     assert 'name="refund_phone"' in source
     assert "/stk-push" in source
     assert "/b2c" in source
+    assert "restore pending M-Pesa" not in source
+    assert "/refunds" in source
+    assert "Outcome is uncertain" in source
 
 
 
