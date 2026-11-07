@@ -17,3 +17,11 @@ Scaffold only. This folder reserves the domain boundary; it is not a claim of pr
 - Add unit, integration, security and end-to-end tests.
 - Add monitoring, retention, backup/restore and operational documentation.
 - Complete sandbox/UAT and release approval for external dependencies.
+
+
+## Related clinical workflow foundation
+
+The shared application now contains a first patient registration, appointment,
+check-in and signed encounter slice documented in `docs/HEALTHCARE.md`.
+This does not implement pharmacy dispensing or laboratory processing; those
+requirements remain outstanding for this module.
