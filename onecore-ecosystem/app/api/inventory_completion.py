@@ -110,6 +110,12 @@ class BatchReceiptIn(BaseModel):
     unit_cost: Decimal = Field(ge=0)
     idempotency_key: str = Field(min_length=8, max_length=100)
 
+    @model_validator(mode="after")
+    def validate_serial_quantity(self):
+        if self.serial_number and self.quantity != Decimal("1"):
+            raise ValueError("serialized inventory must have quantity exactly one")
+        return self
+
 
 class BatchIssueIn(BaseModel):
     warehouse_id: int = Field(gt=0)
