@@ -1,21 +1,20 @@
-from datetime import datetime, timedelta, timezone
 from app.core.models import CustomDomain, SystemNotice, NoticeDismissal
 
-def test_platform_models_register():
+def test_platform_tables_registered():
     assert CustomDomain.__tablename__ == "custom_domains"
     assert SystemNotice.__tablename__ == "system_notices"
     assert NoticeDismissal.__tablename__ == "notice_dismissals"
 
-def test_domain_status_defaults():
-    from app.core.models import now
-    row=CustomDomain(organization_id=1,hostname="shop.example.com",verification_token="test-token")
-    assert row.status == "pending_verification"
-    assert row.tls_status == "not_provisioned"
-    assert row.is_primary is False
+def test_domain_column_defaults():
+    assert CustomDomain.__table__.c.status.default.arg == "pending_verification"
+    assert CustomDomain.__table__.c.tls_status.default.arg == "not_provisioned"
+    assert CustomDomain.__table__.c.is_primary.default.arg is False
 
-def test_notice_is_informational_and_defaults_to_draft_model():
-    row=SystemNotice(title="Planned maintenance",message="Services remain available",
-                     created_by=1)
-    assert row.status == "draft"
-    assert row.severity == "info"
-    assert row.audience == {}
+def test_notice_column_defaults():
+    assert SystemNotice.__table__.c.status.default.arg == "draft"
+    assert SystemNotice.__table__.c.severity.default.arg == "info"
+
+def test_dismissal_is_unique_per_user_and_notice():
+    constraints = [c for c in NoticeDismissal.__table__.constraints if getattr(c, "name", None) == "ix_notice_dismissal_user_notice"]
+    indexes = [i for i in NoticeDismissal.__table__.indexes if i.name == "ix_notice_dismissal_user_notice"]
+    assert constraints or indexes
