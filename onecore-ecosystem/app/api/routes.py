@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1083,6 +1083,221 @@ def reject_procurement_requisition(requisition_id:int,payload:ProcurementRequisi
     audit(db,user.id,membership.organization_id,"procurement.requisition.rejected",
         "procurement_requisition",row.id,payload.reason.strip())
     return {"id":row.id,"status":row.status}
+
+
+
+# Approved requisitions convert to traceable purchase orders without re-keying products.
+@router.post("/procurement/requisitions/{requisition_id}/convert-to-order", status_code=201)
+def convert_requisition_to_order(requisition_id:int,payload:RequisitionConvertIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    q=db.query(ProcurementRequisition).filter_by(id=requisition_id,organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    req=q.with_for_update().first()
+    if not req:raise HTTPException(404,"Requisition not found")
+    if req.status!="approved":raise HTTPException(409,"Only approved requisitions can be converted")
+    existing=db.query(ProcurementPurchaseOrder).filter(
+        ProcurementPurchaseOrder.organization_id==membership.organization_id,
+        ProcurementPurchaseOrder.notes.like("%requisition:"+str(req.id)+":%")).first()
+    if existing:raise HTTPException(409,"This requisition has already been converted")
+    supplier=db.query(ProcurementSupplier).filter_by(id=payload.supplier_id,organization_id=membership.organization_id,is_active=True).first()
+    if not supplier:raise HTTPException(404,"Supplier not found")
+    lines=db.query(ProcurementRequisitionLine).filter_by(requisition_id=req.id,organization_id=membership.organization_id).all()
+    if not lines:raise HTTPException(409,"Requisition has no lines")
+    if set(payload.unit_costs)-{x.product_id for x in lines}:raise HTTPException(422,"Unit costs contain products outside this requisition")
+    order=ProcurementPurchaseOrder(organization_id=membership.organization_id,branch_id=req.branch_id,
+        supplier_id=supplier.id,order_number="PO-"+uuid.uuid4().hex[:14].upper(),status="draft",
+        currency=payload.currency,notes=(payload.notes+" [requisition:"+str(req.id)+":]").strip(),created_by=user.id)
+    db.add(order);db.flush()
+    for line in lines:
+        db.add(ProcurementPurchaseOrderLine(organization_id=membership.organization_id,purchase_order_id=order.id,
+            product_id=line.product_id,quantity_ordered=line.quantity_requested,quantity_received=Decimal("0"),
+            unit_cost=payload.unit_costs.get(line.product_id,Decimal("0"))))
+    audit(db,user.id,membership.organization_id,"procurement.requisition.converted","procurement_requisition",req.id,order.order_number)
+    db.commit()
+    return {"id":order.id,"order_number":order.order_number,"status":order.status,"requisition_id":req.id}
+
+
+@router.put("/procurement/approval-rules")
+def replace_procurement_approval_rules(payload:list[ProcurementApprovalRuleIn],
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if len(payload)>5:raise HTTPException(422,"At most five approval levels are supported")
+    levels=[x.approval_level for x in payload]
+    if len(levels)!=len(set(levels)):raise HTTPException(422,"Approval levels must be unique")
+    ordered=sorted(payload,key=lambda x:x.approval_level)
+    for idx,rule in enumerate(ordered):
+        if idx and rule.minimum_amount < (ordered[idx-1].maximum_amount or ordered[idx-1].minimum_amount):
+            raise HTTPException(422,"Approval amount ranges must not overlap")
+    db.query(ProcurementApprovalRule).filter_by(organization_id=membership.organization_id).delete()
+    for rule in ordered:db.add(ProcurementApprovalRule(organization_id=membership.organization_id,**rule.model_dump(),created_by=user.id))
+    audit(db,user.id,membership.organization_id,"procurement.approval_rules.updated","procurement_approval_rule",membership.organization_id)
+    db.commit()
+    return {"rules":[x.model_dump() for x in ordered]}
+
+
+@router.get("/procurement/approval-rules")
+def list_procurement_approval_rules(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(ProcurementApprovalRule).filter_by(organization_id=membership.organization_id,is_active=True).order_by(ProcurementApprovalRule.approval_level).all()
+    return [{"id":x.id,"minimum_amount":str(x.minimum_amount),"maximum_amount":str(x.maximum_amount) if x.maximum_amount is not None else None,"approval_level":x.approval_level,"approver_role":x.approver_role} for x in rows]
+
+
+@router.post("/procurement/rfqs",status_code=201)
+def create_procurement_rfq(payload:ProcurementRFQIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    _procurement_branch_check(db,membership,payload.branch_id)
+    if payload.closing_date<=datetime.now(timezone.utc):raise HTTPException(422,"RFQ closing date must be in the future")
+    suppliers=db.query(ProcurementSupplier).filter(ProcurementSupplier.organization_id==membership.organization_id,
+        ProcurementSupplier.is_active==True,ProcurementSupplier.id.in_(payload.supplier_ids)).all()
+    if {x.id for x in suppliers}!=set(payload.supplier_ids):raise HTTPException(404,"One or more suppliers not found")
+    pids={x.product_id for x in payload.lines}
+    products=db.query(InventoryProduct).filter(InventoryProduct.organization_id==membership.organization_id,
+        InventoryProduct.is_active==True,InventoryProduct.id.in_(pids)).all()
+    if {x.id for x in products}!=pids:raise HTTPException(404,"One or more products not found")
+    row=ProcurementRFQ(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        rfq_number="RFQ-"+uuid.uuid4().hex[:14].upper(),status="open",closing_date=payload.closing_date,
+        notes=payload.notes,created_by=user.id)
+    db.add(row);db.flush()
+    for x in payload.lines:db.add(ProcurementRFQLine(organization_id=membership.organization_id,rfq_id=row.id,product_id=x.product_id,quantity=x.quantity))
+    for sid in payload.supplier_ids:db.add(ProcurementRFQInvitation(organization_id=membership.organization_id,rfq_id=row.id,supplier_id=sid))
+    audit(db,user.id,membership.organization_id,"procurement.rfq.created","procurement_rfq",row.id,row.rfq_number)
+    db.commit()
+    return {"id":row.id,"rfq_number":row.rfq_number,"status":row.status,"invited_suppliers":len(suppliers)}
+
+
+@router.post("/procurement/rfqs/{rfq_id}/quotes",status_code=201)
+def submit_procurement_rfq_quote(rfq_id:int,payload:ProcurementRFQQuoteIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    rfq=db.query(ProcurementRFQ).filter_by(id=rfq_id,organization_id=membership.organization_id).first()
+    if not rfq:raise HTTPException(404,"RFQ not found")
+    if rfq.status!="open" or rfq.closing_date.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc):raise HTTPException(409,"RFQ is closed")
+    invite=db.query(ProcurementRFQInvitation).filter_by(rfq_id=rfq.id,supplier_id=payload.supplier_id,organization_id=membership.organization_id).first()
+    if not invite:raise HTTPException(403,"Supplier was not invited to this RFQ")
+    if db.query(ProcurementRFQQuote).filter_by(rfq_id=rfq.id,supplier_id=payload.supplier_id).first():raise HTTPException(409,"Supplier quote already submitted")
+    rfq_lines=db.query(ProcurementRFQLine).filter_by(rfq_id=rfq.id,organization_id=membership.organization_id).all()
+    if {x.rfq_line_id for x in payload.lines}!={x.id for x in rfq_lines}:raise HTTPException(422,"Quote must price every RFQ line exactly once")
+    quote=ProcurementRFQQuote(organization_id=membership.organization_id,rfq_id=rfq.id,supplier_id=payload.supplier_id,
+        currency=payload.currency,delivery_days=payload.delivery_days,status="submitted",submitted_by=user.id)
+    db.add(quote);db.flush()
+    for x in payload.lines:db.add(ProcurementRFQQuoteLine(organization_id=membership.organization_id,quote_id=quote.id,rfq_line_id=x.rfq_line_id,unit_price=x.unit_price,tax_rate=x.tax_rate))
+    invite.status="quoted"
+    audit(db,user.id,membership.organization_id,"procurement.rfq.quote_submitted","procurement_rfq_quote",quote.id)
+    db.commit()
+    return {"id":quote.id,"status":quote.status}
+
+
+@router.get("/procurement/rfqs/{rfq_id}/comparison")
+def compare_procurement_rfq_quotes(rfq_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rfq=db.query(ProcurementRFQ).filter_by(id=rfq_id,organization_id=membership.organization_id).first()
+    if not rfq:raise HTTPException(404,"RFQ not found")
+    quotes=db.query(ProcurementRFQQuote).filter_by(rfq_id=rfq.id,organization_id=membership.organization_id).all()
+    result=[]
+    for q in quotes:
+        supplier=db.query(ProcurementSupplier).filter_by(id=q.supplier_id,organization_id=membership.organization_id).first()
+        lines=db.query(ProcurementRFQQuoteLine,ProcurementRFQLine).join(ProcurementRFQLine,ProcurementRFQQuoteLine.rfq_line_id==ProcurementRFQLine.id).filter(ProcurementRFQQuoteLine.quote_id==q.id).all()
+        total=sum((line.quantity*quoted.unit_price*(Decimal("1")+quoted.tax_rate/Decimal("100")) for quoted,line in lines),Decimal("0"))
+        result.append({"quote_id":q.id,"supplier_id":q.supplier_id,"supplier":supplier.name if supplier else "",
+            "currency":q.currency,"delivery_days":q.delivery_days,"total":str(total),
+            "lines":[{"product_id":line.product_id,"quantity":str(line.quantity),"unit_price":str(quoted.unit_price),"tax_rate":str(quoted.tax_rate)} for quoted,line in lines]})
+    return sorted(result,key=lambda x:(x["currency"],Decimal(x["total"]),x["delivery_days"]))
+
+
+@router.post("/procurement/supplier-invoices",status_code=201)
+def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    supplier=db.query(ProcurementSupplier).filter_by(id=payload.supplier_id,organization_id=membership.organization_id,is_active=True).first()
+    order=db.query(ProcurementPurchaseOrder).filter_by(id=payload.purchase_order_id,organization_id=membership.organization_id,supplier_id=payload.supplier_id).first()
+    if not supplier or not order:raise HTTPException(404,"Supplier or purchase order not found")
+    _procurement_branch_check(db,membership,order.branch_id)
+    if order.status not in {"received","partially_received"}:raise HTTPException(409,"Only received purchase orders can be invoiced")
+    subtotal=Decimal("0")
+    for line in payload.lines:
+        po=db.query(ProcurementPurchaseOrderLine).filter_by(id=line.purchase_order_line_id,purchase_order_id=order.id,organization_id=membership.organization_id).first()
+        if not po:raise HTTPException(404,"Invoice line does not belong to this purchase order")
+        if po.unit_cost!=line.unit_cost:raise HTTPException(409,"Invoice unit cost does not match purchase order")
+        inspected=db.query(func.coalesce(func.sum(ProcurementGoodsReceiptLine.quantity_accepted),0)).join(
+            ProcurementGoodsReceipt,ProcurementGoodsReceipt.id==ProcurementGoodsReceiptLine.goods_receipt_id).filter(
+            ProcurementGoodsReceipt.purchase_order_id==order.id,ProcurementGoodsReceipt.status=="inspected",
+            ProcurementGoodsReceiptLine.purchase_order_line_id==po.id).scalar() or Decimal("0")
+        prior=db.query(func.coalesce(func.sum(ProcurementSupplierInvoiceLine.quantity),0)).join(
+            ProcurementSupplierInvoice,ProcurementSupplierInvoice.id==ProcurementSupplierInvoiceLine.invoice_id).filter(
+            ProcurementSupplierInvoice.purchase_order_id==order.id,ProcurementSupplierInvoiceLine.purchase_order_line_id==po.id,
+            ProcurementSupplierInvoice.status.in_(["pending_match","matched"])).scalar() or Decimal("0")
+        if line.quantity>inspected-prior:raise HTTPException(409,"Invoice quantity exceeds accepted, uninvoiced GRN quantity")
+        subtotal+=line.quantity*line.unit_cost
+    invoice=ProcurementSupplierInvoice(organization_id=membership.organization_id,supplier_id=supplier.id,
+        purchase_order_id=order.id,invoice_number=payload.invoice_number,invoice_date=datetime.combine(payload.invoice_date,time.min),
+        currency=payload.currency,status="matched",subtotal=subtotal,tax_total=payload.tax_total,created_by=user.id,
+        matched_by=user.id,matched_at=datetime.now(timezone.utc))
+    db.add(invoice);db.flush()
+    for x in payload.lines:db.add(ProcurementSupplierInvoiceLine(organization_id=membership.organization_id,invoice_id=invoice.id,
+        purchase_order_line_id=x.purchase_order_line_id,quantity=x.quantity,unit_cost=x.unit_cost))
+    audit(db,user.id,membership.organization_id,"procurement.invoice.three_way_matched","supplier_invoice",invoice.id,payload.invoice_number)
+    db.commit()
+    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"status":invoice.status,"subtotal":str(subtotal),"tax_total":str(invoice.tax_total),"total":str(subtotal+invoice.tax_total)}
+
+
+@router.post("/procurement/goods-receipts/{receipt_id}/returns",status_code=201)
+def return_goods_to_supplier(receipt_id:int,payload:SupplierReturnIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    receipt=db.query(ProcurementGoodsReceipt).filter_by(id=receipt_id,organization_id=membership.organization_id).with_for_update().first()
+    if not receipt:raise HTTPException(404,"Goods receipt not found")
+    if receipt.status!="inspected":raise HTTPException(409,"Only inspected goods can be returned")
+    _procurement_branch_check(db,membership,receipt.branch_id)
+    rows={x.id:x for x in db.query(ProcurementGoodsReceiptLine).filter_by(goods_receipt_id=receipt.id,organization_id=membership.organization_id).with_for_update().all()}
+    if not set(x.receipt_line_id for x in payload.lines)<=set(rows):raise HTTPException(422,"Return lines must belong to this receipt")
+    returned=[]
+    for item in payload.lines:
+        row=rows[item.receipt_line_id]
+        already=db.query(func.coalesce(func.sum(ProcurementSupplierReturnLine.quantity),0)).join(
+            ProcurementSupplierReturn,ProcurementSupplierReturn.id==ProcurementSupplierReturnLine.return_id).filter(
+            ProcurementSupplierReturnLine.receipt_line_id==row.id,ProcurementSupplierReturn.organization_id==membership.organization_id).scalar() or Decimal("0")
+        if item.quantity>row.quantity_accepted-already:raise HTTPException(409,"Return quantity exceeds accepted quantity not previously returned")
+        returned.append((row,item.quantity))
+    po=db.query(ProcurementPurchaseOrder).filter_by(id=receipt.purchase_order_id,organization_id=membership.organization_id).first()
+    ret=ProcurementSupplierReturn(organization_id=membership.organization_id,goods_receipt_id=receipt.id,
+        supplier_id=po.supplier_id,return_number="RET-"+uuid.uuid4().hex[:14].upper(),status="posted",
+        reason=payload.reason.strip(),credit_note_reference=payload.credit_note_reference.strip(),created_by=user.id)
+    db.add(ret);db.flush()
+    for row,qty in returned:
+        db.add(ProcurementSupplierReturnLine(organization_id=membership.organization_id,return_id=ret.id,receipt_line_id=row.id,quantity=qty))
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=row.product_id,
+            branch_id=receipt.branch_id,quantity_delta=-qty,movement_type="issue",reference=ret.return_number,
+            idempotency_key="supplier-return-"+str(ret.id)+"-"+str(row.id),created_by=user.id))
+    audit(db,user.id,membership.organization_id,"procurement.supplier_return.posted","supplier_return",ret.id,payload.reason)
+    db.commit()
+    return {"id":ret.id,"return_number":ret.return_number,"status":ret.status,"credit_note_reference":ret.credit_note_reference}
+
+
+@router.get("/procurement/supplier-performance")
+def procurement_supplier_performance(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    suppliers=db.query(ProcurementSupplier).filter_by(organization_id=membership.organization_id).all()
+    output=[]
+    for s in suppliers:
+        orders=db.query(ProcurementPurchaseOrder).filter_by(organization_id=membership.organization_id,supplier_id=s.id).all()
+        receipts=db.query(ProcurementGoodsReceipt).filter_by(organization_id=membership.organization_id).join(
+            ProcurementPurchaseOrder,ProcurementPurchaseOrder.id==ProcurementGoodsReceipt.purchase_order_id).filter(
+            ProcurementPurchaseOrder.supplier_id==s.id).all()
+        accepted=sum((x.quantity_accepted for x in db.query(ProcurementGoodsReceiptLine).join(
+            ProcurementGoodsReceipt,ProcurementGoodsReceipt.id==ProcurementGoodsReceiptLine.goods_receipt_id).filter(
+            ProcurementGoodsReceipt.organization_id==membership.organization_id,ProcurementGoodsReceipt.status=="inspected",
+            ProcurementGoodsReceipt.purchase_order_id.in_([o.id for o in orders] or [-1])).all()),Decimal("0"))
+        delivered=sum((x.quantity_received for x in db.query(ProcurementGoodsReceiptLine).join(
+            ProcurementGoodsReceipt,ProcurementGoodsReceipt.id==ProcurementGoodsReceiptLine.goods_receipt_id).filter(
+            ProcurementGoodsReceipt.organization_id==membership.organization_id,ProcurementGoodsReceipt.purchase_order_id.in_([o.id for o in orders] or [-1])).all()),Decimal("0"))
+        output.append({"supplier_id":s.id,"supplier":s.name,"purchase_orders":len(orders),"goods_receipts":len(receipts),
+            "delivered_quantity":str(delivered),"accepted_quantity":str(accepted),
+            "acceptance_rate_percent":str((accepted/delivered*100).quantize(Decimal("0.01")) if delivered else Decimal("0"))})
+    return output
+
 
 # POS shift accountability and idempotent online/offline transaction synchronization.
 @router.get("/pos/catalog")
