@@ -184,16 +184,26 @@ def advanced_forecast(period_type:str=Query("month",pattern="^(month|quarter|yea
     if rep_id is None:grouped.setdefault((-2,base_currency),[])
     else:grouped.setdefault((rep_id,base_currency),[])
     output=[]
+    actual_start,actual_end=_org_period_bounds(db,m.organization_id,first,last)
     for (owner,currency),items in sorted(grouped.items(),key=lambda pair:(pair[0][1],pair[0][0])):
         scenarios=calculate_scenarios(items,probs,mults)
         target=targets.get((owner,currency),Decimal("0"))
         expected=scenarios["expected"]
+        actual_q=db.query(func.coalesce(func.sum(func.coalesce(CRMLead.actual_value,CRMLead.estimated_value)),0)).filter(
+            CRMLead.organization_id==m.organization_id,CRMLead.stage=="won",CRMLead.currency==currency,
+            CRMLead.actual_closed_at>=actual_start,CRMLead.actual_closed_at<actual_end)
+        actual_q=_scope(actual_q,m,CRMLead)
+        if owner>0:actual_q=actual_q.filter(CRMLead.assigned_to==owner)
+        elif owner==-1:actual_q=actual_q.filter(CRMLead.assigned_to.is_(None))
+        actual=Decimal(str(actual_q.scalar() or 0))
         output.append({"representative_id":owner if owner>0 else None,
             "group":"team" if owner==-2 else ("unassigned" if owner==-1 else "representative"),
             "currency":currency,"opportunity_count":len(items),
             "pipeline_amount":str(sum((Decimal(str(x.estimated_value)) for x in items),Decimal("0"))),
             "best_case":str(scenarios["best_case"]),"expected":str(expected),"worst_case":str(scenarios["worst_case"]),
-            "target_amount":str(target),"attainment_percent":str((expected/target*100).quantize(Decimal("0.01")) if target else Decimal("0"))})
+            "actual_won_amount":str(actual),"target_amount":str(target),
+            "forecast_attainment_percent":str((expected/target*100).quantize(Decimal("0.01")) if target else Decimal("0")),
+            "actual_attainment_percent":str((actual/target*100).quantize(Decimal("0.01")) if target else Decimal("0"))})
     undated=db.query(func.count(CRMLead.id)).filter(CRMLead.organization_id==m.organization_id,
         CRMLead.expected_close_date.is_(None),CRMLead.stage.notin_(["won","lost"]))
     undated=_scope(undated,m,CRMLead)
