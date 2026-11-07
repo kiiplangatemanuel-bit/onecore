@@ -104,3 +104,11 @@ Partial and full returns now use the original tax-inclusive discounted line valu
 - Discounts are controlled by the existing `manage` permission, not a configurable threshold/approval matrix. Per-cashier discount limits and manager override PINs remain future work.
 - POS refunds remain accounting records only; no M-Pesa/card/bank/cash payout is executed.
 - The tax/discount calculation is tax-exclusive and rounds monetary line amounts to two decimal places. Confirm applicable product tax treatment with the organization's tax adviser before production use.
+
+
+### Product tax administration
+
+- Inventory product creation accepts a configured `tax_rate` percentage.
+- `PATCH /api/v1/inventory/products/{product_id}/tax-rate` updates a product's rate and writes an audit event; manage permission is required.
+- The Inventory workspace provides the manager-only tax-rate update form.
+- New POS transactions snapshot the rate. Existing sale lines and receipts are immutable when the product configuration changes.
