@@ -1086,14 +1086,21 @@ def record_laboratory_sample_custody(sample_id:int,payload:dict,m=Depends(active
     if not _roles(db,m,recipient,sample.branch_id).intersection(LAB_ROLES):
         raise HTTPException(403,"Custody recipient must have laboratory access at this branch")
     location=_required_text(payload,"location",160)
-    data.setdefault("chain",[]).append({"action":action,"actor_id":u.id,
+    event_key=_required_text(payload,"idempotency_key",100)
+    chain=data.setdefault("chain",[])
+    prior=next((x for x in chain if x.get("idempotency_key")==event_key),None)
+    if prior:
+        if prior.get("action")!=action or prior.get("recipient_user_id")!=recipient_id:
+            raise HTTPException(409,"Sample custody idempotency key conflicts with an earlier event")
+        return {"sample_id":sample.id,"status":"already_recorded","custody_events":len(chain)}
+    chain.append({"action":action,"actor_id":u.id,
         "recipient_user_id":recipient_id,"location":location,"at":NOW().isoformat(),
-        "seal_number":str(payload.get("seal_number",""))[:100]})
+        "seal_number":str(payload.get("seal_number",""))[:100],"idempotency_key":event_key})
     data["status"]="in_transit" if action=="handoff" else "received"
     _update(sample,data,u,status=data["status"])
     patient=_patient(db,sample.patient_id,m)
     _patient_event(db,m,u,patient,"lab.sample.custody."+action,
-        {"sample_id":sample.id,"recipient_user_id":recipient_id,"location":location},sample.id)
+        {"sample_id":sample.id,"recipient_user_id":recipient_id,"location":location},sample.id,event_key)
     db.commit()
     return {"sample_id":sample.id,"status":sample.status,"custody_events":len(data["chain"])}
 
@@ -1230,10 +1237,13 @@ def record_laboratory_qc(instrument_id:int,payload:dict,m=Depends(active_members
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     instrument=_get(db,m,instrument_id,"lab_instrument")
     _need(db,m,u,"lab.manage",instrument.branch_id)
+    if instrument.status!="active":raise HTTPException(409,"Inactive instrument cannot receive QC")
     passed=bool(payload.get("passed"))
+    valid_until=_date(payload.get("valid_until"),"valid_until")
+    if valid_until<date.today():raise HTTPException(422,"QC validity date cannot be in the past")
     data={"instrument_id":instrument.id,"control_lot":_required_text(payload,"control_lot",80),
         "result":_required_text(payload,"result",200),"expected_range":_required_text(payload,"expected_range",120),
-        "passed":passed,"recorded_by":u.id,"recorded_at":NOW().isoformat()}
+        "valid_until":valid_until.isoformat(),"passed":passed,"recorded_by":u.id,"recorded_at":NOW().isoformat()}
     row=_create(db,m,u,"lab_qc",data,instrument.branch_id,parent_id=instrument.id,
         status="passed" if passed else "failed")
     _audit_action(db,m,u,"lab.quality_control.recorded","lab_qc",row.id,row.status)
@@ -1246,9 +1256,11 @@ def record_laboratory_calibration(instrument_id:int,payload:dict,m=Depends(activ
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     instrument=_get(db,m,instrument_id,"lab_instrument")
     _need(db,m,u,"lab.manage",instrument.branch_id)
+    if instrument.status!="active":raise HTTPException(409,"Inactive instrument cannot be calibrated")
     outcome=str(payload.get("outcome",""))
     if outcome not in {"passed","failed"}:raise HTTPException(422,"Calibration outcome must be passed or failed")
     next_due=_date(payload.get("next_due"),"next_due")
+    if next_due<date.today():raise HTTPException(422,"Calibration due date cannot be in the past")
     data={"instrument_id":instrument.id,"reference":_required_text(payload,"calibration_reference",120),
         "outcome":outcome,"next_due":next_due.isoformat(),"recorded_by":u.id,
         "recorded_at":NOW().isoformat()}
@@ -1280,21 +1292,30 @@ def receive_analyzer_result(instrument_id:int,payload:dict,
 
     latest_qc=_resource_list(db,m,"lab_qc",branch_id=instrument.branch_id,limit=1000)
     latest_qc=next((x for x in latest_qc if x.parent_id==instrument.id),None)
-    if not latest_qc or latest_qc.status!="passed":
+    if (not latest_qc or latest_qc.status!="passed"
+        or _date(_payload(latest_qc).get("valid_until"),"QC valid_until")<date.today()):
         raise HTTPException(409,"A current passing QC record is required")
     latest_cal=_resource_list(db,m,"lab_calibration",branch_id=instrument.branch_id,limit=1000)
     latest_cal=next((x for x in latest_cal if x.parent_id==instrument.id),None)
     if not latest_cal or latest_cal.status!="passed" or _date(_payload(latest_cal)["next_due"],"next_due")<date.today():
         raise HTTPException(409,"A current passing calibration is required")
+    result_id=_required_text(payload,"result_id",120)
     accession=_required_text(payload,"accession_number",80).upper()
     samples=_resource_list(db,m,"lab_sample",branch_id=instrument.branch_id,limit=1000)
     sample=next((x for x in samples if _payload(x).get("accession_number")==accession and _payload(x).get("status")=="accepted"),None)
     if not sample:raise HTTPException(404,"Accepted sample accession not found")
     order=_get(db,m,sample.parent_id,"lab_order",lock=True);od=_payload(order)
     code=_required_text(payload,"test_code",40).upper()
+    result_value=_required_text(payload,"result_value",4000)
+    prior_result=next((x for x in od["lines"] if x.get("analyzer_result_id")==result_id),None)
+    if prior_result:
+        if prior_result.get("test_code")!=code or prior_result.get("result_value")!=result_value or prior_result.get("instrument_id")!=instrument.id:
+            raise HTTPException(409,"Analyzer result ID conflicts with a previously received result")
+        return {"order_id":order.id,"status":"already_recorded","critical_alert":bool(prior_result.get("is_critical"))}
     idx=next((i for i,x in enumerate(od["lines"]) if x["test_code"]==code and x["status"]=="pending"),None)
     if idx is None:raise HTTPException(409,"No pending order line matches the analyzer test code")
-    line=od["lines"][idx];line["result_value"]=_required_text(payload,"result_value",4000)
+    line=od["lines"][idx];line["result_value"]=result_value
+    line["analyzer_result_id"]=result_id
     line["result_notes"]=str(payload.get("result_notes",""))[:4000]
     line["entered_by"]=data["registered_by"];line["instrument_id"]=instrument.id;line["status"]="entered"
     od["lines"][idx]=line;od["status"]="results_entered" if all(x["status"]=="entered" for x in od["lines"]) else "processing"
