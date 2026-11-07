@@ -7,11 +7,12 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactConsent, CRMCampaignDelivery
+from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactConsent, CRMCampaignDelivery, CRMContact
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
 from app.services.crm_delivery import build_unsubscribe_url, send_campaign_message
+from app.services.crm_audience import render_template_text
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM communications"])
 
@@ -29,8 +30,10 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
     c=campaign_or_404(db,campaign_id,membership.organization_id,membership)
-    if c.status not in {"ready","sending","partial","failed"}:
+    if c.status not in {"ready","scheduled","sending","partial","failed"}:
         raise HTTPException(409,"Prepare campaign before dispatch")
+    if c.scheduled_at and c.scheduled_at > datetime.now(timezone.utc):
+        raise HTTPException(409,"Campaign is scheduled for a future time")
     if c.purpose=="marketing":
         build_unsubscribe_url("configuration-check",settings.crm_public_base_url)
     now=datetime.now(timezone.utc)
@@ -83,7 +86,13 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
         db.add(d)
         db.commit()
         try:
-            result=send_campaign_message(c.channel,r.address_snapshot,c.name,c.message,
+            contact=db.query(CRMContact).filter_by(
+                id=r.contact_id,organization_id=r.organization_id).first()
+            if not contact:
+                raise RuntimeError("Campaign contact no longer exists")
+            subject=render_template_text(c.subject or c.name,contact)
+            message=render_template_text(c.message,contact)
+            result=send_campaign_message(c.channel,r.address_snapshot,subject,message,
                 f"onecore-crm-{c.id}-{r.id}",unsubscribe_url)
             d.status="accepted"
             d.provider_message_id=result["provider_message_id"]
@@ -107,8 +116,10 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
     )).count()
     statuses={x[0] for x in db.query(CRMCampaignRecipient.status).filter_by(
         organization_id=membership.organization_id,campaign_id=c.id).all()}
-    c.status=("sent" if remaining==0 and statuses <= {"sent","delivered","suppressed"}
-              else "partial")
+    if remaining == 0:
+        c.status = "sent" if statuses <= {"sent","delivered","suppressed"} else "failed"
+    else:
+        c.status = "partial"
     db.commit()
     return {"campaign_id":c.id,"status":c.status,"processed":processed,
         "accepted":accepted,"failed":failed,"suppressed":suppressed,"remaining":remaining}
