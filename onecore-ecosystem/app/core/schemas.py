@@ -67,3 +67,29 @@ class InventoryProductOut(BaseModel):
     description: str
     unit: str
     is_active: bool
+
+
+from datetime import date
+from decimal import Decimal
+
+
+class AccountingAccountIn(BaseModel):
+    code: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9._-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    account_type: str = Field(pattern=r"^(asset|liability|equity|revenue|expense)$")
+
+
+class AccountingJournalLineIn(BaseModel):
+    account_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, min_length=1, max_length=36)
+    description: str = Field(default="", max_length=240)
+    debit: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    credit: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+
+
+class AccountingJournalIn(BaseModel):
+    entry_date: date
+    branch_id: str | None = Field(default=None, min_length=1, max_length=36)
+    reference: str = Field(default="", max_length=120)
+    memo: str = Field(default="", max_length=500)
+    lines: list[AccountingJournalLineIn] = Field(min_length=2, max_length=200)
