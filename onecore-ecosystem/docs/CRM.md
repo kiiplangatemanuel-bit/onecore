@@ -81,3 +81,24 @@ conversion, contract, deposit or invoice automation is included. Forecast probab
 are fixed illustrative assumptions, not learned from historical conversion data.
 Campaigns, customer communication, consent management, advanced analytics, team
 forecasting, configurable pipeline probabilities and UAT remain outstanding.
+
+
+
+## Accepted quote to sales order conversion increment
+
+An accepted, unexpired CRM quote can be converted once into a confirmed sales order.
+Conversion snapshots every quote line, quantity, unit price, tax rate and calculated
+amount into order lines. The source quote is unique per sales order, so repeat requests
+return the existing order rather than creating duplicates. The generated default
+order number is `SO-{quote_number}`; callers may supply an organization-unique order
+number. All records are tenant-scoped and branch access is checked before conversion.
+
+### Additional API
+- `POST /api/v1/crm/quotes/{id}/convert-to-order`
+- `GET /api/v1/crm/orders`
+- `GET /api/v1/crm/orders/{id}`
+
+This is an internal order record only. It does not reserve or deduct inventory,
+create an invoice, collect a deposit, dispatch goods, or send a customer notification.
+Those require fulfillment, accounting and provider workflows. Migration
+`0020_crm_sales_orders` adds sales order headers and immutable line snapshots.
