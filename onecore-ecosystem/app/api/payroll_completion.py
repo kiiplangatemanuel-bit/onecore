@@ -157,8 +157,9 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     mortgage = min(money(extra.get("mortgage_interest", 0)), D(str(cfg["paye"]["mortgage_monthly_limit"])))
     prmf = min(money(extra.get("post_retirement_medical_fund", 0)), D(str(cfg["paye"]["prmf_monthly_limit"])))
     insurance_premium = money(extra.get("insurance_premium", 0))
+    resident = bool(employee.get("resident_for_tax", True))
     insurance_relief = min(money(insurance_premium * D(str(cfg["paye"]["insurance_relief_rate"]))),
-                            D(str(cfg["paye"]["insurance_relief_monthly_limit"])))
+                            D(str(cfg["paye"]["insurance_relief_monthly_limit"]))) if resident else ZERO
     deductible = money(ahl + shif + pension + mortgage + prmf + nssf)
     meal_exemption = min(money(extra.get("meal_benefit", 0)), D(str(cfg["paye"].get("meal_benefit_exemption_monthly", "5000"))))
     certificate_expiry = extra.get("disability_exemption_valid_until")
@@ -169,11 +170,11 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
             certificate_valid = date.fromisoformat(certificate_expiry) >= as_at
         except ValueError:
             certificate_valid = False
-    disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid else ZERO
+    disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid and resident else ZERO
     taxable_benefits = money(extra.get("taxable_benefits", 0))
     taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
-    personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
+    personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
     paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
     other_deductions = money(extra.get("other_deductions", 0))
     net = money(gross - nssf - shif - ahl - paye - pension - other_deductions)
