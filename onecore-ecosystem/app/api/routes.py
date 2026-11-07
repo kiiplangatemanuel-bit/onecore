@@ -1600,6 +1600,15 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
                   user: User = Depends(current_user), db: Session = Depends(get_db), x_pos_device_token: str | None = Header(default=None)):
     require_permission(membership, "create")
     _crm_branch_check(db, membership, payload.branch_id)
+    device_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+    if device_shift and device_shift.device_id:
+        from app.core.pos_completion_models import POSOfflineConflict
+        prior_conflict=db.query(POSOfflineConflict).filter_by(organization_id=membership.organization_id,
+            device_id=device_shift.device_id,client_transaction_id=payload.client_transaction_id).first()
+        if prior_conflict and prior_conflict.status=="pending":
+            raise HTTPException(409,"Offline transaction is awaiting supervisor conflict resolution")
+        if prior_conflict and prior_conflict.status=="resolved":
+            raise HTTPException(409,"Offline conflict was resolved; discard local queue item and do not replay")
     request_hash = canonical_request_hash(payload)
     existing = db.query(POSSale).filter_by(
         organization_id=membership.organization_id,
