@@ -7,17 +7,18 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
-    for col in [
-        sa.Column("expected_cash",sa.Numeric(18,2),nullable=True),
-        sa.Column("counted_cash",sa.Numeric(18,2),nullable=True),
-        sa.Column("cash_variance",sa.Numeric(18,2),nullable=True),
-        sa.Column("reconciliation_status",sa.String(20),nullable=False,server_default="open"),
-        sa.Column("counted_denominations",sa.JSON(),nullable=False,server_default=sa.text("'{}'")),
-        sa.Column("close_note",sa.String(500),nullable=False,server_default=""),
-        sa.Column("reviewed_by",sa.Integer(),sa.ForeignKey("users.id"),nullable=True),
-        sa.Column("reviewed_at",sa.DateTime(timezone=True),nullable=True),
-        sa.Column("review_note",sa.String(500),nullable=False,server_default="")]:
-        op.add_column("pos_shifts",col)
+    with op.batch_alter_table("pos_shifts") as batch:
+        for col in [
+            sa.Column("expected_cash",sa.Numeric(18,2),nullable=True),
+            sa.Column("counted_cash",sa.Numeric(18,2),nullable=True),
+            sa.Column("cash_variance",sa.Numeric(18,2),nullable=True),
+            sa.Column("reconciliation_status",sa.String(20),nullable=False,server_default="open"),
+            sa.Column("counted_denominations",sa.JSON(),nullable=False,server_default=sa.text("'{}'")),
+            sa.Column("close_note",sa.String(500),nullable=False,server_default=""),
+            sa.Column("reviewed_by",sa.Integer(),sa.ForeignKey("users.id"),nullable=True),
+            sa.Column("reviewed_at",sa.DateTime(timezone=True),nullable=True),
+            sa.Column("review_note",sa.String(500),nullable=False,server_default="")]:
+            batch.add_column(col)
     op.create_table("pos_cash_movements",
         sa.Column("id",sa.Integer(),primary_key=True),
         sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),
