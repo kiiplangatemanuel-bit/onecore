@@ -740,3 +740,146 @@ class ProcurementGoodsReceiptLine(Base):
     __table_args__ = (
         Index("ix_procurement_grn_line_org_key", "organization_id", "idempotency_key", unique=True),
     )
+
+
+class ProcurementApprovalRule(Base):
+    __tablename__ = "procurement_approval_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    minimum_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    maximum_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    approval_level: Mapped[int] = mapped_column()
+    approver_role: Mapped[str] = mapped_column(String(40), default="org_admin")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_approval_rule_org_level", "organization_id", "approval_level", unique=True),)
+
+
+class ProcurementApprovalAction(Base):
+    __tablename__ = "procurement_approval_actions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(24))
+    entity_id: Mapped[int] = mapped_column()
+    approval_level: Mapped[int] = mapped_column()
+    approver_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_approval_action_org_entity_level", "organization_id", "entity_type", "entity_id", "approval_level", unique=True),)
+
+
+class ProcurementRFQ(Base):
+    __tablename__ = "procurement_rfqs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    rfq_number: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    closing_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str] = mapped_column(String(1000), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_rfq_org_number", "organization_id", "rfq_number", unique=True),)
+
+
+class ProcurementRFQLine(Base):
+    __tablename__ = "procurement_rfq_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rfq_id: Mapped[int] = mapped_column(ForeignKey("procurement_rfqs.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementRFQInvitation(Base):
+    __tablename__ = "procurement_rfq_invitations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rfq_id: Mapped[int] = mapped_column(ForeignKey("procurement_rfqs.id"), index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("procurement_suppliers.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="invited")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_rfq_invitation_unique", "rfq_id", "supplier_id", unique=True),)
+
+
+class ProcurementRFQQuote(Base):
+    __tablename__ = "procurement_rfq_quotes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rfq_id: Mapped[int] = mapped_column(ForeignKey("procurement_rfqs.id"), index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("procurement_suppliers.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    delivery_days: Mapped[int] = mapped_column()
+    status: Mapped[str] = mapped_column(String(16), default="submitted")
+    submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_rfq_quote_supplier", "organization_id", "rfq_id", "supplier_id", unique=True),)
+
+
+class ProcurementRFQQuoteLine(Base):
+    __tablename__ = "procurement_rfq_quote_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("procurement_rfq_quotes.id"), index=True)
+    rfq_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_rfq_lines.id"), index=True)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementSupplierInvoice(Base):
+    __tablename__ = "procurement_supplier_invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("procurement_suppliers.id"), index=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_orders.id"), index=True)
+    invoice_number: Mapped[str] = mapped_column(String(80))
+    invoice_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(20), default="pending_match")
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    matched_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_invoice_org_supplier_number", "organization_id", "supplier_id", "invoice_number", unique=True),)
+
+
+class ProcurementSupplierInvoiceLine(Base):
+    __tablename__ = "procurement_supplier_invoice_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("procurement_supplier_invoices.id"), index=True)
+    purchase_order_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_order_lines.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementSupplierReturn(Base):
+    __tablename__ = "procurement_supplier_returns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    goods_receipt_id: Mapped[int] = mapped_column(ForeignKey("procurement_goods_receipts.id"), index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("procurement_suppliers.id"), index=True)
+    return_number: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="posted")
+    reason: Mapped[str] = mapped_column(String(500))
+    credit_note_reference: Mapped[str] = mapped_column(String(100), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_return_org_number", "organization_id", "return_number", unique=True),)
+
+
+class ProcurementSupplierReturnLine(Base):
+    __tablename__ = "procurement_supplier_return_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    return_id: Mapped[int] = mapped_column(ForeignKey("procurement_supplier_returns.id"), index=True)
+    receipt_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_goods_receipt_lines.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
