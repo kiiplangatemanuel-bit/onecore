@@ -294,6 +294,8 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         return {"intent_id": existing.id, "status": existing.status,
                 "conversation_id": existing.conversation_id,
                 "message": "A disbursement request already exists; do not submit a duplicate refund"}
+    if existing and existing.status in {"timeout", "exception"}:
+        raise HTTPException(409, "B2C outcome is uncertain; reconcile with Safaricom before attempting another payout")
     amount = Decimal(str(refund.amount))
     if amount != amount.quantize(Decimal("1")):
         raise HTTPException(422, "Daraja B2C accepts whole KES amounts; this refund requires manual handling")
