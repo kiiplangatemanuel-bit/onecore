@@ -13,6 +13,7 @@ from app.core.security import current_user, verify_password, create_access_token
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.integrations.registry import public_provider_status
+from app.services.inventory import validate_stock_delta, resulting_balance
 
 router = APIRouter(prefix="/api/v1")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
@@ -254,12 +255,7 @@ def inventory_stock(product_id: int | None = Query(default=None, gt=0),
 def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(active_membership),
                               user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "create")
-    if payload.movement_type == "receipt" and payload.quantity_delta <= 0:
-        raise HTTPException(422, "Receipt quantity must be positive")
-    if payload.movement_type == "issue" and payload.quantity_delta >= 0:
-        raise HTTPException(422, "Issue quantity must be negative")
-    if payload.movement_type == "adjustment" and payload.quantity_delta == 0:
-        raise HTTPException(422, "Adjustment quantity cannot be zero")
+    validate_stock_delta(payload.movement_type, payload.quantity_delta)
     if payload.branch_id:
         branch = db.query(Branch).filter_by(id=payload.branch_id,
             organization_id=membership.organization_id, is_active=True).first()
@@ -291,9 +287,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
         InventoryStockMovement.product_id == product.id,
         InventoryStockMovement.branch_id == payload.branch_id
     ).scalar()
-    new_balance = Decimal(str(current or 0)) + payload.quantity_delta
-    if new_balance < 0:
-        raise HTTPException(409, "Insufficient stock for this issue or adjustment")
+    new_balance = resulting_balance(Decimal(str(current or 0)), payload.quantity_delta)
     row = InventoryStockMovement(
         organization_id=membership.organization_id, product_id=product.id,
         branch_id=payload.branch_id, quantity_delta=payload.quantity_delta,
