@@ -30,12 +30,12 @@ def upgrade():
         sa.Column("mpesa_receipt_number", sa.String(40), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.UniqueConstraint("payment_id", name="uq_mpesa_payment_source"),
         sa.UniqueConstraint("checkout_request_id", name="uq_mpesa_payment_checkout"),
         sa.UniqueConstraint("callback_token_hash", name="uq_mpesa_payment_callback_token"),
     )
     op.create_index("ix_mpesa_payment_intents_organization_id", "mpesa_payment_intents", ["organization_id"])
     op.create_index("ix_mpesa_payment_intents_branch_id", "mpesa_payment_intents", ["branch_id"])
-    op.create_index("ix_mpesa_payment_intents_payment_id", "mpesa_payment_intents", ["payment_id"])
 
     op.create_table(
         "mpesa_refund_intents",
@@ -65,7 +65,6 @@ def downgrade():
     op.drop_index("ix_mpesa_refund_intents_branch_id", table_name="mpesa_refund_intents")
     op.drop_index("ix_mpesa_refund_intents_organization_id", table_name="mpesa_refund_intents")
     op.drop_table("mpesa_refund_intents")
-    op.drop_index("ix_mpesa_payment_intents_payment_id", table_name="mpesa_payment_intents")
     op.drop_index("ix_mpesa_payment_intents_branch_id", table_name="mpesa_payment_intents")
     op.drop_index("ix_mpesa_payment_intents_organization_id", table_name="mpesa_payment_intents")
     op.drop_table("mpesa_payment_intents")
