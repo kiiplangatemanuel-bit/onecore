@@ -293,6 +293,7 @@ def reconcile_collection(payload: ReconcileIn, membership=Depends(active_members
         row.data = {**(row.data or {}), "reconciliation_exception": "reference_or_amount_mismatch"}
         db.commit()
         raise HTTPException(409, "Bank/provider reference and amount must match exactly")
+    allocation_snapshot = []
     if row.account_id:
         account = _account_or_404(db, membership, row.account_id)
         tx_type = {"savings": "deposit", "shares": "share_contribution",
@@ -321,6 +322,7 @@ def reconcile_collection(payload: ReconcileIn, membership=Depends(active_members
         db.add(SaccoLoanRepayment(organization_id=membership.organization_id, loan_id=loan.id,
             amount=money(row.amount), principal_component=principal, interest_component=interest,
             reference=row.reference, idempotency_key=key, request_hash=digest, created_by=user.id))
+        allocation_snapshot = [{"schedule_id": schedule.id, "interest": str(ip), "principal": str(pp)} for schedule, ip, pp in allocations]
         for schedule, ip, pp in allocations:
             schedule.interest_paid = money(schedule.interest_paid + ip)
             schedule.principal_paid = money(schedule.principal_paid + pp)
@@ -333,7 +335,8 @@ def reconcile_collection(payload: ReconcileIn, membership=Depends(active_members
     row.status = "settled"
     row.data = {**(row.data or {}), "statement_reference": payload.statement_reference,
                 "statement_amount": str(money(payload.statement_amount)),
-                "settled_at": datetime.now(timezone.utc).isoformat(), "settled_by": user.id}
+                "settled_at": datetime.now(timezone.utc).isoformat(), "settled_by": user.id,
+                "repayment_allocations": allocation_snapshot}
     _audit(db, membership, user, "sacco.collection.settled", "sacco_collection", row.id)
     db.commit()
     return {"id": row.id, "status": row.status, "verified_settlement": True}
@@ -692,9 +695,42 @@ def reverse_settled_collection(collection_id: int, payload: DecisionIn, membersh
         raise HTTPException(403, "Collection importer cannot authorize its reversal")
     if row.data.get("reversal_id"):
         return {"id": row.id, "status": "reversed", "reversal_id": row.data["reversal_id"]}
+    if row.account_id:
+        account = _account_or_404(db, membership, row.account_id)
+        original = db.query(SaccoTransaction).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=f"collection-settlement:{row.id}").first()
+        if not original:
+            raise HTTPException(409, "Settled collection ledger entry is missing")
+        reversal_key = f"collection-reversal:{row.id}"
+        digest = hashlib.sha256(f"{original.id}:{row.amount}:reversal".encode()).hexdigest()
+        db.add(SaccoTransaction(organization_id=membership.organization_id, account_id=account.id,
+            transaction_type="reversal", amount=money(row.amount), reference=f"REV-{row.reference}",
+            idempotency_key=reversal_key, request_hash=digest, created_by=user.id))
+    else:
+        loan = _loan_or_404(db, membership, row.loan_id, lock=True)
+        repayment = db.query(SaccoLoanRepayment).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=f"collection-settlement:{row.id}").first()
+        if not repayment:
+            raise HTTPException(409, "Settled loan repayment ledger entry is missing")
+        for allocation in row.data.get("repayment_allocations", []):
+            schedule = db.query(SaccoLoanSchedule).filter_by(
+                id=allocation["schedule_id"], organization_id=membership.organization_id,
+                loan_id=loan.id).with_for_update().first()
+            if not schedule:
+                raise HTTPException(409, "Original repayment schedule allocation is missing")
+            schedule.interest_paid = money(schedule.interest_paid-Decimal(allocation["interest"]))
+            schedule.principal_paid = money(schedule.principal_paid-Decimal(allocation["principal"]))
+            if schedule.interest_paid < schedule.interest_due or schedule.principal_paid < schedule.principal_due:
+                schedule.status = "pending"
+        loan.outstanding_principal = money(loan.outstanding_principal+repayment.principal_component)
+        loan.outstanding_interest = money(loan.outstanding_interest+repayment.interest_component)
+        loan.status = "active"
     reversal, _ = _record(db, membership, user, "collection_reversal",
         f"collection-reversal:{row.id}", {"original_collection_id": row.id,
-        "reason": payload.note.strip(), "authorized_by": user.id},
+        "reason": payload.note.strip(), "authorized_by": user.id,
+        "ledger_reversal_recorded": True},
         member_id=row.member_id, account_id=row.account_id, loan_id=row.loan_id,
         amount=row.amount, currency=row.currency, reference=row.reference, status="approved",
         branch_id=row.branch_id)
@@ -703,7 +739,7 @@ def reverse_settled_collection(collection_id: int, payload: DecisionIn, membersh
     _audit(db, membership, user, "sacco.collection.reversed", "sacco_collection", row.id)
     db.commit()
     return {"id": row.id, "status": row.status, "reversal_id": reversal.id,
-            "ledger_reversal_required": True}
+            "ledger_reversal_recorded": True}
 
 
 @router.get("/members/{member_id}/statement.csv")
