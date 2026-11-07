@@ -121,6 +121,11 @@ class B2CRefundIn(BaseModel):
     phone_number: str = Field(min_length=9, max_length=20)
 
 
+def _b2c_retry_is_blocked(status: str) -> bool:
+    """Never re-submit a payout whose provider outcome may be unknown."""
+    return status in {"initiating", "pending", "success", "unknown", "timeout", "exception"}
+
+
 def _audit(db, org_id, actor_id, action, resource_type, resource_id, detail):
     db.add(AuditEvent(
         organization_id=org_id, actor_user_id=actor_id, action=action,
@@ -345,12 +350,12 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
     existing = db.query(MpesaRefundIntent).filter_by(
         organization_id=membership.organization_id, refund_id=refund.id
     ).first()
-    if existing and existing.status in {"initiating", "pending", "success"}:
+    if existing and _b2c_retry_is_blocked(existing.status):
+        if existing.status in {"unknown", "timeout", "exception"}:
+            raise HTTPException(409, "B2C outcome is uncertain; reconcile with Safaricom before attempting another payout")
         return {"intent_id": existing.id, "status": existing.status,
                 "conversation_id": existing.conversation_id,
                 "message": "A disbursement request already exists; do not submit a duplicate refund"}
-    if existing and existing.status in {"unknown", "timeout", "exception"}:
-        raise HTTPException(409, "B2C outcome is uncertain; reconcile with Safaricom before attempting another payout")
     if refund.status != "pending":
         raise HTTPException(409, "Only an unpaid pending M-Pesa refund can be submitted to Daraja")
     amount = Decimal(str(refund.amount))
