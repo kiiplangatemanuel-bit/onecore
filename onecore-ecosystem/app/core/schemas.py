@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Any
+from datetime import date
 from datetime import datetime
 
 class LoginIn(BaseModel):
@@ -825,4 +826,66 @@ class HealthcareEncounterIn(BaseModel):
 
 
 class HealthcareEncounterSignIn(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+
+class PharmacyMedicineIn(BaseModel):
+    sku: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    generic_name: str = Field(min_length=2, max_length=180)
+    brand_name: str = Field(default="", max_length=180)
+    strength: str = Field(default="", max_length=80)
+    dosage_form: str = Field(min_length=2, max_length=60)
+    route: str = Field(default="oral", min_length=2, max_length=40)
+    unit: str = Field(default="unit", min_length=1, max_length=24)
+    sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    is_controlled: bool = False
+
+
+class PharmacyBatchIn(BaseModel):
+    client_batch_id: str = Field(min_length=8, max_length=100)
+    batch_number: str = Field(min_length=2, max_length=80)
+    branch_id: str = Field(min_length=1, max_length=36)
+    expiry_date: date
+    received_quantity: Decimal = Field(gt=0, le=Decimal("999999999"), multiple_of=Decimal("0.001"))
+    unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    selling_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+
+class PharmacyBatchQuarantineIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class LaboratoryTestIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    specimen_type: str = Field(min_length=2, max_length=80)
+    unit: str = Field(default="", max_length=40)
+    reference_range: str = Field(default="", max_length=180)
+    turnaround_hours: int = Field(default=24, ge=1, le=720)
+
+
+class LaboratoryOrderIn(BaseModel):
+    client_order_id: str = Field(min_length=8, max_length=100)
+    encounter_id: int = Field(gt=0)
+    test_ids: list[int] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def unique_tests(self):
+        if len(self.test_ids) != len(set(self.test_ids)):
+            raise ValueError("A laboratory test may appear only once per order")
+        return self
+
+
+class LaboratorySampleIn(BaseModel):
+    accession_number: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    specimen_type: str = Field(min_length=2, max_length=80)
+
+
+class LaboratoryResultIn(BaseModel):
+    result_value: str = Field(min_length=1, max_length=4000)
+    result_notes: str = Field(default="", max_length=4000)
+
+
+class LaboratoryValidateIn(BaseModel):
     note: str = Field(default="", max_length=500)
