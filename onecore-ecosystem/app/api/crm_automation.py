@@ -432,6 +432,8 @@ def apply_template(campaign_id:int,template_id:int,m=Depends(active_membership),
     if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Campaign not found")
     if campaign.status!="draft":raise HTTPException(409,"Templates can only be applied to draft campaigns")
     if campaign.channel!=template.channel or campaign.purpose!=template.purpose:raise HTTPException(422,"Template channel and purpose must match")
+    if template.branch_id and template.branch_id!=campaign.branch_id:
+        raise HTTPException(422,"Template and campaign branch must match")
     campaign.message=template.body;campaign.subject=template.subject or campaign.name
     db.commit()
     return {"campaign_id":campaign.id,"template_id":template.id,"applied":True,"variables":template.variables}
