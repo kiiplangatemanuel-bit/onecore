@@ -82,6 +82,7 @@ class AccountingAccountIn(BaseModel):
     code: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9._-]+$")
     name: str = Field(min_length=2, max_length=180)
     account_type: str = Field(pattern=r"^(asset|liability|equity|revenue|expense)$")
+    cash_flow_category: str | None = Field(default=None, pattern=r"^(cash_equivalent|operating|investing|financing)$")
 
 
 class AccountingJournalLineIn(BaseModel):
@@ -307,7 +308,7 @@ class AccountingInvoicePaymentIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
-class AccountingInvoiceRefundIn(BaseModel):
+class AccountingRefundIn(BaseModel):
     payment_account_id: int = Field(gt=0)
     amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     refund_date: date
@@ -316,9 +317,10 @@ class AccountingInvoiceRefundIn(BaseModel):
 
 
 class AccountingProcurementInvoicePostIn(BaseModel):
-    control_account_id: int = Field(gt=0)
+    due_date: date
+    payable_control_account_id: int = Field(gt=0)
     expense_account_id: int = Field(gt=0)
-    tax_account_id: int | None = Field(default=None, gt=0)
+    input_tax_account_id: int | None = Field(default=None, gt=0)
 
 
 class AccountingInvoiceApprovalDecisionIn(BaseModel):
