@@ -17,6 +17,7 @@ from app.core.models import (
     AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournalLine,
     AccountingBankStatementLine, ProcurementSupplier, ProcurementPurchaseOrder,
     ProcurementPurchaseOrderLine, ProcurementApprovalRule, ProcurementApprovalAction,
+    ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, AccountingCreditNote,
     ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, Record, Membership, User,
 )
 from app.core.procurement_workflow_models import (
@@ -97,11 +98,12 @@ class SupplierStatementIn(BaseModel):
 class StatementMatchIn(BaseModel):
     invoice_id: int | None = Field(default=None, gt=0)
     payment_id: int | None = Field(default=None, gt=0)
+    credit_note_id: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def one_target(self):
-        if bool(self.invoice_id) == bool(self.payment_id):
-            raise ValueError("Choose exactly one invoice or payment")
+        if sum(bool(x) for x in (self.invoice_id, self.payment_id, self.credit_note_id)) != 1:
+            raise ValueError("Choose exactly one invoice, payment or credit note")
         return self
 
 
@@ -634,6 +636,126 @@ def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
             "remaining_levels": [x.approval_level for x in rules if x.approval_level not in approved_levels]}
 
 
+
+
+class SupplierPortalQuoteLineIn(BaseModel):
+    rfq_line_id: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0, multiple_of=CENT, le=Decimal("9999999999999999"))
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class SupplierPortalQuoteIn(BaseModel):
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    delivery_days: int = Field(ge=0, le=3650)
+    lines: list[SupplierPortalQuoteLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_lines(self):
+        ids = [x.rfq_line_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each RFQ line must be quoted exactly once")
+        return self
+
+
+@router.get("/supplier-portal/rfqs")
+def supplier_portal_rfqs(token: str = Header(default="", alias="X-Supplier-Portal-Token"),
+                          db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    invitations = db.query(ProcurementRFQInvitation).filter_by(
+        organization_id=access.organization_id, supplier_id=supplier.id
+    ).all()
+    result = []
+    for invite in invitations:
+        rfq = db.query(ProcurementRFQ).filter_by(
+            id=invite.rfq_id, organization_id=access.organization_id, status="open"
+        ).first()
+        if not rfq:
+            continue
+        lines = db.query(ProcurementRFQLine).filter_by(
+            rfq_id=rfq.id, organization_id=access.organization_id
+        ).order_by(ProcurementRFQLine.id).all()
+        result.append({"id": rfq.id, "rfq_number": rfq.rfq_number,
+                       "closing_date": rfq.closing_date.isoformat(),
+                       "status": invite.status,
+                       "lines": [{"id": x.id, "product_id": x.product_id, "quantity": str(x.quantity)} for x in lines]})
+    return result
+
+
+@router.post("/supplier-portal/rfqs/{rfq_id}/quotes", status_code=201)
+def supplier_portal_submit_quote(rfq_id: int, payload: SupplierPortalQuoteIn,
+                                 token: str = Header(default="", alias="X-Supplier-Portal-Token"),
+                                 db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    rfq = db.query(ProcurementRFQ).filter_by(
+        id=rfq_id, organization_id=access.organization_id, status="open"
+    ).with_for_update().first()
+    if not rfq or rfq.closing_date.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(404, "Open RFQ not found")
+    invitation = db.query(ProcurementRFQInvitation).filter_by(
+        organization_id=access.organization_id, rfq_id=rfq.id, supplier_id=supplier.id
+    ).first()
+    if not invitation:
+        raise HTTPException(403, "Supplier was not invited to this RFQ")
+    if db.query(ProcurementRFQQuote).filter_by(
+        organization_id=access.organization_id, rfq_id=rfq.id, supplier_id=supplier.id
+    ).first():
+        raise HTTPException(409, "Supplier has already submitted a quotation")
+    rfq_lines = db.query(ProcurementRFQLine).filter_by(
+        organization_id=access.organization_id, rfq_id=rfq.id
+    ).all()
+    if {x.rfq_line_id for x in payload.lines} != {x.id for x in rfq_lines}:
+        raise HTTPException(422, "Quotation must price every RFQ line exactly once")
+    quote = ProcurementRFQQuote(
+        organization_id=access.organization_id, rfq_id=rfq.id, supplier_id=supplier.id,
+        currency=payload.currency, delivery_days=payload.delivery_days, status="submitted",
+        submitted_by=access.created_by,
+    )
+    db.add(quote)
+    db.flush()
+    for item in payload.lines:
+        db.add(ProcurementRFQQuoteLine(
+            organization_id=access.organization_id, quote_id=quote.id,
+            rfq_line_id=item.rfq_line_id, unit_price=item.unit_price, tax_rate=item.tax_rate,
+        ))
+    invitation.status = "quoted"
+    db.commit()
+    return {"id": quote.id, "rfq_id": rfq.id, "status": "submitted"}
+
+
+@router.get("/supplier-portal/purchase-orders/{order_id}")
+def supplier_portal_purchase_order_detail(order_id: int,
+        token: str = Header(default="", alias="X-Supplier-Portal-Token"), db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=access.organization_id, supplier_id=supplier.id
+    ).first()
+    if not order:
+        raise HTTPException(404, "Purchase order not found")
+    lines = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=access.organization_id, purchase_order_id=order.id
+    ).all()
+    return {"id": order.id, "order_number": order.order_number, "status": order.status,
+            "currency": order.currency, "notes": order.notes,
+            "lines": [{"id": x.id, "product_id": x.product_id, "quantity_ordered": str(x.quantity_ordered),
+                       "quantity_received": str(x.quantity_received), "unit_cost": str(x.unit_cost)} for x in lines]}
+
+
+@router.post("/supplier-portal/tokens/{token_id}/revoke")
+def revoke_supplier_portal_token(token_id: int, membership=Depends(active_membership),
+                                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(ProcurementSupplierPortalToken).filter_by(
+        id=token_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Supplier portal token not found")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+        audit(db, user.id, membership.organization_id, "procurement.supplier_portal.token_revoked",
+              "supplier_portal_token", row.id)
+    return {"id": row.id, "status": "revoked"}
+
 @router.post("/supplier-portal/tokens", status_code=201)
 def create_supplier_portal_token(payload: PortalTokenIn, membership=Depends(active_membership),
                                  user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -780,7 +902,8 @@ def get_supplier_statement(statement_id: int, membership=Depends(active_membersh
             "status": row.status,
             "lines": [{"id": x.id, "line_number": x.line_number, "date": x.transaction_date.date().isoformat(),
                        "description": x.description, "reference": x.reference, "amount": str(x.amount),
-                       "matched_invoice_id": x.matched_invoice_id, "matched_payment_id": x.matched_payment_id}
+                       "matched_invoice_id": x.matched_invoice_id, "matched_payment_id": x.matched_payment_id,
+                       "matched_credit_note_id": x.matched_credit_note_id}
                       for x in lines]}
 
 
@@ -797,7 +920,7 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
     ).with_for_update().first()
     if not statement or not line:
         raise HTTPException(404, "Open supplier statement line not found")
-    if line.matched_invoice_id or line.matched_payment_id:
+    if line.matched_invoice_id or line.matched_payment_id or line.matched_credit_note_id:
         raise HTTPException(409, "Statement line is already matched")
     if payload.invoice_id:
         target = db.query(AccountingInvoice).filter_by(
@@ -816,6 +939,16 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
         if not target or Decimal(target.amount) != abs(Decimal(line.amount)):
             raise HTTPException(422, "Payment supplier or statement amount does not match")
         line.matched_payment_id = target.id
+    if payload.credit_note_id:
+        target = db.query(AccountingCreditNote).join(
+            AccountingInvoice, AccountingInvoice.id == AccountingCreditNote.invoice_id
+        ).filter(AccountingCreditNote.id == payload.credit_note_id,
+                 AccountingCreditNote.organization_id == membership.organization_id,
+                 AccountingCreditNote.status == "posted",
+                 AccountingInvoice.supplier_id == statement.supplier_id).first()
+        if not target or Decimal(target.total) != abs(Decimal(line.amount)):
+            raise HTTPException(422, "Credit note supplier or statement amount does not match")
+        line.matched_credit_note_id = target.id
     line.matched_by = user.id
     line.matched_at = datetime.now(timezone.utc)
     db.commit()
@@ -836,7 +969,7 @@ def reconcile_supplier_statement(statement_id: int, membership=Depends(active_me
     lines = db.query(ProcurementSupplierStatementLine).filter_by(
         statement_id=row.id, organization_id=membership.organization_id
     ).all()
-    unmatched = [x.id for x in lines if not x.matched_invoice_id and not x.matched_payment_id]
+    unmatched = [x.id for x in lines if not x.matched_invoice_id and not x.matched_payment_id and not x.matched_credit_note_id]
     calculated = Decimal(row.opening_balance) + sum((Decimal(x.amount) for x in lines), Decimal("0.00"))
     if unmatched:
         raise HTTPException(409, {"message": "All supplier statement lines must be matched", "unmatched_line_ids": unmatched})
