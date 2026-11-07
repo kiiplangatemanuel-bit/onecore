@@ -789,3 +789,53 @@ class HRLeaveRequestIn(BaseModel):
 class HRLeaveDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected)$")
     note: str = Field(default="", max_length=500)
+
+
+
+class HRPayrollProfileIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    base_period_pay: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    effective_from: date
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def valid_effective_period(self):
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValueError("Profile end date cannot precede its effective date")
+        return self
+
+
+class HRPayrollRunIn(BaseModel):
+    period_start: date
+    period_end: date
+    pay_date: date
+
+    @model_validator(mode="after")
+    def valid_period(self):
+        if self.period_end < self.period_start:
+            raise ValueError("Payroll period end cannot precede its start")
+        if self.pay_date < self.period_end:
+            raise ValueError("Pay date cannot precede the payroll period end")
+        return self
+
+
+class HRPayrollItemIn(BaseModel):
+    client_item_id: str = Field(min_length=8, max_length=100)
+    employee_id: int = Field(gt=0)
+    item_type: str = Field(pattern=r"^(earning|deduction)$")
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    description: str = Field(min_length=2, max_length=180)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("description")
+    @classmethod
+    def payroll_description_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Payroll item description is required")
+        return value
+
+
+class HRPayrollApproveIn(BaseModel):
+    note: str = Field(default="", max_length=500)

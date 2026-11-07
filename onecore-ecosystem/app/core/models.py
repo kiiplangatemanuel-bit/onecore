@@ -263,6 +263,80 @@ class HRAttendance(Base):
     __table_args__ = (Index("ix_hr_attendance_org_employee_date", "organization_id", "employee_id", "attendance_date", unique=True),)
 
 
+class HRPayrollProfile(Base):
+    __tablename__ = "hr_payroll_profiles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    base_period_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_hr_pay_profile_org_employee_from", "organization_id", "employee_id", "effective_from", unique=True),)
+
+
+class HRPayrollRun(Base):
+    __tablename__ = "hr_payroll_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    run_number: Mapped[str] = mapped_column(String(40))
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    pay_date: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    gross_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    deductions_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    net_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approval_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_hr_payroll_run_org_period", "organization_id", "period_start", "period_end", unique=True),
+        Index("ix_hr_payroll_run_org_number", "organization_id", "run_number", unique=True),
+    )
+
+
+class HRPayrollLine(Base):
+    __tablename__ = "hr_payroll_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("hr_payroll_runs.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    employee_number: Mapped[str] = mapped_column(String(40))
+    employee_name: Mapped[str] = mapped_column(String(201))
+    department: Mapped[str] = mapped_column(String(120), default="")
+    job_title: Mapped[str] = mapped_column(String(120), default="")
+    base_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    gross_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    deductions_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    net_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    __table_args__ = (Index("ix_hr_payroll_line_run_employee", "organization_id", "run_id", "employee_id", unique=True),)
+
+
+class HRPayrollItem(Base):
+    __tablename__ = "hr_payroll_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("hr_payroll_runs.id"), index=True)
+    payroll_line_id: Mapped[int] = mapped_column(ForeignKey("hr_payroll_lines.id"), index=True)
+    item_type: Mapped[str] = mapped_column(String(12))
+    code: Mapped[str] = mapped_column(String(40))
+    description: Mapped[str] = mapped_column(String(180))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    client_item_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_hr_payroll_item_org_client_id", "organization_id", "client_item_id", unique=True),)
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"

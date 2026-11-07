@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory, HealthcarePatient, HealthcareAppointment
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolFeeStructureIn, SchoolFeePaymentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HealthcarePatientIn, HealthcareAppointmentIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory, SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation, HealthcarePatient, HealthcareAppointment
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, SchoolFeeStructureIn, SchoolFeePaymentIn, HealthcarePatientIn, HealthcareAppointmentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,7 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.hr import business_days, worked_minutes
+from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals, payroll_money, payroll_item_hash, payroll_totals
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -3682,6 +3682,372 @@ def hr_attendance_report(membership=Depends(active_membership),
         "worked_minutes":x.worked_minutes,
         "status":"completed" if x.clock_out_at else "clocked_in"}
         for x,employee in rows]
+
+
+
+
+# Payroll uses effective-dated base pay and explicit one-off earning/deduction items.
+# Statutory calculations and payment execution are deliberately not inferred.
+def _hr_payroll_run_lines(db, membership, run):
+    lines = db.query(HRPayrollLine).filter_by(
+        organization_id=membership.organization_id, run_id=run.id
+    ).order_by(HRPayrollLine.employee_number, HRPayrollLine.employee_id).all()
+    if not lines:
+        raise HTTPException(404, "Payroll run not found")
+    if any(not can_access_branch(membership, line.branch_id) for line in lines):
+        raise HTTPException(404, "Payroll run not found")
+    return lines
+
+
+def _hr_payroll_run_out(run):
+    return {
+        "id": run.id, "run_number": run.run_number,
+        "period_start": run.period_start.isoformat(),
+        "period_end": run.period_end.isoformat(),
+        "pay_date": run.pay_date.isoformat(), "currency": run.currency,
+        "status": run.status, "gross_total": str(run.gross_total),
+        "deductions_total": str(run.deductions_total),
+        "net_total": str(run.net_total), "created_by": run.created_by,
+        "approved_by": run.approved_by,
+        "approved_at": run.approved_at.isoformat() if run.approved_at else None,
+    }
+
+
+@router.post("/hr/payroll/profiles", status_code=201)
+def create_hr_payroll_profile(payload: HRPayrollProfileIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    employee = db.query(HREmployee).filter_by(
+        id=payload.employee_id, organization_id=membership.organization_id, status="active"
+    ).first()
+    if not employee or not can_access_branch(membership, employee.branch_id):
+        raise HTTPException(404, "Active employee not found")
+    if payload.effective_from < employee.start_date:
+        raise HTTPException(422, "Payroll profile cannot start before the employee start date")
+    if employee.end_date and (payload.effective_to is None or payload.effective_to > employee.end_date):
+        raise HTTPException(422, "Payroll profile must end no later than the employee end date")
+    q = db.query(HRPayrollProfile).filter(
+        HRPayrollProfile.organization_id == membership.organization_id,
+        HRPayrollProfile.employee_id == employee.id,
+        HRPayrollProfile.effective_from <= (payload.effective_to or date.max),
+        or_(HRPayrollProfile.effective_to.is_(None),
+            HRPayrollProfile.effective_to >= payload.effective_from),
+    )
+    if q.first():
+        raise HTTPException(409, "Payroll profile effective dates overlap an existing profile")
+    row = HRPayrollProfile(
+        organization_id=membership.organization_id, employee_id=employee.id,
+        branch_id=employee.branch_id, currency=payload.currency,
+        base_period_pay=payroll_money(payload.base_period_pay),
+        effective_from=payload.effective_from, effective_to=payload.effective_to,
+        created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Payroll profile conflicts with an existing effective date")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "hr.payroll.profile.created",
+          "hr_payroll_profile", row.id, f"employee:{employee.id};currency:{row.currency}")
+    return {"id": row.id, "employee_id": employee.id, "currency": row.currency,
+            "base_period_pay": str(row.base_period_pay),
+            "effective_from": row.effective_from.isoformat(),
+            "effective_to": row.effective_to.isoformat() if row.effective_to else None}
+
+
+@router.get("/hr/payroll/profiles")
+def list_hr_payroll_profiles(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "manage")
+    q = db.query(HRPayrollProfile, HREmployee).join(
+        HREmployee, HREmployee.id == HRPayrollProfile.employee_id
+    ).filter(HRPayrollProfile.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        q = q.filter(HRPayrollProfile.branch_id.in_(allowed))
+    rows = q.order_by(HRPayrollProfile.effective_from.desc(),
+                      HRPayrollProfile.id.desc()).limit(limit).all()
+    return [{
+        "id": profile.id, "employee_id": employee.id,
+        "employee_number": employee.employee_number,
+        "employee_name": f"{employee.first_name} {employee.last_name}",
+        "currency": profile.currency, "base_period_pay": str(profile.base_period_pay),
+        "effective_from": profile.effective_from.isoformat(),
+        "effective_to": profile.effective_to.isoformat() if profile.effective_to else None,
+        "branch_id": profile.branch_id,
+    } for profile, employee in rows]
+
+
+@router.post("/hr/payroll/runs", status_code=201)
+def create_hr_payroll_run(payload: HRPayrollRunIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    overlap = db.query(HRPayrollRun).filter(
+        HRPayrollRun.organization_id == membership.organization_id,
+        HRPayrollRun.period_start <= payload.period_end,
+        HRPayrollRun.period_end >= payload.period_start,
+    ).first()
+    if overlap:
+        raise HTTPException(409, f"Payroll period overlaps existing run {overlap.run_number}")
+    employee_query = db.query(HREmployee).filter(
+        HREmployee.organization_id == membership.organization_id,
+        HREmployee.status == "active",
+        HREmployee.start_date <= payload.period_end,
+        or_(HREmployee.end_date.is_(None), HREmployee.end_date >= payload.period_start),
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            raise HTTPException(403, "No branch access is assigned")
+        employee_query = employee_query.filter(HREmployee.branch_id.in_(allowed))
+    employees = employee_query.order_by(HREmployee.employee_number).all()
+    if not employees:
+        raise HTTPException(409, "No active employees are eligible for this payroll period")
+    profiles = db.query(HRPayrollProfile).filter(
+        HRPayrollProfile.organization_id == membership.organization_id,
+        HRPayrollProfile.effective_from <= payload.period_start,
+        or_(HRPayrollProfile.effective_to.is_(None),
+            HRPayrollProfile.effective_to >= payload.period_end),
+        HRPayrollProfile.employee_id.in_([employee.id for employee in employees]),
+    ).all()
+    profile_map = {}
+    for profile in profiles:
+        if profile.employee_id in profile_map:
+            raise HTTPException(409, "An employee has multiple effective payroll profiles")
+        profile_map[profile.employee_id] = profile
+    missing = [employee.employee_number for employee in employees if employee.id not in profile_map]
+    if missing:
+        raise HTTPException(409, {"message": "Every eligible employee needs a profile covering the entire payroll period",
+                                  "employees_missing_profiles": missing})
+    currencies = {profile_map[employee.id].currency for employee in employees}
+    if len(currencies) != 1:
+        raise HTTPException(422, "A payroll run can contain only one currency; separate the workforce by currency")
+    currency = next(iter(currencies))
+    run = HRPayrollRun(
+        organization_id=membership.organization_id,
+        run_number="PAY-" + uuid.uuid4().hex[:12].upper(),
+        period_start=payload.period_start, period_end=payload.period_end,
+        pay_date=payload.pay_date, currency=currency, status="draft",
+        created_by=user.id,
+    )
+    db.add(run)
+    db.flush()
+    gross_total = Decimal("0.00")
+    for employee in employees:
+        profile = profile_map[employee.id]
+        base = payroll_money(profile.base_period_pay)
+        gross_total += base
+        db.add(HRPayrollLine(
+            organization_id=membership.organization_id, run_id=run.id,
+            employee_id=employee.id, branch_id=employee.branch_id,
+            employee_number=employee.employee_number,
+            employee_name=f"{employee.first_name} {employee.last_name}",
+            department=employee.department, job_title=employee.job_title,
+            base_pay=base, gross_pay=base, deductions_total=Decimal("0.00"),
+            net_pay=base,
+        ))
+    run.gross_total = payroll_money(gross_total)
+    run.deductions_total = Decimal("0.00")
+    run.net_total = payroll_money(gross_total)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Payroll period conflicts with another run")
+    db.refresh(run)
+    audit(db, user.id, membership.organization_id, "hr.payroll.run.created",
+          "hr_payroll_run", run.id, f"employees:{len(employees)};currency:{currency}")
+    return {**_hr_payroll_run_out(run), "employee_count": len(employees)}
+
+
+@router.get("/hr/payroll/runs")
+def list_hr_payroll_runs(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    runs = db.query(HRPayrollRun).filter_by(
+        organization_id=membership.organization_id
+    ).order_by(HRPayrollRun.period_start.desc(), HRPayrollRun.id.desc()).limit(limit).all()
+    visible = []
+    for run in runs:
+        lines = db.query(HRPayrollLine).filter_by(
+            organization_id=membership.organization_id, run_id=run.id
+        ).all()
+        if lines and all(can_access_branch(membership, line.branch_id) for line in lines):
+            visible.append({**_hr_payroll_run_out(run), "employee_count": len(lines)})
+    return visible
+
+
+@router.get("/hr/payroll/runs/{run_id}")
+def get_hr_payroll_run(run_id: int, membership=Depends(active_membership),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    run = db.query(HRPayrollRun).filter_by(
+        id=run_id, organization_id=membership.organization_id
+    ).first()
+    if not run:
+        raise HTTPException(404, "Payroll run not found")
+    lines = _hr_payroll_run_lines(db, membership, run)
+    result = []
+    for line in lines:
+        items = db.query(HRPayrollItem).filter_by(
+            organization_id=membership.organization_id, payroll_line_id=line.id
+        ).order_by(HRPayrollItem.id).all()
+        result.append({
+            "id": line.id, "employee_id": line.employee_id,
+            "employee_number": line.employee_number, "employee_name": line.employee_name,
+            "department": line.department, "job_title": line.job_title,
+            "base_pay": str(line.base_pay), "gross_pay": str(line.gross_pay),
+            "deductions_total": str(line.deductions_total), "net_pay": str(line.net_pay),
+            "items": [{"id": item.id, "item_type": item.item_type, "code": item.code,
+                       "description": item.description, "amount": str(item.amount)}
+                      for item in items],
+        })
+    return {**_hr_payroll_run_out(run), "employee_count": len(lines), "lines": result}
+
+
+@router.post("/hr/payroll/runs/{run_id}/items", status_code=201)
+def add_hr_payroll_item(run_id: int, payload: HRPayrollItemIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    run = db.query(HRPayrollRun).filter_by(
+        id=run_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not run:
+        raise HTTPException(404, "Payroll run not found")
+    if run.status != "draft":
+        raise HTTPException(409, "Only draft payroll runs can be changed")
+    line = db.query(HRPayrollLine).filter_by(
+        organization_id=membership.organization_id, run_id=run.id,
+        employee_id=payload.employee_id
+    ).first()
+    if not line or not can_access_branch(membership, line.branch_id):
+        raise HTTPException(404, "Payroll employee line not found")
+    request_hash = payroll_item_hash(payload)
+    existing = db.query(HRPayrollItem).filter_by(
+        organization_id=membership.organization_id, client_item_id=payload.client_item_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash or existing.run_id != run.id:
+            raise HTTPException(409, "Payroll item ID was reused with different data")
+        return {"id": existing.id, "status": "already_recorded",
+                "gross_pay": str(line.gross_pay), "deductions_total": str(line.deductions_total),
+                "net_pay": str(line.net_pay)}
+    item = HRPayrollItem(
+        organization_id=membership.organization_id, run_id=run.id,
+        payroll_line_id=line.id, item_type=payload.item_type,
+        code=payload.code.strip().upper(), description=payload.description.strip(),
+        amount=payroll_money(payload.amount), client_item_id=payload.client_item_id,
+        request_hash=request_hash, created_by=user.id,
+    )
+    items = db.query(HRPayrollItem).filter_by(
+        organization_id=membership.organization_id, payroll_line_id=line.id
+    ).all() + [item]
+    try:
+        gross, deductions, net = payroll_totals(line.base_pay, items)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    line.gross_pay, line.deductions_total, line.net_pay = gross, deductions, net
+    previous_gross = Decimal(str(line.gross_pay))
+    previous_deductions = Decimal(str(line.deductions_total))
+    previous_net = Decimal(str(line.net_pay))
+    db.add(item)
+    all_lines = db.query(HRPayrollLine).filter_by(
+        organization_id=membership.organization_id, run_id=run.id
+    ).all()
+    run.gross_total = payroll_money(sum((Decimal(str(x.gross_pay)) for x in all_lines), Decimal("0.00")) - previous_gross + gross)
+    run.deductions_total = payroll_money(sum((Decimal(str(x.deductions_total)) for x in all_lines), Decimal("0.00")) - previous_deductions + deductions)
+    run.net_total = payroll_money(sum((Decimal(str(x.net_pay)) for x in all_lines), Decimal("0.00")) - previous_net + net)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(HRPayrollItem).filter_by(
+            organization_id=membership.organization_id, client_item_id=payload.client_item_id
+        ).first()
+        if existing and existing.request_hash == request_hash and existing.run_id == run.id:
+            refreshed_line = db.query(HRPayrollLine).filter_by(
+                organization_id=membership.organization_id, run_id=run.id,
+                employee_id=payload.employee_id
+            ).first()
+            return {"id": existing.id, "status": "already_recorded",
+                    "gross_pay": str(refreshed_line.gross_pay),
+                    "deductions_total": str(refreshed_line.deductions_total),
+                    "net_pay": str(refreshed_line.net_pay)}
+        raise HTTPException(409, "Payroll item conflicts with an existing item ID")
+    db.refresh(item)
+    audit(db, user.id, membership.organization_id, "hr.payroll.item.added",
+          "hr_payroll_item", item.id, f"run:{run.id};employee:{line.employee_id};type:{item.item_type}")
+    return {"id": item.id, "status": "recorded", "gross_pay": str(line.gross_pay),
+            "deductions_total": str(line.deductions_total), "net_pay": str(line.net_pay),
+            "run_gross_total": str(run.gross_total), "run_net_total": str(run.net_total)}
+
+
+@router.post("/hr/payroll/runs/{run_id}/approve")
+def approve_hr_payroll_run(run_id: int, payload: HRPayrollApproveIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    run = db.query(HRPayrollRun).filter_by(
+        id=run_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not run:
+        raise HTTPException(404, "Payroll run not found")
+    if run.status != "draft":
+        raise HTTPException(409, "Only draft payroll runs can be approved")
+    if run.created_by == user.id:
+        raise HTTPException(403, "The payroll run creator cannot approve the same run")
+    lines = _hr_payroll_run_lines(db, membership, run)
+    if not lines or any(Decimal(str(line.net_pay)) < 0 for line in lines):
+        raise HTTPException(409, "Payroll run contains an invalid net pay")
+    run.status = "approved"
+    run.approved_by = user.id
+    run.approved_at = datetime.now(timezone.utc)
+    run.approval_note = payload.note.strip()
+    db.commit()
+    audit(db, user.id, membership.organization_id, "hr.payroll.run.approved",
+          "hr_payroll_run", run.id, f"employees:{len(lines)}")
+    return _hr_payroll_run_out(run)
+
+
+@router.get("/hr/payroll/my-payslips")
+def list_my_hr_payslips(membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db),
+    limit: int=Query(default=24, ge=1, le=120)):
+    require_permission(membership, "read")
+    employee = db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id, user_id=user.id, status="active"
+    ).first()
+    if not employee or not can_access_branch(membership, employee.branch_id):
+        return []
+    q = db.query(HRPayrollLine, HRPayrollRun).join(
+        HRPayrollRun, HRPayrollRun.id == HRPayrollLine.run_id
+    ).filter(HRPayrollLine.organization_id == membership.organization_id,
+             HRPayrollLine.employee_id == employee.id, HRPayrollRun.status == "approved")
+    rows = q.order_by(HRPayrollRun.period_end.desc()).limit(limit).all()
+    payslips = []
+    for line, run in rows:
+        items = db.query(HRPayrollItem).filter_by(
+            organization_id=membership.organization_id, payroll_line_id=line.id
+        ).order_by(HRPayrollItem.id).all()
+        payslips.append({
+            "run_number": run.run_number, "period_start": run.period_start.isoformat(),
+            "period_end": run.period_end.isoformat(), "pay_date": run.pay_date.isoformat(),
+            "currency": run.currency, "employee_number": line.employee_number,
+            "employee_name": line.employee_name, "base_pay": str(line.base_pay),
+            "gross_pay": str(line.gross_pay), "deductions_total": str(line.deductions_total),
+            "net_pay": str(line.net_pay),
+            "items": [{"item_type": item.item_type, "code": item.code,
+                       "description": item.description, "amount": str(item.amount)}
+                      for item in items],
+        })
+    return payslips
 
 
 @router.get("/crm/forecast")
