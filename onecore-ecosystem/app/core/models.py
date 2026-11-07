@@ -880,6 +880,7 @@ class CRMCampaignRecipient(Base):
     channel: Mapped[str] = mapped_column(String(16))
     address_snapshot: Mapped[str] = mapped_column(String(320))
     status: Mapped[str] = mapped_column(String(16), default="prepared")
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         Index("ix_crm_campaign_recipient_unique", "campaign_id", "contact_id", unique=True),
