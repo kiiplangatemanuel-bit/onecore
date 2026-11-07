@@ -1126,3 +1126,39 @@ class AccountingProcurementLink(Base):
         Index("ix_accounting_procurement_link_org_source", "organization_id", "procurement_invoice_id", unique=True),
         Index("ix_accounting_procurement_link_org_ledger", "organization_id", "accounting_invoice_id", unique=True),
     )
+
+
+class POSAccountingMapping(Base):
+    """Tenant-level ledger accounts used for automatic POS journal posting."""
+    __tablename__ = "pos_accounting_mappings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), unique=True, index=True)
+    cash_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    card_clearing_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    bank_clearing_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    credit_receivable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    sales_revenue_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    sales_discount_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    output_tax_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_accounts.id"), nullable=True)
+    sales_returns_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class POSAccountingLink(Base):
+    """Unique source-to-journal bridge; pending links are safely retryable."""
+    __tablename__ = "pos_accounting_links"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    source_type: Mapped[str] = mapped_column(String(16))
+    source_id: Mapped[int] = mapped_column()
+    journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    failure_reason: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        Index("ix_pos_accounting_source", "organization_id", "source_type", "source_id", unique=True),
+        Index("ix_pos_accounting_pending", "organization_id", "status"),
+    )
