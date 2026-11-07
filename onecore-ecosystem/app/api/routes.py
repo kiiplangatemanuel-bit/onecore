@@ -1,4 +1,4 @@
-import json, re, uuid, hashlib
+import json, re, uuid, hashlib, hmac
 from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -1595,7 +1595,7 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             id=pos_device_id, organization_id=membership.organization_id,
             branch_id=payload.branch_id, status="trusted"
         ).with_for_update().first()
-        if not device or not hashlib.sha256(pos_device_secret.encode("utf-8")).hexdigest() == device.token_digest:
+        if not device or not hmac.compare_digest(hashlib.sha256(pos_device_secret.encode("utf-8")).hexdigest(), device.token_digest):
             raise HTTPException(403, "POS device is not trusted or its credential is invalid")
         device.last_seen_at = datetime.now(timezone.utc)
     request_hash = canonical_request_hash(payload)
