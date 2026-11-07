@@ -332,8 +332,11 @@ def campaign_roi(campaign_id:int|None=None,m=Depends(active_membership),db:Sessi
             revenue.append({"currency":currency,"attributed_revenue":str(gross),"conversions":count,
                 "campaign_cost":str(spend) if currency==campaign.budget_currency else None,
                 "budget_currency":campaign.budget_currency,"roi_percent":str(roi) if roi is not None else None})
+        funnel=db.query(CRMCampaignAttribution.event_type,func.count(CRMCampaignAttribution.id)).filter_by(
+            organization_id=m.organization_id,campaign_id=campaign.id).group_by(CRMCampaignAttribution.event_type).all()
         result.append({"campaign_id":campaign.id,"name":campaign.name,"status":campaign.status,
-            "budget_amount":str(campaign.budget_amount or 0),"budget_currency":campaign.budget_currency,"revenue":revenue})
+            "budget_amount":str(campaign.budget_amount or 0),"budget_currency":campaign.budget_currency,
+            "funnel":{event_type:count for event_type,count in funnel},"revenue":revenue})
     return {"campaigns":result,"roi_note":"Explicit attribution only; ROI is not proof of causation."}
 
 @router.post("/scheduler/heartbeat")
