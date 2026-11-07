@@ -710,3 +710,12 @@ Implemented in this increment:
 - Migration `0022_accounting_completion` adds refund and procurement-link tables.
 
 Validation status: GitHub Actions on the new PR head is required to establish migration upgrade/downgrade/re-upgrade, Python compilation and the complete pytest suite. Do not mark this increment verified until those checks pass. The tax summary is a workpaper, not a statutory return; the cash-flow report is a ledger classification report, not a forecast; refund journals do not execute external payment rails.
+
+
+### Accounting fiscal year-end close controls (same implementation branch)
+
+- Added a read-only year-end preview of posted revenue/expense balances and the retained-earnings transfer journal.
+- Added a controlled close action requiring organization-wide branch scope, clean close checklist, an active equity retained-earnings account and exact fiscal-period code confirmation.
+- The closing journal and period lock are committed atomically; period-specific reference prevents duplicate close journals.
+- Added Accounting workspace preview and confirmation forms plus OpenAPI/schema tests.
+- Remaining exclusions: tax provision, statutory reserve/dividend calculations, FX translation, consolidation, restatement, external sign-off and auditor certification.
