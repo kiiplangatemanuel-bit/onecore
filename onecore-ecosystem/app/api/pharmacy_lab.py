@@ -822,13 +822,20 @@ def reverse_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_memb
     line["refills_used"]=min(int(line.get("refills_allowed",0)),max(0,int(Decimal(line["quantity_dispensed"])//Decimal(line["quantity_prescribed"]))-1))
     authorized=Decimal(line["quantity_prescribed"])*(1+int(line.get("refills_allowed",0)))
     line["status"]="pending" if Decimal(line["quantity_dispensed"])==0 else "dispensed" if Decimal(line["quantity_dispensed"])>=authorized else "partially_dispensed"
-    rxd["lines"][idx]=line;rxd["status"]="partially_dispensed" if any(
-        x["status"]!="dispensed" for x in rxd["lines"]) else "dispensed"
+    rxd["lines"][idx]=line
+    if rxd.get("status")!="cancelled":
+        rxd["status"]="active" if all(x["status"]=="pending" for x in rxd["lines"]) else (
+            "dispensed" if all(x["status"]=="dispensed" for x in rxd["lines"]) else "partially_dispensed")
     _update(rx,rxd,u,status=rxd["status"])
     invoice_rows=_resource_list(db,m,"pharmacy_invoice",patient_id=disp.patient_id,limit=1000)
     for inv in invoice_rows:
         if _payload(inv).get("source_id")==disp.id:
             inv.status="reversed";iv=_payload(inv);iv["status"]="reversed";_update(inv,iv,u,status="reversed")
+    for allocation in allocations:
+        medrow,med=_medicine(db,m,int(_payload(_batch(db,m,int(allocation["batch_id"]))[0])["medicine_id"]))
+        if med.get("is_controlled"):
+            _controlled_event(db,m,u,medrow.id,int(allocation["batch_id"]),disp.patient_id,
+                "dispense_reversed",Decimal(allocation["quantity"]),reason,verifier_id,disp.id,disp.branch_id)
     row=_create(db,m,u,"pharmacy_controlled_event",{"event_type":"dispense_reversed",
         "dispense_id":disp.id,"quantity":str(total),"reason":reason,"verifier_id":verifier_id},
         disp.branch_id,disp.patient_id,parent_id=disp.id,status="reversed")
