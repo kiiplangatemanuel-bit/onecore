@@ -12,7 +12,7 @@ from app.core.automation_healthcare_schemas import CRMTemplateIn, CRMSegmentIn, 
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
-from app.services.crm_automation import validate_segment_filters, matches_segment
+from app.services.crm_automation import validate_segment_filters, matches_segment, validate_template_content
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM automation"])
 
@@ -43,6 +43,7 @@ def _segment(db,segment_id,org,membership):
 def create_template(payload:CRMTemplateIn,membership=Depends(active_membership),
                     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage");_branch(db,membership,payload.branch_id)
+    validate_template_content(payload.subject,payload.body)
     version=(db.query(func.max(CRMMessageTemplate.version)).filter_by(
         organization_id=membership.organization_id,name=payload.name.strip()).scalar() or 0)+1
     row=CRMMessageTemplate(organization_id=membership.organization_id,branch_id=payload.branch_id or None,
@@ -74,6 +75,7 @@ def revise_template(template_id:int,payload:CRMTemplateIn,membership=Depends(act
                     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage");old=_template(db,template_id,membership.organization_id)
     if not can_access_branch(membership,old.branch_id):raise HTTPException(404,"Template not found")
+    validate_template_content(payload.subject,payload.body)
     _branch(db,membership,payload.branch_id)
     version=(db.query(func.max(CRMMessageTemplate.version)).filter_by(
         organization_id=membership.organization_id,name=payload.name).scalar() or 0)+1
