@@ -466,3 +466,27 @@ sign-off.
 Remaining bank reconciliation gaps: CSV/XLSX statement parsing, direct bank feeds,
 automatic/fuzzy matching, bank account verification, provider credentials, bank
 charges workflow and finance-team UAT. No live bank integration is claimed.
+
+
+## CRM quotes and pipeline forecast increment (8 November 2026)
+
+Implemented on main:
+- Tenant-owned sales quotes linked to customer contacts and optionally sales leads.
+- Quote line items with quantity, price, tax rate and server-calculated totals.
+- Draft -> issued -> accepted/rejected lifecycle with expiry handling and audit events.
+- Branch alignment validation between quote, customer contact and linked lead.
+- Quote currency constrained to the organization's configured base currency.
+- Quote detail/list APIs and accessible CRM workspace controls.
+- Pipeline forecast grouped by currency and lead stage using fixed, documented
+  stage probability assumptions. This is a transparent heuristic, not a statistical
+  forecast.
+- Migration 0012_crm_quotes; models, schemas, APIs, UI, tests and docs/CRM.md.
+
+Verification: GitHub Actions run 42364853288 passed migrations, downgrade/re-upgrade,
+compilation and pytest: 53 passed, 5 warnings.
+
+CRM remains incomplete: quote PDF generation, email/SMS delivery, customer signature,
+quote-to-order conversion, contracts, campaigns, consent/preference management,
+communication logs and provider delivery, segmentation, configurable stages and
+probabilities, conversion cohort analytics, forecasting models, contact merge,
+import/export, team assignment and UAT.
