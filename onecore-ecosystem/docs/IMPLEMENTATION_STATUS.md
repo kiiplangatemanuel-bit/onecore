@@ -838,3 +838,24 @@ repayment allocation, arrears, guarantors, collateral, interest accrual, account
 journals, member statements, regulatory reports, payment rails, granular roles,
 AML/KYC document verification and UAT remain outstanding. Products requiring a
 guarantor are blocked from application until guarantor capture is implemented.
+
+
+## SACCO loan disbursement and repayment increment (7 November 2026)
+
+Implemented on `feature/sacco-loan-servicing`, stacked on the SACCO member/savings
+foundation:
+
+- Approved loan applications can be recorded as disbursed loans; a unique loan
+  account is created and the application cannot be disbursed twice.
+- Flat and reducing-balance installment schedules are generated with decimal
+  arithmetic, month-end date handling and final-installment reconciliation.
+- Repayments allocate chronologically to earliest installments, interest before
+  principal; overpayments are rejected and idempotency keys prevent duplicates.
+- Loan balances and schedule paid amounts update atomically; fully settled loans
+  close. Added migration `0028_sacco_loan_servicing`, service arithmetic tests,
+  API routes and workspace actions.
+
+Boundaries: disbursement and repayment are internal records only; no external
+cash transfer, bank/M-Pesa confirmation or payment callback exists. No arrears,
+late fees, collateral/guarantor workflow, restructuring, early-settlement rebate,
+variable rates, accounting journal, prudential reporting or production UAT.
