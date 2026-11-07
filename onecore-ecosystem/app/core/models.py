@@ -359,6 +359,45 @@ class POSPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class POSReturn(Base):
+    __tablename__ = "pos_returns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("pos_sales.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    client_return_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(String(500))
+    refund_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_pos_return_org_client_id", "organization_id", "client_return_id", unique=True),)
+
+
+class POSReturnLine(Base):
+    __tablename__ = "pos_return_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    return_id: Mapped[int] = mapped_column(ForeignKey("pos_returns.id"), index=True)
+    sale_line_id: Mapped[int] = mapped_column(ForeignKey("pos_sale_lines.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+
+
+class POSRefund(Base):
+    __tablename__ = "pos_refunds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    return_id: Mapped[int] = mapped_column(ForeignKey("pos_returns.id"), index=True)
+    method: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    provider_reference: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(16), default="recorded")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class SchoolClass(Base):
     __tablename__ = "school_classes"
     id: Mapped[int] = mapped_column(primary_key=True)
