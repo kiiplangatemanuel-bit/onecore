@@ -60,14 +60,15 @@ $('returnForm').addEventListener('submit',async e=>{
   refunds:[{method:refundMethod,amount:(Math.round(total*100)/100).toFixed(2)}]};
  try{const result=await api('/pos/sales/'+currentReceipt.id+'/returns',{method:'POST',body:JSON.stringify(body)});
   if(refundMethod==='mpesa' && result.refunds?.[0]?.id){
+   pendingMpesaRefund={returnId:result.id,refundId:result.refunds[0].id};
+   $('mpesaRefundRetry').hidden=false;
+   $('mpesaRefundRetryPhone').value=form.elements.refund_phone.value;
    try{
     const payout=await api('/integrations/mpesa/pos/returns/'+result.id+'/refunds/'+result.refunds[0].id+'/b2c',{method:'POST',body:JSON.stringify({phone_number:form.elements.refund_phone.value})});
-    status('Return recorded. M-Pesa B2C payout '+payout.status+'; waiting for Safaricom confirmation.');
+    $('mpesaRefundRetryStatus').textContent='Return '+result.id+' saved. M-Pesa B2C payout status: '+payout.status+'. Use Check / retry after Safaricom responds.';
+    status('Return recorded. M-Pesa B2C payout '+payout.status+'; awaiting provider confirmation.');
    }catch(payoutError){
-    pendingMpesaRefund={returnId:result.id,refundId:result.refunds[0].id};
-    $('mpesaRefundRetry').hidden=false;
     $('mpesaRefundRetryStatus').textContent='Return '+result.id+' is saved. Payout initiation failed: '+payoutError.message+'. Retry the same refund; do not create another return.';
-    $('mpesaRefundRetryPhone').value=form.elements.refund_phone.value;
    }
   }else status('Return '+result.id+' recorded and restocked. Refund payout remains subject to its payment provider.');
   await loadReceipt(currentReceipt.id);form.reset();
@@ -112,8 +113,9 @@ $('retryMpesaRefund').addEventListener('click',async()=>{
  if(!pendingMpesaRefund)return;
  try{
   const payout=await api('/integrations/mpesa/pos/returns/'+pendingMpesaRefund.returnId+'/refunds/'+pendingMpesaRefund.refundId+'/b2c',{method:'POST',body:JSON.stringify({phone_number:$('mpesaRefundRetryPhone').value})});
-  status('M-Pesa refund payout '+payout.status+'; waiting for Safaricom confirmation.');
-  $('mpesaRefundRetry').hidden=true;pendingMpesaRefund=null;
+  $('mpesaRefundRetryStatus').textContent='M-Pesa B2C payout status: '+payout.status+'. '+(payout.message||'');
+  status('M-Pesa refund payout status: '+payout.status+'.');
+  if(payout.status==='success'){$('mpesaRefundRetry').hidden=true;pendingMpesaRefund=null;}
  }catch(err){status('M-Pesa payout retry failed: '+err.message);}
 });
 $('sync').addEventListener('click',syncQueue);
