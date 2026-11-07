@@ -117,3 +117,23 @@ penalties, restructure loans, apply non-performing-loan rules, issue notices,
 allocate recovery costs or create accounting journals. It does not reconcile
 receipts with bank/mobile-money settlement. Validate policies and regulatory
 ageing definitions with the SACCO before operational use.
+
+
+## Loan guarantor and collateral records
+
+- Added tenant- and branch-scoped guarantor registration against an existing loan.
+  Guarantors must be active, KYC-verified SACCO members and cannot be the borrower.
+  A consent reference is required; one member can be registered only once per loan.
+- Guarantor records begin pending and require an independent reviewer; the creator
+  cannot approve or reject their own registration.
+- Added collateral registration with asset type, description, declared owner,
+  optional title/serial identifier and estimated value.
+- Collateral approval requires an assessed value, valuation date and valuation
+  reference. The registrant cannot review their own collateral.
+- Registration and review actions are written to the audit event log. Read endpoints
+  expose the status and review evidence within the caller's tenant and branch scope.
+
+Boundaries: consent references and valuation references are evidence identifiers,
+not uploaded or independently verified documents. The feature does not perfect
+security interests, verify title/ownership, establish legal priority, enforce
+guarantor liability, calculate loan-to-value policy, or provide external valuation.
