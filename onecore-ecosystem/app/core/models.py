@@ -235,6 +235,7 @@ class CRMLead(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
+    source_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(180))
     source: Mapped[str] = mapped_column(String(60), default="other")
     stage: Mapped[str] = mapped_column(String(24), default="new")
