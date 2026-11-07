@@ -706,3 +706,37 @@ class ProcurementRequisitionLine(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
     quantity_requested: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementGoodsReceipt(Base):
+    __tablename__ = "procurement_goods_receipts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_orders.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    receipt_number: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(24), default="pending_inspection")
+    received_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    inspected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    inspected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    inspection_note: Mapped[str] = mapped_column(String(1000), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_grn_org_number", "organization_id", "receipt_number", unique=True),)
+
+
+class ProcurementGoodsReceiptLine(Base):
+    __tablename__ = "procurement_goods_receipt_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    goods_receipt_id: Mapped[int] = mapped_column(ForeignKey("procurement_goods_receipts.id"), index=True)
+    purchase_order_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_order_lines.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    quantity_received: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    quantity_accepted: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
+    quantity_rejected: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    rejection_reason: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_procurement_grn_line_org_key", "organization_id", "idempotency_key", unique=True),
+    )
