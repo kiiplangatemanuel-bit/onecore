@@ -232,7 +232,7 @@ def _visible_snapshots(db, membership):
 KENYA_2026_RULES = {
     "country": "KE", "currency": "KES", "version": "KE-2026-02",
     "effective_from": "2026-02-01", "effective_to": None,
-    "status": "active", "reviewed_on": "2026-11-08",
+    "status": "draft", "reviewed_on": "2026-11-08",
     "sources": [
         {"authority": "KRA", "url": "https://www.kra.go.ke/individual/filing-paying/types-of-taxes/paye", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/finance-act-2026-what-it-means-for-you", "verified_on": "2026-11-08", "note": "Reviewed Finance Act 2026 commencement and published changes; payroll rates remain subject to administrator and tax adviser sign-off."},
@@ -748,10 +748,15 @@ def payroll_analytics(membership=Depends(active_membership), user=Depends(curren
             HRPayrollLine.branch_id.in_(allowed)).all()}
         runs = [r for r in runs if r.id in visible_run_ids]
     finalized = [r for r in runs if r.status in ("approved","paid","partial_paid")]
+    finalized_ids = {r.id for r in finalized}
+    visible = [r.data for r in _visible_snapshots(db, membership) if r.data.get("run_id") in finalized_ids]
+    gross_total = sum((D(x["calculation"]["gross_pay"]) for x in visible), ZERO)
+    net_total = sum((D(x["calculation"]["net_pay"]) for x in visible), ZERO)
     return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid","partial_paid")},
             "finalized_runs": len(finalized),
-            "gross_total": str(money(sum((D(r.gross_total or 0) for r in finalized), ZERO))),
-            "net_total": str(money(sum((D(r.net_total or 0) for r in finalized), ZERO)))}
+            "employee_months": len(visible),
+            "gross_total": str(money(gross_total)),
+            "net_total": str(money(net_total))}
 
 
 @router.get("/hr/payroll/year-end/{year}")
