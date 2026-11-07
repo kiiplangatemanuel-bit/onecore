@@ -1782,8 +1782,13 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             organization_id=membership.organization_id, client_return_id=payload.client_return_id
         ).first()
         if existing and existing.request_hash == request_hash and existing.sale_id == sale_id:
+            existing_refunds = db.query(POSRefund).filter_by(
+                organization_id=membership.organization_id, return_id=existing.id
+            ).order_by(POSRefund.id).all()
             return {"id": existing.id, "sale_id": existing.sale_id, "status": "already_recorded",
-                    "refund_total": str(existing.refund_total)}
+                    "refund_total": str(existing.refund_total),
+                    "refunds": [{"id": item.id, "method": item.method, "amount": str(item.amount),
+                                 "status": item.status} for item in existing_refunds]}
         raise HTTPException(409, "Return conflicts with another return or stock movement")
     db.refresh(result)
     audit(db, user.id, membership.organization_id, "pos.sale.returned",

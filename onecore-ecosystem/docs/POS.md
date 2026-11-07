@@ -164,7 +164,23 @@ A manager initiates its B2C disbursement through
 The refund is marked recorded only after a successful B2C result callback with a
 transaction receipt. Timeouts and failed results do not claim that money was sent.
 B2C requires an approved Daraja shortcode, initiator name, pre-encrypted security
-credential, and registered result and timeout callback URLs.
+credential, and registered result and timeout callback URLs. A B2C intent in
+`initiating`, `pending`, `success`, `unknown`, `timeout` or `exception`
+cannot be submitted again automatically. In particular, transport failures and
+timeouts are ambiguous provider outcomes; reconcile the transaction with Safaricom
+before any manual retry. Only a definitive provider rejection/failure is eligible
+for a new attempt.
+
+A successful STK callback must include the exact checkout request ID, payer phone,
+whole-KES amount and a receipt. A successful B2C callback must include the expected
+conversation ID, exact transaction amount and a receipt. Missing or mismatched
+provider fields put the intent into `exception` and leave the POS tender/refund
+unsettled. Provider receipts are checked against previously applied receipts to
+prevent duplicate settlement. The Daraja API base URL must be HTTPS on a
+Safaricom-owned host. The POS creates M-Pesa tenders as unsettled; the sales journal
+does not debit the M-Pesa clearing account until the successful STK callback.
+Likewise, the return journal does not credit the M-Pesa clearing account until the
+successful B2C result callback.
 
 ### Required environment configuration
 

@@ -174,3 +174,110 @@ def test_successful_b2c_callback_records_refund_only_after_receipt(monkeypatch):
     assert intent.status == "success"
     assert len(posted) == 1
     db.close()
+
+
+
+def test_b2c_unknown_and_timeout_outcomes_never_allow_automatic_retry():
+    from app.api.mpesa import _b2c_retry_is_blocked
+    for status in ("initiating", "pending", "success", "unknown", "timeout", "exception"):
+        assert _b2c_retry_is_blocked(status)
+    for status in ("failed", "cancelled"):
+        assert not _b2c_retry_is_blocked(status)
+
+
+def test_successful_stk_callback_requires_matching_phone_and_amount(monkeypatch):
+    from app.api.mpesa import _stk_callback
+    db = _mpesa_test_session()
+    sale = POSSale(
+        id=71, organization_id=1, branch_id="branch-1", shift_id=2,
+        cashier_user_id=10, client_transaction_id="txn-00000071",
+        request_hash="c" * 64, total_amount=Decimal("100.00"),
+        currency="KES", status="posted",
+    )
+    payment = POSPayment(
+        id=81, organization_id=1, sale_id=71, method="mpesa",
+        amount=Decimal("100.00"), status="unsettled",
+    )
+    token = "strict-stk-callback"
+    intent = MpesaPaymentIntent(
+        id=91, organization_id=1, branch_id="branch-1", payment_id=81,
+        phone_number="254712345678", amount=Decimal("100.00"),
+        checkout_request_id="ws_CO_71",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending",
+    )
+    db.add_all([sale, payment, intent])
+    db.commit()
+    body = {"Body": {"stkCallback": {
+        "CheckoutRequestID": "ws_CO_71", "ResultCode": 0, "ResultDesc": "Success",
+        "CallbackMetadata": {"Item": [
+            {"Name": "Amount", "Value": 100},
+            {"Name": "MpesaReceiptNumber", "Value": "QAB71"},
+        ]},
+    }}}
+    assert _stk_callback(db, token, body) is True
+    db.refresh(intent)
+    db.refresh(payment)
+    assert intent.status == "exception"
+    assert "phone number is missing" in intent.result_description
+    assert payment.status == "unsettled"
+    db.close()
+
+
+def test_successful_b2c_callback_requires_transaction_amount():
+    from app.api.mpesa import _b2c_callback
+    db = _mpesa_test_session()
+    returned = POSReturn(
+        id=121, organization_id=1, sale_id=7, branch_id="branch-1",
+        client_return_id="return-000121", request_hash="d" * 64,
+        reason="Customer return", refund_total=Decimal("50.00"), created_by=10,
+    )
+    refund = POSRefund(
+        id=122, organization_id=1, return_id=121, method="mpesa",
+        amount=Decimal("50.00"), status="pending",
+    )
+    token = "strict-b2c-callback"
+    intent = MpesaRefundIntent(
+        id=123, organization_id=1, branch_id="branch-1", refund_id=122,
+        phone_number="254712345678", amount=Decimal("50.00"),
+        conversation_id="AG_121",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending",
+    )
+    db.add_all([returned, refund, intent])
+    db.commit()
+    body = {"Result": {
+        "ConversationID": "AG_121", "ResultCode": 0, "ResultDesc": "Success",
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QAB121B2C"},
+        ]},
+    }}
+    assert _b2c_callback(db, token, body) is True
+    db.refresh(intent)
+    db.refresh(refund)
+    assert intent.status == "exception"
+    assert "missing a valid transaction amount" in intent.result_description
+    assert refund.status == "pending"
+    db.close()
+
+
+
+def test_pos_mpesa_tenders_are_unsettled_until_callback_and_receipt_shows_status():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    routes = (root / "app" / "api" / "routes.py").read_text(encoding="utf-8")
+    accounting = (root / "app" / "api" / "accounting_pos.py").read_text(encoding="utf-8")
+    workspace = (root / "app" / "web" / "pos.html").read_text(encoding="utf-8")
+    assert 'status="unsettled" if payment.method in {"credit", "mpesa"} else "recorded"' in routes
+    assert 'if payment.status == "unsettled" and payment.method != "credit":' in accounting
+    assert "'/integrations/mpesa/pos/sales/'+saleId+'/payments'" in workspace
+    assert "M-Pesa collection status" in workspace
+
+
+def test_idempotent_return_response_includes_original_refund_ids():
+    from pathlib import Path
+    routes = (Path(__file__).resolve().parents[1] / "app" / "api" / "routes.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'existing_refunds = db.query(POSRefund)' in routes
+    assert '"refunds": [{"id": item.id, "method": item.method' in routes

@@ -9,7 +9,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 from decimal import Decimal
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -58,6 +58,9 @@ def _enabled():
     )
     if not settings.integration_mpesa_enabled or not all(required):
         raise HTTPException(503, "M-Pesa integration is not enabled or its Daraja configuration is incomplete")
+    provider = urlparse(settings.mpesa_base_url)
+    if provider.scheme != "https" or not provider.hostname or not (provider.hostname == "safaricom.co.ke" or provider.hostname.endswith(".safaricom.co.ke")):
+        raise HTTPException(503, "Daraja base URL must use an HTTPS Safaricom host")
     if not settings.mpesa_callback_url.startswith("https://"):
         raise HTTPException(503, "M-Pesa callback base URL must use public HTTPS")
     if settings.mpesa_transaction_type not in {"CustomerPayBillOnline", "CustomerBuyGoodsOnline"}:
@@ -116,6 +119,11 @@ class STKPushIn(BaseModel):
 
 class B2CRefundIn(BaseModel):
     phone_number: str = Field(min_length=9, max_length=20)
+
+
+def _b2c_retry_is_blocked(status: str) -> bool:
+    """Never re-submit a payout whose provider outcome may be unknown."""
+    return status in {"initiating", "pending", "success", "unknown", "timeout", "exception"}
 
 
 def _audit(db, org_id, actor_id, action, resource_type, resource_id, detail):
@@ -235,13 +243,18 @@ def _stk_callback(db: Session, token: str, body: dict):
         items = ((callback.get("CallbackMetadata") or {}).get("Item") or [])
         metadata = {str(item.get("Name")): item.get("Value") for item in items if isinstance(item, dict)}
         try:
-            paid = Decimal(str(metadata.get("Amount"))).quantize(CENT)
+            if metadata.get("Amount") is None:
+                raise ValueError("missing amount")
+            paid = Decimal(str(metadata["Amount"])).quantize(CENT)
         except Exception:
-            return False
-        callback_phone = metadata.get("PhoneNumber")
-        if callback_phone is not None and str(callback_phone) != intent.phone_number:
             intent.status = "exception"
-            intent.result_description = "Callback phone number does not match the requested payer"
+            intent.result_description = "Successful callback contained an invalid or missing amount"
+            db.commit()
+            return True
+        callback_phone = metadata.get("PhoneNumber")
+        if callback_phone is None or str(callback_phone) != intent.phone_number:
+            intent.status = "exception"
+            intent.result_description = "Callback phone number is missing or does not match the requested payer"
             db.commit()
             return True
         if paid != Decimal(str(intent.amount)).quantize(CENT):
@@ -253,6 +266,15 @@ def _stk_callback(db: Session, token: str, body: dict):
         if not receipt:
             intent.status = "exception"
             intent.result_description = "Successful callback did not include an M-Pesa receipt number"
+            db.commit()
+            return True
+        duplicate_receipt = db.query(MpesaPaymentIntent).filter(
+            MpesaPaymentIntent.mpesa_receipt_number == receipt,
+            MpesaPaymentIntent.id != intent.id,
+        ).first()
+        if duplicate_receipt:
+            intent.status = "exception"
+            intent.result_description = "M-Pesa receipt number has already been applied to another payment"
             db.commit()
             return True
         payment = db.query(POSPayment).filter_by(
@@ -328,12 +350,14 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
     existing = db.query(MpesaRefundIntent).filter_by(
         organization_id=membership.organization_id, refund_id=refund.id
     ).first()
-    if existing and existing.status in {"initiating", "pending", "success"}:
+    if existing and _b2c_retry_is_blocked(existing.status):
+        if existing.status in {"unknown", "timeout", "exception"}:
+            raise HTTPException(409, "B2C outcome is uncertain; reconcile with Safaricom before attempting another payout")
         return {"intent_id": existing.id, "status": existing.status,
                 "conversation_id": existing.conversation_id,
                 "message": "A disbursement request already exists; do not submit a duplicate refund"}
-    if existing and existing.status in {"timeout", "exception"}:
-        raise HTTPException(409, "B2C outcome is uncertain; reconcile with Safaricom before attempting another payout")
+    if refund.status != "pending":
+        raise HTTPException(409, "Only an unpaid pending M-Pesa refund can be submitted to Daraja")
     amount = Decimal(str(refund.amount))
     if amount != amount.quantize(Decimal("1")):
         raise HTTPException(422, "Daraja B2C accepts whole KES amounts; this refund requires manual handling")
@@ -422,7 +446,14 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
             id=intent.refund_id, organization_id=intent.organization_id
         ).with_for_update().first()
         callback_amount = metadata.get("TransactionAmount")
-        if callback_amount is not None and Decimal(str(callback_amount)).quantize(CENT) != Decimal(str(intent.amount)).quantize(CENT):
+        try:
+            paid_amount = Decimal(str(callback_amount)).quantize(CENT)
+        except Exception:
+            intent.status = "exception"
+            intent.result_description = "Successful B2C callback is missing a valid transaction amount"
+            db.commit()
+            return True
+        if paid_amount != Decimal(str(intent.amount)).quantize(CENT):
             intent.status = "exception"
             intent.result_description = "B2C callback amount does not match the requested refund"
             db.commit()
@@ -430,6 +461,15 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         if not refund or not receipt:
             intent.status = "exception"
             intent.result_description = "Successful B2C callback is missing its refund record or transaction receipt"
+            db.commit()
+            return True
+        duplicate_receipt = db.query(MpesaRefundIntent).filter(
+            MpesaRefundIntent.mpesa_receipt_number == receipt,
+            MpesaRefundIntent.id != intent.id,
+        ).first()
+        if duplicate_receipt:
+            intent.status = "exception"
+            intent.result_description = "M-Pesa receipt number has already been applied to another refund"
             db.commit()
             return True
         refund.status = "recorded"
