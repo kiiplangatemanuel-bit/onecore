@@ -13,6 +13,8 @@ depends_on = None
 
 
 def upgrade():
+    op.drop_index("ix_lab_sample_org_order", table_name="laboratory_samples")
+    op.create_index("ix_lab_sample_org_order", "laboratory_samples", ["organization_id", "order_id"], unique=False)
     op.create_table("pharmacy_prescriptions",
         sa.Column("id",sa.Integer(),primary_key=True,autoincrement=True),
         sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),
@@ -143,6 +145,8 @@ def upgrade():
 
 
 def downgrade():
+    op.drop_index("ix_lab_sample_org_order", table_name="laboratory_samples")
+    op.create_index("ix_lab_sample_org_order", "laboratory_samples", ["organization_id", "order_id"], unique=True)
     op.drop_table("laboratory_test_panel_lines")
     op.drop_table("laboratory_test_panels")
     op.drop_table("pharmacy_lab_workflow_records")
