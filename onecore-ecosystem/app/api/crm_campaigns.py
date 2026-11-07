@@ -2,6 +2,7 @@
 import hashlib, secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -142,6 +143,24 @@ def campaign_report(campaign_id:int,membership=Depends(active_membership),db:Ses
         "statuses":counts,"attempt_count":attempts,"delivered":counts.get("delivered",0),
         "accepted":counts.get("sent",0)+counts.get("delivered",0),"failed":counts.get("failed",0),
         "suppressed":counts.get("suppressed",0),"exhausted":counts.get("exhausted",0)}
+
+@router.get("/unsubscribe/{token}",response_class=HTMLResponse)
+def unsubscribe_confirmation(token:str,db:Session=Depends(get_db)):
+    digest=hashlib.sha256(token.encode()).hexdigest()
+    exists=db.query(CRMCampaignDelivery.id).filter_by(unsubscribe_token_hash=digest).first()
+    if not exists:
+        raise HTTPException(404,"Unsubscribe link is invalid")
+    # GET is deliberately read-only: mail security scanners must not change consent.
+    return HTMLResponse(
+        "<!doctype html><html lang='en'><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Confirm unsubscribe</title><body>"
+        "<main><h1>Unsubscribe from marketing messages</h1>"
+        "<p>Confirm below to stop receiving this channel's marketing messages.</p>"
+        f"<form method='post' action='/api/v1/crm/unsubscribe/{token}'>"
+        "<button type='submit'>Confirm unsubscribe</button></form></main></body></html>"
+    )
+
 
 @router.post("/unsubscribe/{token}")
 def unsubscribe(token:str,db:Session=Depends(get_db)):
