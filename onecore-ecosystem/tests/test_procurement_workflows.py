@@ -31,6 +31,7 @@ def test_procurement_workflow_routes_are_registered():
         "/api/v1/procurement/supplier-settlements/callbacks/b2c/timeout/{token}",
         "/api/v1/procurement/approval-delegations",
         "/api/v1/procurement/orders/{order_id}/approve-as-delegate",
+        "/api/v1/procurement/orders/{order_id}/escalate-approval",
         "/api/v1/procurement/supplier-portal/tokens",
         "/api/v1/procurement/supplier-portal/rfqs",
         "/api/v1/procurement/supplier-portal/rfqs/{rfq_id}/quotes",
@@ -41,6 +42,7 @@ def test_procurement_workflow_routes_are_registered():
         "/api/v1/procurement/supplier-statements/{statement_id}/reconcile",
         "/api/v1/procurement/supplier-returns/{return_id}/post-credit-note",
         "/api/v1/procurement/invoice-discrepancies/{discrepancy_id}/resolve",
+        "/api/v1/procurement/invoice-discrepancies/{discrepancy_id}/auto-resolve",
         "/api/v1/procurement/accounting-reconciliation",
     }
     assert expected <= paths
