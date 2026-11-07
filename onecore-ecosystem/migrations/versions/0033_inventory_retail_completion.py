@@ -9,10 +9,6 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("inventory_stock_movements", sa.Column("warehouse_id", sa.Integer(), nullable=True))
-    op.create_foreign_key("fk_inventory_movement_warehouse", "inventory_stock_movements",
-        "inventory_warehouses", ["warehouse_id"], ["id"])
-    op.create_index("ix_inventory_stock_movements_warehouse_id", "inventory_stock_movements", ["warehouse_id"])
     op.create_table("inventory_warehouses",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
@@ -23,6 +19,10 @@ def upgrade():
     op.create_index("ix_inventory_warehouses_organization_id", "inventory_warehouses", ["organization_id"])
     op.create_index("ix_inventory_warehouses_branch_id", "inventory_warehouses", ["branch_id"])
     op.create_index("uq_inventory_warehouse_org_code", "inventory_warehouses", ["organization_id","code"], unique=True)
+    op.add_column("inventory_stock_movements", sa.Column("warehouse_id", sa.Integer(), nullable=True))
+    with op.batch_alter_table("inventory_stock_movements") as batch_op:
+        batch_op.create_foreign_key("fk_inventory_movement_warehouse", "inventory_warehouses", ["warehouse_id"], ["id"])
+    op.create_index("ix_inventory_stock_movements_warehouse_id", "inventory_stock_movements", ["warehouse_id"])
     op.create_table("inventory_transfers",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
@@ -145,5 +145,6 @@ def downgrade():
     op.drop_table("inventory_transfers")
     op.drop_table("inventory_warehouses")
     op.drop_index("ix_inventory_stock_movements_warehouse_id", table_name="inventory_stock_movements")
-    op.drop_constraint("fk_inventory_movement_warehouse", "inventory_stock_movements", type_="foreignkey")
-    op.drop_column("inventory_stock_movements", "warehouse_id")
+    with op.batch_alter_table("inventory_stock_movements") as batch_op:
+        batch_op.drop_constraint("fk_inventory_movement_warehouse", type_="foreignkey")
+        batch_op.drop_column("warehouse_id")
