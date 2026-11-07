@@ -16,7 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
+from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals, payroll_money, payroll_item_hash, payroll_totals
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
