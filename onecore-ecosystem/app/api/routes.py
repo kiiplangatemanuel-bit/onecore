@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -866,6 +866,129 @@ def get_purchase_order(order_id: int, membership=Depends(active_membership), db:
                        "outstanding": str(x.quantity_ordered - x.quantity_received),
                        "unit_cost": str(x.unit_cost)} for x in lines]}
 
+
+
+# Purchase requisition workflow: draft -> submitted -> approved/rejected.
+@router.get("/procurement/requisitions")
+def list_procurement_requisitions(membership=Depends(active_membership),
+    db: Session=Depends(get_db), limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(ProcurementRequisition).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    rows=q.order_by(ProcurementRequisition.id.desc()).limit(limit).all()
+    return [{"id":x.id,"requisition_number":x.requisition_number,"branch_id":x.branch_id,
+        "status":x.status,"justification":x.justification,"requested_by":x.requested_by,
+        "submitted_at":x.submitted_at.isoformat() if x.submitted_at else None,
+        "reviewed_by":x.reviewed_by,"reviewed_at":x.reviewed_at.isoformat() if x.reviewed_at else None}
+        for x in rows]
+
+
+@router.post("/procurement/requisitions",status_code=201)
+def create_procurement_requisition(payload:ProcurementRequisitionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    _procurement_branch_check(db,membership,payload.branch_id)
+    ids={x.product_id for x in payload.lines}
+    products=db.query(InventoryProduct).filter(
+        InventoryProduct.organization_id==membership.organization_id,
+        InventoryProduct.is_active==True,InventoryProduct.id.in_(ids)).all()
+    if {x.id for x in products}!=ids:
+        raise HTTPException(404,"One or more products were not found")
+    row=ProcurementRequisition(organization_id=membership.organization_id,
+        branch_id=payload.branch_id,requisition_number="REQ-"+uuid.uuid4().hex[:14].upper(),
+        status="draft",justification=payload.justification.strip(),requested_by=user.id)
+    db.add(row);db.flush()
+    for item in payload.lines:
+        db.add(ProcurementRequisitionLine(organization_id=membership.organization_id,
+            requisition_id=row.id,product_id=item.product_id,quantity_requested=item.quantity))
+    db.commit();db.refresh(row)
+    audit(db,user.id,membership.organization_id,"procurement.requisition.created",
+        "procurement_requisition",row.id,row.requisition_number)
+    return {"id":row.id,"requisition_number":row.requisition_number,"status":row.status}
+
+
+@router.get("/procurement/requisitions/{requisition_id}")
+def get_procurement_requisition(requisition_id:int,membership=Depends(active_membership),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(ProcurementRequisition).filter_by(id=requisition_id,
+        organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    row=q.first()
+    if not row: raise HTTPException(404,"Requisition not found")
+    lines=db.query(ProcurementRequisitionLine).filter_by(
+        requisition_id=row.id,organization_id=membership.organization_id).order_by(
+        ProcurementRequisitionLine.id).all()
+    return {"id":row.id,"requisition_number":row.requisition_number,"branch_id":row.branch_id,
+        "status":row.status,"justification":row.justification,"requested_by":row.requested_by,
+        "reviewed_by":row.reviewed_by,"rejection_reason":row.rejection_reason,
+        "lines":[{"id":x.id,"product_id":x.product_id,"quantity":str(x.quantity_requested)} for x in lines]}
+
+
+@router.post("/procurement/requisitions/{requisition_id}/submit")
+def submit_procurement_requisition(requisition_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    q=db.query(ProcurementRequisition).filter_by(id=requisition_id,
+        organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    row=q.with_for_update().first()
+    if not row: raise HTTPException(404,"Requisition not found")
+    if row.requested_by!=user.id: raise HTTPException(403,"Only the requester can submit this requisition")
+    if row.status!="draft": raise HTTPException(409,"Only draft requisitions can be submitted")
+    row.status="submitted";row.submitted_at=datetime.now(timezone.utc)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"procurement.requisition.submitted",
+        "procurement_requisition",row.id,row.requisition_number)
+    return {"id":row.id,"status":row.status}
+
+
+@router.post("/procurement/requisitions/{requisition_id}/approve")
+def approve_procurement_requisition(requisition_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    q=db.query(ProcurementRequisition).filter_by(id=requisition_id,
+        organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    row=q.with_for_update().first()
+    if not row: raise HTTPException(404,"Requisition not found")
+    if row.status!="submitted": raise HTTPException(409,"Only submitted requisitions can be approved")
+    if row.requested_by==user.id: raise HTTPException(409,"Requester cannot approve their own requisition")
+    row.status="approved";row.reviewed_by=user.id;row.reviewed_at=datetime.now(timezone.utc)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"procurement.requisition.approved",
+        "procurement_requisition",row.id,row.requisition_number)
+    return {"id":row.id,"status":row.status}
+
+
+@router.post("/procurement/requisitions/{requisition_id}/reject")
+def reject_procurement_requisition(requisition_id:int,payload:ProcurementRequisitionReviewIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if len(payload.reason.strip())<5: raise HTTPException(422,"A rejection reason of at least 5 characters is required")
+    q=db.query(ProcurementRequisition).filter_by(id=requisition_id,
+        organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementRequisition.branch_id.in_(allowed)) if allowed else q.filter(ProcurementRequisition.id==-1)
+    row=q.with_for_update().first()
+    if not row: raise HTTPException(404,"Requisition not found")
+    if row.status!="submitted": raise HTTPException(409,"Only submitted requisitions can be rejected")
+    if row.requested_by==user.id: raise HTTPException(409,"Requester cannot reject their own requisition")
+    row.status="rejected";row.rejection_reason=payload.reason.strip()
+    row.reviewed_by=user.id;row.reviewed_at=datetime.now(timezone.utc)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"procurement.requisition.rejected",
+        "procurement_requisition",row.id,payload.reason.strip())
+    return {"id":row.id,"status":row.status}
 
 # POS shift accountability and idempotent online/offline transaction synchronization.
 @router.get("/pos/catalog")
