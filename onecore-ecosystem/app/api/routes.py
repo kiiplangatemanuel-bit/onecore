@@ -1635,9 +1635,11 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             _record_pos_sync_conflict(db,membership,user,payload,shift,"device_revoked",
                 {"device_status":device.status if device else "missing"})
             raise HTTPException(401,"Trusted POS device authentication failed")
-        if device.offline_until and device.offline_until < datetime.now(timezone.utc):
+        device_expiry=device.offline_until
+        if device_expiry and device_expiry.tzinfo is None: device_expiry=device_expiry.replace(tzinfo=timezone.utc)
+        if device_expiry and device_expiry < datetime.now(timezone.utc):
             _record_pos_sync_conflict(db,membership,user,payload,shift,"offline_expired",
-                {"offline_until":device.offline_until.isoformat()})
+                {"offline_until":device_expiry.isoformat()})
             raise HTTPException(409,"Trusted device offline authorization expired; supervisor review is required")
     product_ids = {line.product_id for line in payload.lines}
     products = db.query(InventoryProduct).filter(
