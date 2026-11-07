@@ -239,3 +239,33 @@ class SchoolGradeBandIn(BaseModel):
     minimum_percent: Decimal = Field(ge=0, le=100)
     maximum_percent: Decimal = Field(ge=0, le=100)
     points: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class AccountingInvoiceLineIn(BaseModel):
+    account_id: int = Field(gt=0)
+    tax_account_id: int | None = Field(default=None, gt=0)
+    description: str = Field(min_length=2, max_length=240)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999"))
+    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class AccountingInvoiceIn(BaseModel):
+    invoice_type: str = Field(pattern=r"^(receivable|payable)$")
+    contact_id: int | None = Field(default=None, gt=0)
+    supplier_id: int | None = Field(default=None, gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    invoice_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
+    issue_date: date
+    due_date: date
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    control_account_id: int = Field(gt=0)
+    lines: list[AccountingInvoiceLineIn] = Field(min_length=1, max_length=200)
+
+
+class AccountingInvoicePaymentIn(BaseModel):
+    payment_account_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"))
+    payment_date: date
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
