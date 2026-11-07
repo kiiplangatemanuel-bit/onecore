@@ -9,6 +9,7 @@ from app.core.models import User
 from app.core.security import hash_password
 from app.api.routes import router
 from app.api.platform_routes import router as platform_router
+from app.api.sacco_finance import router as sacco_finance_router
 from app.api.accounting_statements import router as accounting_statements_router
 
 @asynccontextmanager
@@ -29,6 +30,7 @@ app = FastAPI(title=settings.app_name, version="0.1.0", description="OneCore mod
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
+app.include_router(sacco_finance_router)
 app.include_router(platform_router)
 app.include_router(accounting_statements_router)
 
