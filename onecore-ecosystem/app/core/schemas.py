@@ -345,3 +345,21 @@ class AccountingBankStatementIn(BaseModel):
 class AccountingBankMatchIn(BaseModel):
     statement_line_id: int = Field(gt=0)
     journal_line_id: int = Field(gt=0)
+
+
+class CRMQuoteLineIn(BaseModel):
+    description: str = Field(min_length=2, max_length=240)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999"), multiple_of=Decimal("0.001"))
+    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class CRMQuoteIn(BaseModel):
+    contact_id: int = Field(gt=0)
+    lead_id: int | None = Field(default=None, gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    quote_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    issue_date: date
+    valid_until: date
+    lines: list[CRMQuoteLineIn] = Field(min_length=1, max_length=200)
