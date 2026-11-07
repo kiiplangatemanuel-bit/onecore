@@ -92,3 +92,23 @@ def test_sacco_arrears_ageing_ui_is_read_only():
     assert 'id="arrearsRows"' in html
     assert "/sacco/loans/arrears" in html
     assert "No late fees or penalties are calculated or posted" in html
+
+
+
+def test_sacco_guarantor_and_collateral_contracts():
+    from app.core.schemas import (SaccoLoanGuarantorIn, SaccoLoanCollateralIn,
+        SaccoLoanGuarantorDecisionIn, SaccoLoanCollateralDecisionIn)
+    assert SaccoLoanGuarantorIn(member_id=2, guaranteed_amount=Decimal("500.00"),
+        consent_reference="CONSENT-001").member_id == 2
+    assert SaccoLoanCollateralIn(collateral_type="vehicle", description="Motor vehicle",
+        owner_name="Member Name", estimated_value=Decimal("120000.00")).estimated_value == Decimal("120000.00")
+    with pytest.raises(ValidationError):
+        SaccoLoanGuarantorIn(member_id=2, guaranteed_amount=Decimal("1.001"),
+            consent_reference="CONSENT-001")
+    with pytest.raises(ValidationError):
+        SaccoLoanCollateralDecisionIn(decision="accepted", note="Accepted")
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/sacco/loans/{loan_id}/guarantors" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/decision" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/collateral" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/decision" in paths
