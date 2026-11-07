@@ -422,6 +422,21 @@ class CRMQuoteIn(BaseModel):
     lines: list[CRMQuoteLineIn] = Field(min_length=1, max_length=200)
 
 
+class SchoolLearnerPlacementIn(BaseModel):
+    target_class_id: int = Field(gt=0)
+    effective_date: date
+    change_type: str = Field(pattern=r"^(promotion|transfer)$")
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("Placement reason must contain at least five non-space characters")
+        return value
+
+
 class SchoolAttendanceItemIn(BaseModel):
     learner_id: int = Field(gt=0)
     status: str = Field(pattern=r"^(present|absent|late|excused)$")
