@@ -88,3 +88,14 @@ def test_kenya_2026_rule_pack_has_official_authority_sources_and_effective_date(
     assert any("kenyalaw.org" in host for host in hosts)
     assert KENYA_2026_RULES["effective_from"] == "2026-02-01"
     assert KENYA_2026_RULES["status"] == "active"
+
+
+
+def test_employer_meals_are_taxed_above_exemption_but_not_paid_as_cash():
+    without = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES)
+    with_meals = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                         {"meal_benefit": "8000"})
+    assert Decimal(with_meals["gross_pay"]) == Decimal(without["gross_pay"])
+    assert Decimal(with_meals["taxable_benefits"]) == Decimal("3000.00")
+    assert Decimal(with_meals["taxable_pay"]) == Decimal(without["taxable_pay"]) + Decimal("3000.00")
+    assert Decimal(with_meals["net_pay"]) < Decimal(without["net_pay"])
