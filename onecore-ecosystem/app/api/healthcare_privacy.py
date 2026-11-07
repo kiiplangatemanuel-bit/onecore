@@ -22,7 +22,7 @@ ROLE_PERMISSIONS={
         "appointment.manage","access.manage","consent.manage","audit.read","breakglass",
         "hospital.manage","admissions.manage","nursing.manage","observations.manage","orders.manage","billing.manage","insurance.manage","pharmacy.manage","lab.manage","emergency.manage","theatre.manage","documents.manage","privacy.monitor","retention.manage","recovery.manage"},
     "clinician":{"patient.read","clinical.read","clinical.write","appointment.manage","breakglass","admissions.manage","nursing.manage","observations.manage","orders.manage","emergency.manage","theatre.manage","documents.manage"},
-    "nurse":{"patient.read","clinical.read","clinical.write","appointment.manage","breakglass","nursing.manage","observations.manage","admissions.manage","emergency.manage"},
+    "nurse":{"patient.read","clinical.read","appointment.manage","breakglass","nursing.manage","observations.manage","admissions.manage","emergency.manage"},
     "receptionist":{"patient.register","patient.read","appointment.manage","admissions.manage","emergency.manage"},
     "privacy_officer":{"access.manage","consent.manage","audit.read"},
     "clinical_auditor":{"patient.read","clinical.read","audit.read"},
