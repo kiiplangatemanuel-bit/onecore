@@ -1,0 +1,17 @@
+{
+  "category_number": 20,
+  "name": "Payments and Financial Infrastructure",
+  "scope_from_master_specification": "M-Pesa STK Push/C2B/B2C; banks/cards/payment links/gateways; split/recurring payments; verification/callbacks/reconciliation; refunds; transaction history; duplicate protection; audit; optional wallet; multi-currency; settlement and reports.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

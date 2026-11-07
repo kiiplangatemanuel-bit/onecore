@@ -1,0 +1,17 @@
+{
+  "category_number": 26,
+  "name": "Superadmin Control Centre",
+  "scope_from_master_specification": "Mandatory 2FA; users/tenants/modules/subscriptions/licensing; AI/provider/API/integration/SHA/eTIMS monitoring; registration visibility/approval; tenant activation/suspension; global settings/feature flags; CMS/news/careers/partners/support; reports/audit/security/health/backups/maintenance/releases/emergency disable/rollback; staged development-to-production lifecycle.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

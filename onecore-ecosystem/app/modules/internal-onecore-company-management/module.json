@@ -1,0 +1,17 @@
+{
+  "category_number": 34,
+  "name": "Internal OneCore Company Management",
+  "scope_from_master_specification": "Internal CRM/leads/sales; onboarding/projects/tasks/software delivery; HR/payroll/accounting/expenses; partner/support/knowledge/product management; staff performance, approvals and company analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

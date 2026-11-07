@@ -1,0 +1,17 @@
+{
+  "category_number": 42,
+  "name": "OneCore Public Website",
+  "scope_from_master_specification": "onecore.co.ke: homepage, company profile, product directory/detail pages, industry solutions, pricing, demos, quotes, contact, testimonials/case studies, news/blog, careers, partners, developer/docs/support/community/status links, trust, downloads/events, newsletter/social, language/search, SEO/accessibility, privacy/cookies, sitemap and analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "category_number": 73,
+  "name": "Enterprise Integration and Data Exchange",
+  "scope_from_master_specification": "External API registry/credentials/approval/health; mapping/transformation; scheduled/event-driven exchange; import/export validation/deduplication/retries/dead-letter queues/reconciliation/sync monitoring/version/security/audit/performance.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

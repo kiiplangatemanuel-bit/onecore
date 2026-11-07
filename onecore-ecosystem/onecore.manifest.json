@@ -1,0 +1,9 @@
+{
+  "company": "OneCore Technologies Ltd",
+  "tagline": "One Platform. Every Organization. Anywhere.",
+  "source_document": "OneCore_Complete_Ecosystem_and_Workflow_Master_Document_UPDATED.docx",
+  "source_version": "Consolidated master edition \u2014 5 November 2026",
+  "feature_category_count": 75,
+  "architecture": "Modular monolith initially; extract services when justified",
+  "delivery_status": "Runnable foundation and scaffolding; not production-complete"
+}

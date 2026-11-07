@@ -1,0 +1,17 @@
+{
+  "category_number": 29,
+  "name": "White-label and Custom Software Development",
+  "scope_from_master_specification": "Branding, custom login/domains/portals/mobile apps/modules/workflows/integrations/reports/forms/rules; dedicated/private deployment; full-control and source-code licensing; maintenance agreements.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

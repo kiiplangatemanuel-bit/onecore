@@ -1,0 +1,17 @@
+{
+  "category_number": 53,
+  "name": "Public System Status Centre",
+  "scope_from_master_specification": "status.onecore.co.ke: website/products/APIs/database/payments/M-Pesa/eTIMS/SHA/storage/auth/notifications/docs/support/workers/infrastructure status; maintenance calendar, incidents, uptime history/reports, email/webhook/RSS/API subscriptions and monitored status indicators.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

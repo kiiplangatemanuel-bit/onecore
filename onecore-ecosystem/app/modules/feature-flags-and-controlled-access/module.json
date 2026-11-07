@@ -1,0 +1,17 @@
+{
+  "category_number": 66,
+  "name": "Feature Flags and Controlled Access",
+  "scope_from_master_specification": "Global/product/module/tenant/user/developer flags; beta/experimental/internal; staged and percentage/country/plan rollouts; temporary expiry; rollback/emergency disable; usage analytics and audit.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

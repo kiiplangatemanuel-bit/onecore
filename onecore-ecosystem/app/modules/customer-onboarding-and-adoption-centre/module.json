@@ -1,0 +1,17 @@
+{
+  "category_number": 70,
+  "name": "Customer Onboarding and Adoption Centre",
+  "scope_from_master_specification": "Registration/verification/industry/modules/subscription; setup wizard; branches/staff/customer/supplier/product imports; opening balances; configuration/migration; tours/checklists/training/go-live readiness; adoption/feedback/customer success/renewal/churn/health reports.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

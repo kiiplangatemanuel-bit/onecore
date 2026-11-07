@@ -1,0 +1,17 @@
+{
+  "category_number": 12,
+  "name": "Property Management",
+  "scope_from_master_specification": "Properties/buildings/units; tenants/landlords; leases; rent invoices/collections/reconciliation; deposits/utilities; maintenance/inspections; communication; renewals/arrears; expenses/contractors; reports and tenant/landlord portals.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

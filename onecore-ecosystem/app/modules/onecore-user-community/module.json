@@ -1,0 +1,17 @@
+{
+  "category_number": 58,
+  "name": "OneCore User Community",
+  "scope_from_master_specification": "community.onecore.co.ke: public reading; accounts for posting; profiles/groups/forums/Q&A/comments/replies/mentions/reactions/votes/accepted answers/search/tags/feature requests/bug discussions/announcements/events/polls/reputation/moderation/reporting/spam/blocking/rules/history/analytics/notifications.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

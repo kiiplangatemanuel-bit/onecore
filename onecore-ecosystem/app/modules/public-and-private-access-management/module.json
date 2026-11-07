@@ -1,0 +1,17 @@
+{
+  "category_number": 63,
+  "name": "Public and Private Access Management",
+  "scope_from_master_specification": "URL access matrix; central IdP/SSO; separate customer/developer/partner/staff permissions; tenant-aware access; no privilege inheritance; MFA and privileged access safeguards.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

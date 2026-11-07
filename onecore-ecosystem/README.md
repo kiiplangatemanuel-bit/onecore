@@ -1,0 +1,69 @@
+# OneCore Technologies Ltd — Ecosystem Starter
+
+**One Platform. Every Organization. Anywhere.**  
+This repository is a runnable, modular-monolith foundation generated from the supplied *OneCore Complete Ecosystem & Workflow Master Specification* (5 November 2026, including the domain/branding/maintenance addendum).
+
+It provides the shared platform foundation, a tenant-aware generic module API, integration adapter contracts, a public landing page, operational endpoints, Docker setup, tests, and the complete 75-category scope catalogue. It is deliberately structured so provider-specific credentials and URLs are configured through environment variables and adapter implementations.
+
+> **Important delivery boundary:** this is an executable foundation and module scaffold, not a claim that all 75 enterprise domains are already production-complete, legally certified, or connected to providers. The specification itself says each feature must pass database, backend, frontend, permissions, validation, tests, monitoring, documentation and deployment checks before being marked complete. Domain workflows that need specialist rules (clinical, financial, tax, payroll, education, etc.) require implementation and UAT before production use.
+
+## Stack
+- Python 3.12, FastAPI, SQLAlchemy 2, Pydantic settings
+- PostgreSQL in production; SQLite for local development
+- JWT access tokens, Argon2 password hashing, tenant-aware authorization
+- Adapter interfaces for M-Pesa, KRA eTIMS, SHA/DHA AfyaLink, banks, messaging, AI and object storage
+- Docker Compose, pytest, OpenAPI
+
+## Quick start
+```bash
+cp .env.example .env
+docker compose up --build
+```
+API: http://localhost:8000  
+Interactive API docs: http://localhost:8000/docs  
+Health: http://localhost:8000/health  
+Public site: http://localhost:8000/
+
+For local non-Docker development:
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+## First-run bootstrap
+Set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` in `.env` before first startup. The bootstrap account is a platform administrator for development. Replace it with a controlled production provisioning process, enforce MFA, and rotate the password before any real deployment.
+
+## Developer integration rule
+1. Implement or select a provider adapter in `app/integrations/`.
+2. Put only secrets and environment-specific values in `.env` / deployment secret manager.
+3. Set `INTEGRATION_<PROVIDER>_ENABLED=true` and the relevant provider variables.
+4. Test callbacks, signature validation, retries, idempotency and reconciliation in sandbox.
+5. Enable production only after provider onboarding, legal/contractual approval and acceptance tests.
+
+The application starts with adapters disabled. No real payment, tax, health, messaging, AI or bank call is made by default. Never paste production secrets into source control.
+
+## Main API groups
+- `/api/v1/auth` — login and current identity
+- `/api/v1/organizations` — organizations and membership
+- `/api/v1/modules` — 75-category catalogue and enabled modules
+- `/api/v1/records/{module_key}` — tenant-scoped generic records (starter data plane)
+- `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)
+- `/api/v1/operations` — audit events and operational overview
+- `/health` — liveness/readiness information
+
+## Architecture and extension points
+See `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, `docs/MODULE_DELIVERY.md`, and `docs/SPEC_TRACEABILITY.md`.
+
+## Production checklist (minimum)
+- Configure PostgreSQL, Redis/queue, object storage, TLS, reverse proxy and managed secrets.
+- Replace development bootstrap with invitation/provisioning; add MFA/SSO and privileged-session controls.
+- Add migrations (Alembic), backup/PITR and tested restore; define RTO/RPO.
+- Complete tenant/branch authorization tests and independent security review.
+- Implement specialist domain schemas and workflows for each enabled product.
+- Complete provider sandbox/UAT/certification and reconciliation.
+- Add observability, alerting, rate limits, WAF, malware scanning and retention policies.
+- Complete Kenya Data Protection Act/GDPR applicability assessment and contracts.
+- Do not advertise SHA/eTIMS certification or production connectivity until formally approved and tested.

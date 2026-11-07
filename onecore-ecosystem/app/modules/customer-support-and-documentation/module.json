@@ -1,0 +1,17 @@
+{
+  "category_number": 25,
+  "name": "Customer Support and Documentation",
+  "scope_from_master_specification": "Support portal/help centre/KB/docs/tutorials/FAQs; tickets/live chat/AI support; bug/feature/incident reporting; assignments/priorities/SLA/escalations; feedback and status page.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

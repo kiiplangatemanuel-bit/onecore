@@ -1,0 +1,17 @@
+{
+  "category_number": 71,
+  "name": "Advanced Business Intelligence",
+  "scope_from_master_specification": "Cross-product/group/branch analytics; budget vs actual; cash flow/revenue/inventory forecasts; churn/CLV/credit risk/stress tests; school/hospital/hotel/restaurant/property insights; predictive maintenance; natural-language KPI; executive reports/scheduled exports with permission-aware access.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "category_number": 37,
+  "name": "Master Module Integration Map",
+  "scope_from_master_specification": "Core identity/tenant/permissions/config/billing/security connected to Business OS, AI, Cloud, Connect and industry systems through shared accounting, payments, eTIMS, SHA, communication, analytics, automation and storage; administered through Superadmin/Organization Admin/Operations/Compliance.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

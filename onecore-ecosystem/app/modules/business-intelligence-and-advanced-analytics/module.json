@@ -1,0 +1,17 @@
+{
+  "category_number": 31,
+  "name": "Business Intelligence and Advanced Analytics",
+  "scope_from_master_specification": "Central and cross-module dashboards; report builder; financial/sales/inventory/customer/HR/school/hospital/loan/hotel/restaurant analytics; predictive analytics/forecasting/benchmarking/anomaly detection; scheduled reports, exports and AI insights.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

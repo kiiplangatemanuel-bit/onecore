@@ -1,0 +1,17 @@
+{
+  "category_number": 22,
+  "name": "Website Builder and Digital Presence",
+  "scope_from_master_specification": "Drag/drop builder; templates; business/industry sites; pages/blog/CMS; custom domains/SSL; SEO/analytics; forms/bookings/payments; multilingual sites; backups/versioning/restore and branding.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "category_number": 27,
+  "name": "Organization Admin Portal",
+  "scope_from_master_specification": "Organization profile/branding/branches; employees/roles; module and subscription management; payments/usage/storage/AI; API/integrations; workflows/custom fields/approvals; reports/audit; KRA/SHA setup; custom domains; exports and security.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

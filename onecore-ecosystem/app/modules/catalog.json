@@ -1,0 +1,377 @@
+[
+  {
+    "number": 1,
+    "name": "Company identity and platform principles",
+    "scope": "Company: OneCore Technologies Ltd."
+  },
+  {
+    "number": 2,
+    "name": "Five architecture pillars",
+    "scope": ""
+  },
+  {
+    "number": 3,
+    "name": "Domain and URL architecture",
+    "scope": "The following is the recommended production URL map. DNS, TLS certificates, routing, identity and access policies must be configured consistently. Subdomains are logical entry points; they may be served by a shared frontend/API gateway where appropriate."
+  },
+  {
+    "number": 4,
+    "name": "Main website workflow \u2014 onecore.co.ke",
+    "scope": "4.1 Public visitor journey"
+  },
+  {
+    "number": 5,
+    "name": "Customer application workflow \u2014 app.onecore.co.ke",
+    "scope": "5.1 Registration and account activation"
+  },
+  {
+    "number": 6,
+    "name": "Organization administration workflow",
+    "scope": "Manage organization profile, branches, branding, domains, operating hours, currency, timezone and language."
+  },
+  {
+    "number": 7,
+    "name": "Superadmin and OneCore operations workflows",
+    "scope": "7.1 Superadmin access and control"
+  },
+  {
+    "number": 8,
+    "name": "Complete 75-category master feature register",
+    "scope": "The 75 categories below are the authoritative scope map. The feature bullets preserve the detailed requirements supplied for each category while grouping related capabilities for readability."
+  },
+  {
+    "number": 9,
+    "name": "Pharmacy and Laboratory Management",
+    "scope": "Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock, suppliers, pricing and billing; lab catalogue, sample registration/tracking, processing, result validation, reports, doctor access, equipment, inventory and quality control."
+  },
+  {
+    "number": 10,
+    "name": "Finance, SACCO, Microfinance and Chama",
+    "scope": "Members/KYC; savings, deposits, withdrawals, shares/contributions; groups; loan products/applications/assessment/approval/disbursement; interest, penalties, schedules and repayments; guarantors/collateral; statements, delinquency/restructuring, dividends, portfolio/risk reports, M-Pesa/banks, member portals, meetings, voting/resolutions and AI insights."
+  },
+  {
+    "number": 11,
+    "name": "HR and Payroll",
+    "scope": "Employee profiles, recruitment/ATS, onboarding/contracts, departments/positions, attendance/biometrics, shifts, leave/overtime/timesheets, payroll, allowances/deductions/payslips/payments, configurable PAYE/NSSF/SHIF/AHL statutory rules, tax reports, appraisals, training, discipline, self-service and analytics."
+  },
+  {
+    "number": 12,
+    "name": "Property Management",
+    "scope": "Properties/buildings/units; tenants/landlords; leases; rent invoices/collections/reconciliation; deposits/utilities; maintenance/inspections; communication; renewals/arrears; expenses/contractors; reports and tenant/landlord portals."
+  },
+  {
+    "number": 13,
+    "name": "Hotel Management",
+    "scope": "Rooms/availability/reservations; check-in/out; guest profiles; pricing; housekeeping; restaurant integration; billing/deposits/M-Pesa; invoices; staff/maintenance; reviews; occupancy/revenue analytics and booking portal."
+  },
+  {
+    "number": 14,
+    "name": "Restaurant Management",
+    "scope": "Menus; tables/reservations; orders; kitchen display/tickets; waiter/cashier; delivery/takeaway; POS; ingredient stock, recipes/costing/food-cost; suppliers/procurement; loyalty/discounts; M-Pesa, tax invoices and sales reports."
+  },
+  {
+    "number": 15,
+    "name": "Services Management",
+    "scope": "Service catalogue/bookings/appointments; job cards/work orders; technician assignment; tasks/projects; quotations/contracts/recurring billing; support; equipment/service history; completion reports, feedback and analytics."
+  },
+  {
+    "number": 16,
+    "name": "OneCore AI",
+    "scope": "Individual/business/institution/enterprise access; standalone/integrated use; hybrid billing; multi-provider gateway, routing/failover, private deployment, policies, usage/cost controls; chat, documents, summarization, data/spreadsheet analysis, visualization, BI, coding/SQL, voice/STT/TTS, image generation/understanding, file/PDF analysis, reports, forecasting, predictive insights, anomaly detection, automation, support, knowledge, extraction, decision support, search, agents and tool/API calls; English, Kiswahili, French, Arabic and extensible African languages; permission/tenant-aware governance, human approval, logs and retention."
+  },
+  {
+    "number": 17,
+    "name": "OneCore Cloud",
+    "scope": "Cloud file storage; organization storage; document management; upload/download/share/folders; permissions/versioning/preview/search; quotas; automated backups/verification; disaster recovery/restore; encryption; hosting/deployment and storage analytics/retention."
+  },
+  {
+    "number": 18,
+    "name": "OneCore Connect",
+    "scope": "REST APIs; docs; API keys; OAuth; webhooks/retries; rate limits/versioning; monitoring/sandbox; third-party connectors; M-Pesa/banks/SMS/email/WhatsApp/push/accounting/identity/SHA/eTIMS; external connectors, logs and error handling."
+  },
+  {
+    "number": 19,
+    "name": "KRA eTIMS and Tax Management",
+    "scope": "KRA PIN, branch/till and tax classification; VAT; invoice transmission via applicable authorized OSCU/VSCU method; KRA responses/identifiers/QR where required; credit/debit notes, corrections and permitted cancellations; supplier invoices; history/export; retries/duplicate prevention; VAT summaries, tax periods, estimates, reminders, payment references, authorized payment channels and reconciliation. Returns filing and tax payments are separate unless KRA explicitly authorizes APIs."
+  },
+  {
+    "number": 20,
+    "name": "Payments and Financial Infrastructure",
+    "scope": "M-Pesa STK Push/C2B/B2C; banks/cards/payment links/gateways; split/recurring payments; verification/callbacks/reconciliation; refunds; transaction history; duplicate protection; audit; optional wallet; multi-currency; settlement and reports."
+  },
+  {
+    "number": 21,
+    "name": "Communication Centre",
+    "scope": "Internal messaging/announcements; email/SMS/WhatsApp/push; bulk/scheduled messages; templates; reminders; payment/approval/customer/staff notifications; delivery reports, failures and communication history."
+  },
+  {
+    "number": 22,
+    "name": "Website Builder and Digital Presence",
+    "scope": "Drag/drop builder; templates; business/industry sites; pages/blog/CMS; custom domains/SSL; SEO/analytics; forms/bookings/payments; multilingual sites; backups/versioning/restore and branding."
+  },
+  {
+    "number": 23,
+    "name": "OneCore E-commerce",
+    "scope": "Online stores/catalogue/variants; cart/customer accounts/checkout; orders/payments/M-Pesa; inventory sync; delivery/shipping; discounts; digital/subscription products; reviews; marketplace/sellers; analytics and eTIMS invoices."
+  },
+  {
+    "number": 24,
+    "name": "Data Migration and Digital Transformation",
+    "scope": "System/process assessment; migration plans; CSV/XLSX and legacy DB imports; customers/suppliers/inventory/financial data; cleaning/deduplication; mapping/preview/validation/errors; rollback; parallel operation/API migration; onboarding, training and go-live."
+  },
+  {
+    "number": 25,
+    "name": "Customer Support and Documentation",
+    "scope": "Support portal/help centre/KB/docs/tutorials/FAQs; tickets/live chat/AI support; bug/feature/incident reporting; assignments/priorities/SLA/escalations; feedback and status page."
+  },
+  {
+    "number": 26,
+    "name": "Superadmin Control Centre",
+    "scope": "Mandatory 2FA; users/tenants/modules/subscriptions/licensing; AI/provider/API/integration/SHA/eTIMS monitoring; registration visibility/approval; tenant activation/suspension; global settings/feature flags; CMS/news/careers/partners/support; reports/audit/security/health/backups/maintenance/releases/emergency disable/rollback; staged development-to-production lifecycle."
+  },
+  {
+    "number": 27,
+    "name": "Organization Admin Portal",
+    "scope": "Organization profile/branding/branches; employees/roles; module and subscription management; payments/usage/storage/AI; API/integrations; workflows/custom fields/approvals; reports/audit; KRA/SHA setup; custom domains; exports and security."
+  },
+  {
+    "number": 28,
+    "name": "Subscription, Billing and Licensing Engine",
+    "scope": "Individual/business/industry/enterprise plans; monthly/annual/per-user/per-module/usage/hybrid/trial/custom pricing; activation/renewal/upgrades/downgrades/grace/suspension; payment verification/receipts/tax/refunds/limits/entitlements/revenue analytics; shared SaaS, dedicated, private, self-hosted, perpetual and custom arrangements with infrastructure/AI costs separately stated."
+  },
+  {
+    "number": 29,
+    "name": "White-label and Custom Software Development",
+    "scope": "Branding, custom login/domains/portals/mobile apps/modules/workflows/integrations/reports/forms/rules; dedicated/private deployment; full-control and source-code licensing; maintenance agreements."
+  },
+  {
+    "number": 30,
+    "name": "Partner and Developer Ecosystem",
+    "scope": "Partner registration/verification; resellers/implementation/affiliate/referral; commissions; partner dashboard; developer APIs/sandbox/examples; plugins/extensions marketplace; third-party developers, certification, training and support."
+  },
+  {
+    "number": 31,
+    "name": "Business Intelligence and Advanced Analytics",
+    "scope": "Central and cross-module dashboards; report builder; financial/sales/inventory/customer/HR/school/hospital/loan/hotel/restaurant analytics; predictive analytics/forecasting/benchmarking/anomaly detection; scheduled reports, exports and AI insights."
+  },
+  {
+    "number": 32,
+    "name": "Security, Privacy and Compliance",
+    "scope": "Tenant isolation; RBAC/MFA; password/session security; encryption; API auth/rate limits; brute-force/CSRF/XSS/SQLi protections; secure uploads; device/session revocation; audit; retention/export/deletion/consent; encrypted backups; vulnerability/dependency scans; penetration tests; incidents/alerts; Kenya Data Protection Act and GDPR where applicable; enhanced health/finance controls."
+  },
+  {
+    "number": 33,
+    "name": "Mobile Applications and Hardware Integration",
+    "scope": "Android/Windows/tablets/PWA; responsive dashboards/offline; push/camera/QR/barcode; Bluetooth/USB; printers/cash drawers/biometrics/POS terminals; device registration/authentication/permissions/revocation."
+  },
+  {
+    "number": 34,
+    "name": "Internal OneCore Company Management",
+    "scope": "Internal CRM/leads/sales; onboarding/projects/tasks/software delivery; HR/payroll/accounting/expenses; partner/support/knowledge/product management; staff performance, approvals and company analytics."
+  },
+  {
+    "number": 35,
+    "name": "Developer Infrastructure and Engineering Operations",
+    "scope": "Modular monolith/API-first; PostgreSQL/Redis/workers/queues/object storage; Docker/Nginx/GitHub/protected branches; dev/test/staging/production; CI/CD/tests/API versioning/migrations/backward compatibility; logs/APM/errors/health; backups/replication/DR/load tests/rollback/docs/secrets."
+  },
+  {
+    "number": 36,
+    "name": "Advanced Competitive Features",
+    "scope": "Unified search/dashboard/customer profiles; cross-module workflows; AI operations; no-code/low-code; plugins; digital signatures/QR/barcodes/receipts; multi-org; self-service; offline-first; benchmarking/forecasting/custom dashboards/reports; sandbox; backup verification/DR tests/rollback/progressive releases; enterprise deployments; cross-device sync; intelligent alerts and data validation."
+  },
+  {
+    "number": 37,
+    "name": "Master Module Integration Map",
+    "scope": "Core identity/tenant/permissions/config/billing/security connected to Business OS, AI, Cloud, Connect and industry systems through shared accounting, payments, eTIMS, SHA, communication, analytics, automation and storage; administered through Superadmin/Organization Admin/Operations/Compliance."
+  },
+  {
+    "number": 38,
+    "name": "Important External Integrations",
+    "scope": "M-Pesa; KRA eTIMS; SHA/DHA AfyaLink; banks; SMS/email/WhatsApp; AI providers; biometrics; barcode hardware; printers; external identity services. All integrations require authorized credentials, testing, error handling and reconciliation."
+  },
+  {
+    "number": 39,
+    "name": "Feature Delivery and Quality Requirements",
+    "scope": "Every module requires requirements, schema, APIs, permissions, validation, error handling, audit, automated/security/performance tests, user/admin/integration docs, deployment, backup/recovery, monitoring, versioning, release approval and UAT."
+  },
+  {
+    "number": 40,
+    "name": "Original Final OneCore Product Inventory",
+    "scope": "Core Platform; Business OS; AI; Cloud; Connect; Accounting OS; POS OS; Retail OS; School OS; Hospital OS; Pharmacy OS; Laboratory OS; Finance/SACCO/Microfinance/Chama OS; HR/Payroll; Property; Hotel; Restaurant; Services; CRM; Inventory; Procurement; E-commerce; Website Builder; Communication; Tax/eTIMS; SHA connector; Workflow; Analytics/BI; Support; Developer; Partner; Superadmin; Organization Admin; Subscription; Migration; Internal Operations."
+  },
+  {
+    "number": 41,
+    "name": "Original Integration and Product Inventory Baseline",
+    "scope": "Preserve the original product inventory and its integrations as the baseline for traceability; do not treat this inventory as a replacement for detailed category requirements."
+  },
+  {
+    "number": 42,
+    "name": "OneCore Public Website",
+    "scope": "onecore.co.ke: homepage, company profile, product directory/detail pages, industry solutions, pricing, demos, quotes, contact, testimonials/case studies, news/blog, careers, partners, developer/docs/support/community/status links, trust, downloads/events, newsletter/social, language/search, SEO/accessibility, privacy/cookies, sitemap and analytics."
+  },
+  {
+    "number": 43,
+    "name": "Central CMS",
+    "scope": "admin.onecore.co.ke/cms: pages, news/blog, careers, products/solutions, partners/community, events, testimonials/case studies, FAQs/KB/docs/landing pages, navigation/footer/banners; editor/templates/media/tags/authors; preview, draft/review/approval/schedule/publish/archive/revisions/comments/emergency publishing."
+  },
+  {
+    "number": 44,
+    "name": "Multilingual CMS",
+    "scope": "English, Kiswahili, French, Arabic, Somali, Amharic, Hausa, Yoruba, Zulu, Portuguese and extensible languages; localized URLs/pages, translation assignment/review, machine translation with human review, fallback/detection, search, RTL Arabic, localized formats."
+  },
+  {
+    "number": 45,
+    "name": "Universal Search",
+    "scope": "search.onecore.co.ke: public/product/docs/blog/news/careers/partner/FAQ/KB/community/video search; multilingual autocomplete, typo correction, filters/ranking, popular/recent searches, analytics, failed-search monitoring, recommendations and permission-/tenant-aware private search."
+  },
+  {
+    "number": 46,
+    "name": "SEO and Digital Marketing Centre",
+    "scope": "Metadata, canonical URLs, social previews, structured data, sitemaps/robots/redirects, broken links, image alt/optimization, multilingual SEO, duplicate content, performance history, campaigns, UTM, newsletter, landing pages and conversion/source analytics."
+  },
+  {
+    "number": 47,
+    "name": "Media Library and Digital Asset Management",
+    "scope": "admin.onecore.co.ke/media: images/video/docs/audio, logos/brand assets, bulk upload, folders/tags/search/preview, optimization/thumbnails, duplicate detection, version/replacement/usage, copyright/licensing, permissions, CDN, signed downloads, archive/restore, storage analytics and malware/type/size checks."
+  },
+  {
+    "number": 48,
+    "name": "Central Notification Engine",
+    "scope": "admin.onecore.co.ke/notifications: in-app/web/email/SMS/WhatsApp/push/webhooks; scheduled/recurring multilingual templates; preferences/opt-out; essential security/service alerts; payments/subscriptions/maintenance; tracking/retries/read history/audience targeting/broadcast analytics."
+  },
+  {
+    "number": 49,
+    "name": "Ecosystem Analytics Centre",
+    "scope": "admin.onecore.co.ke/analytics: visits, sources, product adoption, docs/search, support, developer/API, partner/community, notification, careers/marketing/campaign, country/device/language, content/download and privacy-preserving analytics."
+  },
+  {
+    "number": 50,
+    "name": "Audit and Accountability Centre",
+    "scope": "User/staff/Superadmin actions; content changes/approval/publishing/restoration; maintenance/emergency/notifications; partner/community/API/file events; role changes/login/security; before/after references, timestamps, exports, tamper-evident storage, retention and restricted access."
+  },
+  {
+    "number": 51,
+    "name": "Maintenance Control Centre",
+    "scope": "admin.onecore.co.ke/maintenance: schedule/emergency/recurring maintenance; service/module/API/infrastructure/tenant/branch/environment scope; announcement/partial/read-only/full/API/worker/DB modes; approvals, notices, ticker/countdown, staff visibility, scoped temporary exemptions, backups/health/migration checks, auto/manual reopen, rollback and reports. Offline POS must continue locally."
+  },
+  {
+    "number": 52,
+    "name": "Emergency and Incident Management Centre",
+    "scope": "admin.onecore.co.ke/incidents: incident IDs, SEV-1 to SEV-4, ownership/escalation/timeline, internal/public communication, evidence, resolution, RCA, corrective/preventive actions, reviews, analytics, security evidence and audit."
+  },
+  {
+    "number": 53,
+    "name": "Public System Status Centre",
+    "scope": "status.onecore.co.ke: website/products/APIs/database/payments/M-Pesa/eTIMS/SHA/storage/auth/notifications/docs/support/workers/infrastructure status; maintenance calendar, incidents, uptime history/reports, email/webhook/RSS/API subscriptions and monitored status indicators."
+  },
+  {
+    "number": 54,
+    "name": "Advanced Developer Portal",
+    "scope": "developers.onecore.co.ke: developer/company accounts, verification, teams/roles/agreements/2FA/devices, usage/billing, API keys/OAuth/scopes/quotas/webhooks/versions/errors, sandbox, docs/tutorials/SDKs/OpenAPI/Postman, explorer/test console/request builder/response viewer/webhook tester/mock/debug tools, plugin submissions/review/marketplace/certification. Registration never grants unrestricted production access."
+  },
+  {
+    "number": 55,
+    "name": "Documentation Centre",
+    "scope": "docs.onecore.co.ke: public/private customer/partner/internal/API docs; installation/configuration/user/admin/developer/integration guides; troubleshooting/FAQs/videos/tutorials/releases/versioning/search/feedback/ratings/translations/downloads/related content/analytics."
+  },
+  {
+    "number": 56,
+    "name": "Advanced Support Portal",
+    "scope": "support.onecore.co.ke: customer accounts, categories/priorities/assignments/departments/escalation/SLA; notes/replies/attachments; bug/feature/technical/billing/account/integration cases; AI classification/response suggestions/KB recommendations; chat/email-to-ticket/notifications/CSAT/analytics/team performance/audit/incident links."
+  },
+  {
+    "number": 57,
+    "name": "Secure Files Centre",
+    "scope": "files.onecore.co.ke: public-approved downloads, private personal/org storage, upload/download/folders/sharing/version/preview/search/permissions/ownership/history/expiring signed links/password/time-limited/revocable sharing/recipient restrictions/encryption/malware/integrity checks/secure deletion/retention/legal hold/classification/signatures/audit. No public exposure of private buckets."
+  },
+  {
+    "number": 58,
+    "name": "OneCore User Community",
+    "scope": "community.onecore.co.ke: public reading; accounts for posting; profiles/groups/forums/Q&A/comments/replies/mentions/reactions/votes/accepted answers/search/tags/feature requests/bug discussions/announcements/events/polls/reputation/moderation/reporting/spam/blocking/rules/history/analytics/notifications."
+  },
+  {
+    "number": 59,
+    "name": "Advanced Partners Portal",
+    "scope": "partners.onecore.co.ke: applications, verification/docs/agreements/approval/activation/suspension/renewal; partner profiles/teams; referral links/leads/onboarding/sales pipeline/commissions/statements/payout requests/history/analytics/resources/training/certification/docs/support/announcements/fraud monitoring/approvals/audit."
+  },
+  {
+    "number": 60,
+    "name": "Careers Portal",
+    "scope": "careers.onecore.co.ke: jobs/categories/departments/descriptions/employment types/remote roles/internships/graduate programmes; online applications/CV/cover letter; candidate profiles/status/pipeline/interviews/feedback/communication/expiry/job alerts/applicant management/hiring analytics/approvals/audit."
+  },
+  {
+    "number": 61,
+    "name": "Public Security and Trust Centre",
+    "scope": "trust.onecore.co.ke: security overview, privacy/terms/data protection, responsible disclosure/security contact/advisories, compliance/data processing/residency where applicable, backup/recovery overview, subprocessors and incident disclosure; never publish sensitive infrastructure/credentials."
+  },
+  {
+    "number": 62,
+    "name": "Central Superadmin CMS and Ecosystem Administration",
+    "scope": "admin.onecore.co.ke: central control of website/news/careers/products/docs/KB/community/partners/developer notices/API releases/media/SEO/translations/notifications/analytics/audit/maintenance/incidents/status/security/events; segregated roles and approvals for high-impact actions."
+  },
+  {
+    "number": 63,
+    "name": "Public and Private Access Management",
+    "scope": "URL access matrix; central IdP/SSO; separate customer/developer/partner/staff permissions; tenant-aware access; no privilege inheritance; MFA and privileged access safeguards."
+  },
+  {
+    "number": 64,
+    "name": "Static Assets and CDN",
+    "scope": "cdn.onecore.co.ke and media.onecore.co.ke: approved public images/product assets/logos/icons/fonts/CSS/JS/downloads; thumbnails/WebP/AVIF/responsive sizes/cache/invalidation/versioning/compression/bandwidth/analytics/integrity/deployment/SSL/cache purge/SVG sanitization/CSP; private files excluded."
+  },
+  {
+    "number": 65,
+    "name": "Release and Announcement Management",
+    "scope": "admin.onecore.co.ke/releases: versioned releases, feature/bug/security/breaking/API/docs announcements, schedules/approvals, audience-specific notices, beta/early access, history, rollback, deprecation/EOL and adoption analytics."
+  },
+  {
+    "number": 66,
+    "name": "Feature Flags and Controlled Access",
+    "scope": "Global/product/module/tenant/user/developer flags; beta/experimental/internal; staged and percentage/country/plan rollouts; temporary expiry; rollback/emergency disable; usage analytics and audit."
+  },
+  {
+    "number": 67,
+    "name": "Service Directory and Integration Registry",
+    "scope": "admin.onecore.co.ke/services: service ID/owner/description/category/dependencies/endpoints/version/environment/availability/access/maintenance/configuration/usage/integration health/deprecation/retirement/docs/audit."
+  },
+  {
+    "number": 68,
+    "name": "Backup, Recovery and Business Continuity",
+    "scope": "Database/files/tenant/config/CMS/API/key backup procedures; integrity/restore tests; PITR; DR environments; RTO/RPO; cross-region recovery as appropriate; retention/failure alerts/authorized recovery/audit/continuity exercises/reports/dependency recovery/data verification."
+  },
+  {
+    "number": 69,
+    "name": "Operational Monitoring and Observability",
+    "scope": "Application/infrastructure/API/database/PostgreSQL/Redis/worker/queue/uptime/latency/error/CPU/memory/disk/storage/network/slow query/failed job/sync/payment/messaging/security monitoring; alerts/escalation/thresholds/dependencies/central dashboard."
+  },
+  {
+    "number": 70,
+    "name": "Customer Onboarding and Adoption Centre",
+    "scope": "Registration/verification/industry/modules/subscription; setup wizard; branches/staff/customer/supplier/product imports; opening balances; configuration/migration; tours/checklists/training/go-live readiness; adoption/feedback/customer success/renewal/churn/health reports."
+  },
+  {
+    "number": 71,
+    "name": "Advanced Business Intelligence",
+    "scope": "Cross-product/group/branch analytics; budget vs actual; cash flow/revenue/inventory forecasts; churn/CLV/credit risk/stress tests; school/hospital/hotel/restaurant/property insights; predictive maintenance; natural-language KPI; executive reports/scheduled exports with permission-aware access."
+  },
+  {
+    "number": 72,
+    "name": "Enterprise Document and Records Management",
+    "scope": "Document registration/classification/numbering/templates/approvals/signatures/version/retention/archive/retrieval/access/confidentiality/sharing/expiry/OCR/AI summaries/audit/legal hold/authorized destruction."
+  },
+  {
+    "number": 73,
+    "name": "Enterprise Integration and Data Exchange",
+    "scope": "External API registry/credentials/approval/health; mapping/transformation; scheduled/event-driven exchange; import/export validation/deduplication/retries/dead-letter queues/reconciliation/sync monitoring/version/security/audit/performance."
+  },
+  {
+    "number": 74,
+    "name": "Advanced POS and Retail Competitive Features",
+    "scope": "Offline PWA/multiple users by policy/secure local credentials/device authorization/transaction IDs and sequence/idempotent dependency-ordered sync/stock reservation and negative-stock policies/offline prices/promotions/credit/local receipts/recovery/conflict review/device and storage health/bandwidth-aware partial/full sync/background/manual/daily sync/cross-branch reconciliation/cashier accountability/fraud alerts/overrides/refund approvals/loss prevention/multi-store analytics/loyalty."
+  },
+  {
+    "number": 75,
+    "name": "Advanced Governance and Compliance",
+    "scope": "Data ownership/processing agreements/classification/residency where applicable/retention/export/deletion/consent/privacy requests/breach response/regulatory change/statutory history/policy acknowledgement/access reviews/permission recertification/segregation of duties/dual authorization/financial limits/admin reviews/audit exports/risk register/compliance evidence."
+  }
+]

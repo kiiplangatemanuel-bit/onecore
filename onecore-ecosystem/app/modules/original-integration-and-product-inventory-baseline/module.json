@@ -1,0 +1,17 @@
+{
+  "category_number": 41,
+  "name": "Original Integration and Product Inventory Baseline",
+  "scope_from_master_specification": "Preserve the original product inventory and its integrations as the baseline for traceability; do not treat this inventory as a replacement for detailed category requirements.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

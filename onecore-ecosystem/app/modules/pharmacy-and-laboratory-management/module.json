@@ -1,0 +1,17 @@
+{
+  "category_number": 9,
+  "name": "Pharmacy and Laboratory Management",
+  "scope_from_master_specification": "Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock, suppliers, pricing and billing; lab catalogue, sample registration/tracking, processing, result validation, reports, doctor access, equipment, inventory and quality control.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

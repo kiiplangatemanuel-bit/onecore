@@ -1,0 +1,17 @@
+{
+  "category_number": 30,
+  "name": "Partner and Developer Ecosystem",
+  "scope_from_master_specification": "Partner registration/verification; resellers/implementation/affiliate/referral; commissions; partner dashboard; developer APIs/sandbox/examples; plugins/extensions marketplace; third-party developers, certification, training and support.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "category_number": 51,
+  "name": "Maintenance Control Centre",
+  "scope_from_master_specification": "admin.onecore.co.ke/maintenance: schedule/emergency/recurring maintenance; service/module/API/infrastructure/tenant/branch/environment scope; announcement/partial/read-only/full/API/worker/DB modes; approvals, notices, ticker/countdown, staff visibility, scoped temporary exemptions, backups/health/migration checks, auto/manual reopen, rollback and reports. Offline POS must continue locally.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

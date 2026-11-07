@@ -1,0 +1,17 @@
+{
+  "category_number": 35,
+  "name": "Developer Infrastructure and Engineering Operations",
+  "scope_from_master_specification": "Modular monolith/API-first; PostgreSQL/Redis/workers/queues/object storage; Docker/Nginx/GitHub/protected branches; dev/test/staging/production; CI/CD/tests/API versioning/migrations/backward compatibility; logs/APM/errors/health; backups/replication/DR/load tests/rollback/docs/secrets.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

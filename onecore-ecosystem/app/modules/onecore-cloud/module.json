@@ -1,0 +1,17 @@
+{
+  "category_number": 17,
+  "name": "OneCore Cloud",
+  "scope_from_master_specification": "Cloud file storage; organization storage; document management; upload/download/share/folders; permissions/versioning/preview/search; quotas; automated backups/verification; disaster recovery/restore; encryption; hosting/deployment and storage analytics/retention.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

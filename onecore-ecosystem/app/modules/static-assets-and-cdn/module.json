@@ -1,0 +1,17 @@
+{
+  "category_number": 64,
+  "name": "Static Assets and CDN",
+  "scope_from_master_specification": "cdn.onecore.co.ke and media.onecore.co.ke: approved public images/product assets/logos/icons/fonts/CSS/JS/downloads; thumbnails/WebP/AVIF/responsive sizes/cache/invalidation/versioning/compression/bandwidth/analytics/integrity/deployment/SSL/cache purge/SVG sanitization/CSP; private files excluded.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

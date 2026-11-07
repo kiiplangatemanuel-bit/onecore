@@ -1,0 +1,83 @@
+import json, re
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+from app.core.models import User, Organization, Membership, Record, AuditEvent
+from app.core.schemas import LoginIn, OrganizationIn, RecordIn
+from app.core.security import current_user, verify_password, create_access_token, require_platform_admin, hash_password
+from app.core.tenancy import active_membership
+from app.integrations.registry import public_provider_status
+
+router = APIRouter(prefix="/api/v1")
+CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
+
+def audit(db, user_id, org_id, action, resource_type="", resource_id="", detail=""):
+    db.add(AuditEvent(actor_user_id=user_id, organization_id=org_id, action=action,
+                      resource_type=resource_type, resource_id=str(resource_id), detail=detail))
+    db.commit()
+
+@router.post("/auth/login")
+def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == form.username.lower()).first()
+    if not user or not verify_password(form.password, user.password_hash) or not user.is_active:
+        raise HTTPException(401, "Incorrect email or password")
+    return {"access_token": create_access_token(user.id), "token_type": "bearer"}
+
+@router.get("/auth/me")
+def me(user: User = Depends(current_user)):
+    return {"id": user.id, "email": user.email, "full_name": user.full_name, "platform_role": user.platform_role}
+
+@router.post("/organizations", status_code=201)
+def create_organization(payload: OrganizationIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if db.query(Organization).filter_by(slug=payload.slug).first():
+        raise HTTPException(409, "Organization slug already exists")
+    org = Organization(**payload.model_dump())
+    db.add(org); db.flush()
+    db.add(Membership(user_id=user.id, organization_id=org.id, role="org_admin", branch_scope="*"))
+    db.commit(); db.refresh(org)
+    audit(db, user.id, org.id, "organization.created", "organization", org.id)
+    return {"id": org.id, "name": org.name, "slug": org.slug, "role": "org_admin"}
+
+@router.get("/organizations")
+def list_organizations(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.query(Membership, Organization).join(Organization, Organization.id == Membership.organization_id).filter(
+        Membership.user_id == user.id, Membership.is_active == True, Organization.is_active == True).all()
+    return [{"id": o.id, "name": o.name, "slug": o.slug, "role": m.role} for m, o in rows]
+
+@router.get("/modules")
+def module_catalog(user: User = Depends(current_user)):
+    return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+
+@router.get("/integrations")
+def integrations(user: User = Depends(current_user)):
+    return public_provider_status()
+
+@router.get("/records/{module_key}")
+def list_records(module_key: str, membership=Depends(active_membership), db: Session = Depends(get_db), limit: int = 100):
+    if not re.match(r"^[a-z0-9-]{2,100}$", module_key):
+        raise HTTPException(400, "Invalid module key")
+    rows = db.query(Record).filter_by(organization_id=membership.organization_id, module_key=module_key).order_by(Record.id.desc()).limit(min(limit, 500)).all()
+    return [{"id": r.id, "module_key": r.module_key, "record_type": r.record_type, "data": r.data, "branch_id": r.branch_id} for r in rows]
+
+@router.post("/records/{module_key}", status_code=201)
+def create_record(module_key: str, payload: RecordIn, membership=Depends(active_membership), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if not re.match(r"^[a-z0-9-]{2,100}$", module_key):
+        raise HTTPException(400, "Invalid module key")
+    row = Record(organization_id=membership.organization_id, module_key=module_key, record_type=payload.record_type,
+                 data=payload.data, branch_id=payload.branch_id, created_by=user.id)
+    db.add(row); db.commit(); db.refresh(row)
+    audit(db, user.id, membership.organization_id, "record.created", module_key, row.id)
+    return {"id": row.id, "module_key": row.module_key, "record_type": row.record_type, "data": row.data}
+
+@router.get("/operations/audit")
+def audit_log(membership=Depends(active_membership), db: Session = Depends(get_db), limit: int = 100):
+    rows = db.query(AuditEvent).filter_by(organization_id=membership.organization_id).order_by(AuditEvent.id.desc()).limit(min(limit, 500)).all()
+    return [{"id": x.id, "actor_user_id": x.actor_user_id, "action": x.action, "resource_type": x.resource_type,
+             "resource_id": x.resource_id, "detail": x.detail, "created_at": x.created_at.isoformat()} for x in rows]
+
+@router.get("/admin/overview")
+def admin_overview(user: User = Depends(require_platform_admin), db: Session = Depends(get_db)):
+    return {"organizations": db.query(Organization).count(), "users": db.query(User).count(),
+            "providers": public_provider_status()}

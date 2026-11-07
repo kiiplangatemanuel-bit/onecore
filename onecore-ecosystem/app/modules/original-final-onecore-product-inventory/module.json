@@ -1,0 +1,17 @@
+{
+  "category_number": 40,
+  "name": "Original Final OneCore Product Inventory",
+  "scope_from_master_specification": "Core Platform; Business OS; AI; Cloud; Connect; Accounting OS; POS OS; Retail OS; School OS; Hospital OS; Pharmacy OS; Laboratory OS; Finance/SACCO/Microfinance/Chama OS; HR/Payroll; Property; Hotel; Restaurant; Services; CRM; Inventory; Procurement; E-commerce; Website Builder; Communication; Tax/eTIMS; SHA connector; Workflow; Analytics/BI; Support; Developer; Partner; Superadmin; Organization Admin; Subscription; Migration; Internal Operations.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

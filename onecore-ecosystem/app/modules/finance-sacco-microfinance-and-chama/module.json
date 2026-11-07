@@ -1,0 +1,17 @@
+{
+  "category_number": 10,
+  "name": "Finance, SACCO, Microfinance and Chama",
+  "scope_from_master_specification": "Members/KYC; savings, deposits, withdrawals, shares/contributions; groups; loan products/applications/assessment/approval/disbursement; interest, penalties, schedules and repayments; guarantors/collateral; statements, delinquency/restructuring, dividends, portfolio/risk reports, M-Pesa/banks, member portals, meetings, voting/resolutions and AI insights.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

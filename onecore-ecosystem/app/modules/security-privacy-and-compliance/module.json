@@ -1,0 +1,17 @@
+{
+  "category_number": 32,
+  "name": "Security, Privacy and Compliance",
+  "scope_from_master_specification": "Tenant isolation; RBAC/MFA; password/session security; encryption; API auth/rate limits; brute-force/CSRF/XSS/SQLi protections; secure uploads; device/session revocation; audit; retention/export/deletion/consent; encrypted backups; vulnerability/dependency scans; penetration tests; incidents/alerts; Kenya Data Protection Act and GDPR where applicable; enhanced health/finance controls.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

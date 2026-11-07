@@ -1,0 +1,17 @@
+{
+  "category_number": 62,
+  "name": "Central Superadmin CMS and Ecosystem Administration",
+  "scope_from_master_specification": "admin.onecore.co.ke: central control of website/news/careers/products/docs/KB/community/partners/developer notices/API releases/media/SEO/translations/notifications/analytics/audit/maintenance/incidents/status/security/events; segregated roles and approvals for high-impact actions.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

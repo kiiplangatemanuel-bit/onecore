@@ -1,0 +1,17 @@
+{
+  "category_number": 56,
+  "name": "Advanced Support Portal",
+  "scope_from_master_specification": "support.onecore.co.ke: customer accounts, categories/priorities/assignments/departments/escalation/SLA; notes/replies/attachments; bug/feature/technical/billing/account/integration cases; AI classification/response suggestions/KB recommendations; chat/email-to-ticket/notifications/CSAT/analytics/team performance/audit/incident links.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

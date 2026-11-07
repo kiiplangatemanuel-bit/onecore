@@ -1,0 +1,17 @@
+{
+  "category_number": 72,
+  "name": "Enterprise Document and Records Management",
+  "scope_from_master_specification": "Document registration/classification/numbering/templates/approvals/signatures/version/retention/archive/retrieval/access/confidentiality/sharing/expiry/OCR/AI summaries/audit/legal hold/authorized destruction.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

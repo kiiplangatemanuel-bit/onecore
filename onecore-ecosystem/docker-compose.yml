@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - onecore_data:/app/data
+    restart: unless-stopped
+volumes:
+  onecore_data:

@@ -1,0 +1,22 @@
+{
+  "package": "OneCore Complete Ecosystem \u2014 Developer Package",
+  "baseline_archive": "OneCore_Ecosystem_Developer_Starter.zip",
+  "source_specification": "OneCore_Complete_Ecosystem_and_Workflow_Master_Document_UPDATED(1).docx",
+  "functional_categories": 75,
+  "architecture_pillars": 5,
+  "included_module_scaffolds": 75,
+  "status": "developer foundation and module scaffolds; not production-complete",
+  "external_integrations": [
+    "M-Pesa",
+    "KRA eTIMS",
+    "SHA/DHA AfyaLink",
+    "Banks",
+    "SMS",
+    "Email",
+    "WhatsApp",
+    "AI providers",
+    "Object storage",
+    "Hardware"
+  ],
+  "note": "Provider credentials and current authorized API implementations are supplied/configured separately; environment placeholders alone do not create integrations."
+}

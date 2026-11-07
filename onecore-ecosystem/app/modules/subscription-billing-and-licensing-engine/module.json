@@ -1,0 +1,17 @@
+{
+  "category_number": 28,
+  "name": "Subscription, Billing and Licensing Engine",
+  "scope_from_master_specification": "Individual/business/industry/enterprise plans; monthly/annual/per-user/per-module/usage/hybrid/trial/custom pricing; activation/renewal/upgrades/downgrades/grace/suspension; payment verification/receipts/tax/refunds/limits/entitlements/revenue analytics; shared SaaS, dedicated, private, self-hosted, perpetual and custom arrangements with infrastructure/AI costs separately stated.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

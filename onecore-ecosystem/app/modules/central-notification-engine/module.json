@@ -1,0 +1,17 @@
+{
+  "category_number": 48,
+  "name": "Central Notification Engine",
+  "scope_from_master_specification": "admin.onecore.co.ke/notifications: in-app/web/email/SMS/WhatsApp/push/webhooks; scheduled/recurring multilingual templates; preferences/opt-out; essential security/service alerts; payments/subscriptions/maintenance; tracking/retries/read history/audience targeting/broadcast analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

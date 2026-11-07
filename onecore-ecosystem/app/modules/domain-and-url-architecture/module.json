@@ -1,0 +1,17 @@
+{
+  "category_number": 3,
+  "name": "Domain and URL architecture",
+  "scope_from_master_specification": "The following is the recommended production URL map. DNS, TLS certificates, routing, identity and access policies must be configured consistently. Subdomains are logical entry points; they may be served by a shared frontend/API gateway where appropriate.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

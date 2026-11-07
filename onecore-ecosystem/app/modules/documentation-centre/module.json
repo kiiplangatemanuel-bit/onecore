@@ -1,0 +1,17 @@
+{
+  "category_number": 55,
+  "name": "Documentation Centre",
+  "scope_from_master_specification": "docs.onecore.co.ke: public/private customer/partner/internal/API docs; installation/configuration/user/admin/developer/integration guides; troubleshooting/FAQs/videos/tutorials/releases/versioning/search/feedback/ratings/translations/downloads/related content/analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

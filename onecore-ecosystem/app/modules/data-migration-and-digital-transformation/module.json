@@ -1,0 +1,17 @@
+{
+  "category_number": 24,
+  "name": "Data Migration and Digital Transformation",
+  "scope_from_master_specification": "System/process assessment; migration plans; CSV/XLSX and legacy DB imports; customers/suppliers/inventory/financial data; cleaning/deduplication; mapping/preview/validation/errors; rollback; parallel operation/API migration; onboarding, training and go-live.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

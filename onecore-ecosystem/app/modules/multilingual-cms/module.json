@@ -1,0 +1,17 @@
+{
+  "category_number": 44,
+  "name": "Multilingual CMS",
+  "scope_from_master_specification": "English, Kiswahili, French, Arabic, Somali, Amharic, Hausa, Yoruba, Zulu, Portuguese and extensible languages; localized URLs/pages, translation assignment/review, machine translation with human review, fallback/detection, search, RTL Arabic, localized formats.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

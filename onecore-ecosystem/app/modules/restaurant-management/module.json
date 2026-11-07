@@ -1,0 +1,17 @@
+{
+  "category_number": 14,
+  "name": "Restaurant Management",
+  "scope_from_master_specification": "Menus; tables/reservations; orders; kitchen display/tickets; waiter/cashier; delivery/takeaway; POS; ingredient stock, recipes/costing/food-cost; suppliers/procurement; loyalty/discounts; M-Pesa, tax invoices and sales reports.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

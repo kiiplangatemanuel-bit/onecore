@@ -1,0 +1,17 @@
+{
+  "category_number": 6,
+  "name": "Organization administration workflow",
+  "scope_from_master_specification": "Manage organization profile, branches, branding, domains, operating hours, currency, timezone and language.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

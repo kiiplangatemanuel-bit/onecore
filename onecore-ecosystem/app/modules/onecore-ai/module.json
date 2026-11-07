@@ -1,0 +1,17 @@
+{
+  "category_number": 16,
+  "name": "OneCore AI",
+  "scope_from_master_specification": "Individual/business/institution/enterprise access; standalone/integrated use; hybrid billing; multi-provider gateway, routing/failover, private deployment, policies, usage/cost controls; chat, documents, summarization, data/spreadsheet analysis, visualization, BI, coding/SQL, voice/STT/TTS, image generation/understanding, file/PDF analysis, reports, forecasting, predictive insights, anomaly detection, automation, support, knowledge, extraction, decision support, search, agents and tool/API calls; English, Kiswahili, French, Arabic and extensible African languages; permission/tenant-aware governance, human approval, logs and retention.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

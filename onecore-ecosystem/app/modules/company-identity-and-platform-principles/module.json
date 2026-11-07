@@ -1,0 +1,17 @@
+{
+  "category_number": 1,
+  "name": "Company identity and platform principles",
+  "scope_from_master_specification": "Company: OneCore Technologies Ltd.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

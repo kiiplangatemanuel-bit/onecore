@@ -1,0 +1,17 @@
+{
+  "category_number": 45,
+  "name": "Universal Search",
+  "scope_from_master_specification": "search.onecore.co.ke: public/product/docs/blog/news/careers/partner/FAQ/KB/community/video search; multilingual autocomplete, typo correction, filters/ranking, popular/recent searches, analytics, failed-search monitoring, recommendations and permission-/tenant-aware private search.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

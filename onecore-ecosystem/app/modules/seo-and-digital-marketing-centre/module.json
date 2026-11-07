@@ -1,0 +1,17 @@
+{
+  "category_number": 46,
+  "name": "SEO and Digital Marketing Centre",
+  "scope_from_master_specification": "Metadata, canonical URLs, social previews, structured data, sitemaps/robots/redirects, broken links, image alt/optimization, multilingual SEO, duplicate content, performance history, campaigns, UTM, newsletter, landing pages and conversion/source analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

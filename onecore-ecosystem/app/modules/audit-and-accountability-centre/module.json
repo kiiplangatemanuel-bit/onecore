@@ -1,0 +1,17 @@
+{
+  "category_number": 50,
+  "name": "Audit and Accountability Centre",
+  "scope_from_master_specification": "User/staff/Superadmin actions; content changes/approval/publishing/restoration; maintenance/emergency/notifications; partner/community/API/file events; role changes/login/security; before/after references, timestamps, exports, tamper-evident storage, retention and restricted access.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

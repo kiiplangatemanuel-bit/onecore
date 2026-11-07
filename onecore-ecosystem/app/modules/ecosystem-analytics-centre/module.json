@@ -1,0 +1,17 @@
+{
+  "category_number": 49,
+  "name": "Ecosystem Analytics Centre",
+  "scope_from_master_specification": "admin.onecore.co.ke/analytics: visits, sources, product adoption, docs/search, support, developer/API, partner/community, notification, careers/marketing/campaign, country/device/language, content/download and privacy-preserving analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

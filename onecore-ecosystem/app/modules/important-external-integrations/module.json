@@ -1,0 +1,17 @@
+{
+  "category_number": 38,
+  "name": "Important External Integrations",
+  "scope_from_master_specification": "M-Pesa; KRA eTIMS; SHA/DHA AfyaLink; banks; SMS/email/WhatsApp; AI providers; biometrics; barcode hardware; printers; external identity services. All integrations require authorized credentials, testing, error handling and reconciliation.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

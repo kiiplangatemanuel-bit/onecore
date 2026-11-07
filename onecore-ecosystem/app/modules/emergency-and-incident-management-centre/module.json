@@ -1,0 +1,17 @@
+{
+  "category_number": 52,
+  "name": "Emergency and Incident Management Centre",
+  "scope_from_master_specification": "admin.onecore.co.ke/incidents: incident IDs, SEV-1 to SEV-4, ownership/escalation/timeline, internal/public communication, evidence, resolution, RCA, corrective/preventive actions, reviews, analytics, security evidence and audit.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

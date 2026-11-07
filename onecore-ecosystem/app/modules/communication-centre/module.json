@@ -1,0 +1,17 @@
+{
+  "category_number": 21,
+  "name": "Communication Centre",
+  "scope_from_master_specification": "Internal messaging/announcements; email/SMS/WhatsApp/push; bulk/scheduled messages; templates; reminders; payment/approval/customer/staff notifications; delivery reports, failures and communication history.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

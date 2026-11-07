@@ -1,0 +1,17 @@
+{
+  "category_number": 7,
+  "name": "Superadmin and OneCore operations workflows",
+  "scope_from_master_specification": "7.1 Superadmin access and control",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

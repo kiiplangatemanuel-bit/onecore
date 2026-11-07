@@ -1,0 +1,17 @@
+{
+  "category_number": 36,
+  "name": "Advanced Competitive Features",
+  "scope_from_master_specification": "Unified search/dashboard/customer profiles; cross-module workflows; AI operations; no-code/low-code; plugins; digital signatures/QR/barcodes/receipts; multi-org; self-service; offline-first; benchmarking/forecasting/custom dashboards/reports; sandbox; backup verification/DR tests/rollback/progressive releases; enterprise deployments; cross-device sync; intelligent alerts and data validation.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

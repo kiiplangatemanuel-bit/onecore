@@ -1,0 +1,17 @@
+{
+  "category_number": 57,
+  "name": "Secure Files Centre",
+  "scope_from_master_specification": "files.onecore.co.ke: public-approved downloads, private personal/org storage, upload/download/folders/sharing/version/preview/search/permissions/ownership/history/expiring signed links/password/time-limited/revocable sharing/recipient restrictions/encryption/malware/integrity checks/secure deletion/retention/legal hold/classification/signatures/audit. No public exposure of private buckets.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

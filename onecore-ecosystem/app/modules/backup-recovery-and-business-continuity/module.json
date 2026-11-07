@@ -1,0 +1,17 @@
+{
+  "category_number": 68,
+  "name": "Backup, Recovery and Business Continuity",
+  "scope_from_master_specification": "Database/files/tenant/config/CMS/API/key backup procedures; integrity/restore tests; PITR; DR environments; RTO/RPO; cross-region recovery as appropriate; retention/failure alerts/authorized recovery/audit/continuity exercises/reports/dependency recovery/data verification.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

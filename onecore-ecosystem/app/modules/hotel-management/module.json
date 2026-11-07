@@ -1,0 +1,17 @@
+{
+  "category_number": 13,
+  "name": "Hotel Management",
+  "scope_from_master_specification": "Rooms/availability/reservations; check-in/out; guest profiles; pricing; housekeeping; restaurant integration; billing/deposits/M-Pesa; invoices; staff/maintenance; reviews; occupancy/revenue analytics and booking portal.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

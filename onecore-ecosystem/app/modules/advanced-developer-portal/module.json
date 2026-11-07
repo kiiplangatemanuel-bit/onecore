@@ -1,0 +1,17 @@
+{
+  "category_number": 54,
+  "name": "Advanced Developer Portal",
+  "scope_from_master_specification": "developers.onecore.co.ke: developer/company accounts, verification, teams/roles/agreements/2FA/devices, usage/billing, API keys/OAuth/scopes/quotas/webhooks/versions/errors, sandbox, docs/tutorials/SDKs/OpenAPI/Postman, explorer/test console/request builder/response viewer/webhook tester/mock/debug tools, plugin submissions/review/marketplace/certification. Registration never grants unrestricted production access.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

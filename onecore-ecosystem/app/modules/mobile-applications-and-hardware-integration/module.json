@@ -1,0 +1,17 @@
+{
+  "category_number": 33,
+  "name": "Mobile Applications and Hardware Integration",
+  "scope_from_master_specification": "Android/Windows/tablets/PWA; responsive dashboards/offline; push/camera/QR/barcode; Bluetooth/USB; printers/cash drawers/biometrics/POS terminals; device registration/authentication/permissions/revocation.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

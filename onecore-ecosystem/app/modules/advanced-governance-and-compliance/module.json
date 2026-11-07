@@ -1,0 +1,17 @@
+{
+  "category_number": 75,
+  "name": "Advanced Governance and Compliance",
+  "scope_from_master_specification": "Data ownership/processing agreements/classification/residency where applicable/retention/export/deletion/consent/privacy requests/breach response/regulatory change/statutory history/policy acknowledgement/access reviews/permission recertification/segregation of duties/dual authorization/financial limits/admin reviews/audit exports/risk register/compliance evidence.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

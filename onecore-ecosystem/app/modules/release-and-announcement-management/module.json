@@ -1,0 +1,17 @@
+{
+  "category_number": 65,
+  "name": "Release and Announcement Management",
+  "scope_from_master_specification": "admin.onecore.co.ke/releases: versioned releases, feature/bug/security/breaking/API/docs announcements, schedules/approvals, audience-specific notices, beta/early access, history, rollback, deprecation/EOL and adoption analytics.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

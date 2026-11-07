@@ -1,0 +1,17 @@
+{
+  "category_number": 43,
+  "name": "Central CMS",
+  "scope_from_master_specification": "admin.onecore.co.ke/cms: pages, news/blog, careers, products/solutions, partners/community, events, testimonials/case studies, FAQs/KB/docs/landing pages, navigation/footer/banners; editor/templates/media/tags/authors; preview, draft/review/approval/schedule/publish/archive/revisions/comments/emergency publishing.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "category_number": 18,
+  "name": "OneCore Connect",
+  "scope_from_master_specification": "REST APIs; docs; API keys; OAuth; webhooks/retries; rate limits/versioning; monitoring/sandbox; third-party connectors; M-Pesa/banks/SMS/email/WhatsApp/push/accounting/identity/SHA/eTIMS; external connectors, logs and error handling.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

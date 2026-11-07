@@ -1,0 +1,17 @@
+{
+  "category_number": 59,
+  "name": "Advanced Partners Portal",
+  "scope_from_master_specification": "partners.onecore.co.ke: applications, verification/docs/agreements/approval/activation/suspension/renewal; partner profiles/teams; referral links/leads/onboarding/sales pipeline/commissions/statements/payout requests/history/analytics/resources/training/certification/docs/support/announcements/fraud monitoring/approvals/audit.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

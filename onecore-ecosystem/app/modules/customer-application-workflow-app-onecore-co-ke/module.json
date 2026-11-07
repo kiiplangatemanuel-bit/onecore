@@ -1,0 +1,17 @@
+{
+  "category_number": 5,
+  "name": "Customer application workflow \u2014 app.onecore.co.ke",
+  "scope_from_master_specification": "5.1 Registration and account activation",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}

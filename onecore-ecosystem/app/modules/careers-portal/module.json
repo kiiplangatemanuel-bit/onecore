@@ -1,0 +1,17 @@
+{
+  "category_number": 60,
+  "name": "Careers Portal",
+  "scope_from_master_specification": "careers.onecore.co.ke: jobs/categories/departments/descriptions/employment types/remote roles/internships/graduate programmes; online applications/CV/cover letter; candidate profiles/status/pipeline/interviews/feedback/communication/expiry/job alerts/applicant management/hiring analytics/approvals/audit.",
+  "status": "scaffold",
+  "required_before_production": [
+    "domain schema and migrations",
+    "service layer and API contracts",
+    "tenant and branch authorization",
+    "validation and approval rules",
+    "audit events",
+    "frontend workflows",
+    "automated tests and UAT",
+    "monitoring, backup and recovery",
+    "operator and user documentation"
+  ]
+}
