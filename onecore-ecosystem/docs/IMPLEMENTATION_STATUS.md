@@ -513,3 +513,23 @@ import/export, team assignment and UAT.
   attendance register UI was added at `/school` with class/date loading, status/note
   editing and batch save; its UI contract is covered by a test.
 
+
+
+## Procurement requisitions increment (7 November 2026)
+
+- Added tenant/branch-scoped requisition header and line models.
+- Added draft requisition creation with product ownership checks, positive decimal
+  quantities, unique product lines and required business justification.
+- Added submit, approve and reject transitions. Only the requester may submit; a
+  different organization manager must review; rejection requires a reason.
+- Added organization/branch filters, row locking for state transitions and audit
+  events for create, submit, approve and reject.
+- Added reversible migration `0014_procurement_requisitions`.
+- Added basic requisition controls to `/procurement` and updated
+  `docs/PROCUREMENT.md`.
+- Automated tests cover payload validation, duplicate product rejection, model
+  registration and OpenAPI routes.
+- CI status: awaiting GitHub Actions result for the increment's final commit.
+- Remaining gaps: configurable approval tiers/amount thresholds, delegation,
+  requisition-to-PO conversion, multi-line UI editing, attachments and full UAT.
+
