@@ -1,13 +1,13 @@
-import re, secrets, ssl, socket
-from datetime import datetime, timezone
+import re, secrets, ssl, socket, hashlib
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, Membership, User, AuditEvent
+from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, Membership, OrganizationInvitation, User, AuditEvent
 from app.core.security import current_user, require_platform_admin
 from app.core.tenancy import active_membership
-from app.core.authorization import require_permission
+from app.core.authorization import require_permission, ROLE_PERMISSIONS
 
 router = APIRouter(prefix="/api/v1")
 
@@ -164,6 +164,76 @@ def withdraw_notice(notice_id:int,user:User=Depends(require_platform_admin),db:S
     row.status="withdrawn";db.commit()
     _audit(db,user.id,row.organization_id,"notice.withdrawn","system_notice",row.id)
     return {"id":row.id,"status":row.status}
+
+
+class InvitationIn(BaseModel):
+    email: EmailStr
+    role: str = Field(pattern="^(org_admin|branch_admin|manager|accountant|staff|viewer)$")
+    branch_scope: str = Field(default="*", max_length=500)
+
+class AcceptInvitationIn(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+@router.post("/invitations", status_code=201)
+def create_invitation(payload:InvitationIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    email=str(payload.email).lower()
+    scope=payload.branch_scope.strip()
+    if scope!="*" and (not scope or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,100}",part.strip()) for part in scope.split(","))):
+        raise HTTPException(422,"Invalid branch scope")
+    pending=db.query(OrganizationInvitation).filter_by(organization_id=membership.organization_id,email=email,accepted_at=None,revoked_at=None).first()
+    if pending:
+        raise HTTPException(409,"An active invitation already exists for this email")
+    token=secrets.token_urlsafe(32)
+    row=OrganizationInvitation(organization_id=membership.organization_id,email=email,role=payload.role,
+        branch_scope=scope,token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=datetime.now(timezone.utc)+timedelta(days=7),created_by=user.id)
+    db.add(row);db.commit();db.refresh(row)
+    _audit(db,user.id,membership.organization_id,"invitation.created","organization_invitation",row.id,email)
+    return {"id":row.id,"email":email,"role":row.role,"expires_at":row.expires_at.isoformat(),
+            "invitation_token":token,"delivery":"Token returned once; deliver it using the configured secure email service."}
+
+@router.get("/invitations")
+def list_invitations(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    rows=db.query(OrganizationInvitation).filter_by(organization_id=membership.organization_id).order_by(OrganizationInvitation.id.desc()).all()
+    return [{"id":x.id,"email":x.email,"role":x.role,"branch_scope":x.branch_scope,
+             "expires_at":x.expires_at.isoformat(),"accepted_at":x.accepted_at.isoformat() if x.accepted_at else None,
+             "revoked_at":x.revoked_at.isoformat() if x.revoked_at else None} for x in rows]
+
+@router.post("/invitations/accept")
+def accept_invitation(payload:AcceptInvitationIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    digest=hashlib.sha256(payload.token.encode()).hexdigest()
+    row=db.query(OrganizationInvitation).filter_by(token_hash=digest).first()
+    if not row or row.accepted_at or row.revoked_at:
+        raise HTTPException(404,"Invitation is invalid or no longer active")
+    expiry=row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    if expiry<=datetime.now(timezone.utc):
+        raise HTTPException(410,"Invitation has expired")
+    if user.email.lower()!=row.email.lower():
+        raise HTTPException(403,"Sign in with the email address that received this invitation")
+    org=db.get(Organization,row.organization_id)
+    if not org or not org.is_active:
+        raise HTTPException(404,"Organization not found")
+    existing=db.query(Membership).filter_by(user_id=user.id,organization_id=row.organization_id).first()
+    if existing and existing.is_active:
+        raise HTTPException(409,"You already have active access to this organization")
+    if existing:
+        existing.role=row.role;existing.branch_scope=row.branch_scope;existing.is_active=True
+    else:
+        db.add(Membership(user_id=user.id,organization_id=row.organization_id,role=row.role,branch_scope=row.branch_scope))
+    row.accepted_at=datetime.now(timezone.utc);db.commit()
+    _audit(db,user.id,row.organization_id,"invitation.accepted","organization_invitation",row.id,row.email)
+    return {"organization_id":row.organization_id,"organization_name":org.name,"role":row.role}
+
+@router.delete("/invitations/{invitation_id}",status_code=204)
+def revoke_invitation(invitation_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(OrganizationInvitation).filter_by(id=invitation_id,organization_id=membership.organization_id).first()
+    if not row: raise HTTPException(404,"Invitation not found")
+    if row.accepted_at: raise HTTPException(409,"Accepted invitations cannot be revoked")
+    row.revoked_at=datetime.now(timezone.utc);db.commit()
+    _audit(db,user.id,membership.organization_id,"invitation.revoked","organization_invitation",row.id,row.email)
 
 @router.get("/branding/footer")
 def mandatory_footer():
