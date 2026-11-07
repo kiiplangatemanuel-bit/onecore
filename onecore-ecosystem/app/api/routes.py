@@ -206,7 +206,7 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
 @router.post("/inventory/products", status_code=201)
 def create_inventory_product(payload: InventoryProductIn, membership=Depends(active_membership),
                              user: User = Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "create")
+    require_permission(membership, "manage" if payload.tax_rate > 0 else "create")
     sku = payload.sku.strip().upper()
     if db.query(InventoryProduct).filter_by(organization_id=membership.organization_id, sku=sku).first():
         raise HTTPException(409, "SKU already exists in this organization")
@@ -1435,14 +1435,25 @@ def close_pos_shift(shift_id: int, payload: POSShiftCloseIn,
     ).filter(POSSale.organization_id == membership.organization_id,
              POSSale.shift_id == shift.id, POSPayment.method == "cash",
              POSPayment.status == "recorded").scalar()
-    expected = Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
+    cash_refunds = db.query(func.coalesce(func.sum(POSRefund.amount), 0)).join(
+        POSReturn, POSReturn.id == POSRefund.return_id
+    ).join(POSSale, POSSale.id == POSReturn.sale_id).filter(
+        POSRefund.organization_id == membership.organization_id,
+        POSReturn.organization_id == membership.organization_id,
+        POSSale.organization_id == membership.organization_id,
+        POSSale.shift_id == shift.id,
+        POSRefund.method == "cash",
+        POSRefund.status == "recorded",
+    ).scalar()
+    expected = (Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
+                - Decimal(str(cash_refunds or 0)))
     shift.closing_cash = payload.closing_cash
     shift.status = "closed"
     shift.closed_at = datetime.now(timezone.utc)
     db.commit()
     variance = payload.closing_cash - expected
     audit(db, user.id, membership.organization_id, "pos.shift.closed",
-          "pos_shift", shift.id, f"expected:{expected};counted:{payload.closing_cash};variance:{variance}")
+          "pos_shift", shift.id, f"expected:{expected};cash_refunds:{cash_refunds};counted:{payload.closing_cash};variance:{variance}")
     return {"id": shift.id, "status": shift.status, "expected_cash": str(expected),
             "closing_cash": str(payload.closing_cash), "variance": str(variance)}
 
