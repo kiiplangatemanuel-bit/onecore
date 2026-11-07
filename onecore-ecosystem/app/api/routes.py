@@ -3525,6 +3525,72 @@ def get_crm_campaign(campaign_id: int,membership=Depends(active_membership),
             "status":x.status} for x in recipients]}
 
 
+@router.get("/crm/campaigns/{campaign_id}/preview")
+def preview_crm_campaign_audience(campaign_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    """Return a consent-aware audience estimate without storing recipients or sending."""
+    require_permission(membership,"read")
+    campaign=db.query(CRMCampaign).filter_by(
+        id=campaign_id,organization_id=membership.organization_id).first()
+    if not campaign or not can_access_branch(membership,campaign.branch_id):
+        raise HTTPException(404,"Campaign not found")
+    latest_consent=db.query(
+        func.max(CRMContactConsent.id).label("latest_id")
+    ).filter(
+        CRMContactConsent.organization_id==membership.organization_id,
+        CRMContactConsent.channel==campaign.channel,
+        CRMContactConsent.purpose==campaign.purpose,
+    ).group_by(CRMContactConsent.contact_id).subquery()
+    query=db.query(CRMContact,CRMContactConsent).join(
+        CRMContactConsent,CRMContactConsent.contact_id==CRMContact.id
+    ).join(latest_consent,latest_consent.c.latest_id==CRMContactConsent.id).filter(
+        CRMContact.organization_id==membership.organization_id,
+        CRMContactConsent.organization_id==membership.organization_id,
+    )
+    if campaign.branch_id:
+        query=query.filter(CRMContact.branch_id==campaign.branch_id)
+    else:
+        allowed=branch_scope_ids(membership)
+        if allowed is not None:
+            if not allowed:
+                query=query.filter(CRMContact.id==-1)
+            else:
+                query=query.filter(CRMContact.branch_id.in_(allowed))
+    rows=query.order_by(CRMContact.id).limit(5001).all()
+    now=datetime.now(timezone.utc)
+    granted=0
+    revoked_or_missing=0
+    expired=0
+    missing_address=0
+    for contact,consent in rows:
+        if consent.decision!="granted":
+            revoked_or_missing+=1
+            continue
+        if consent.expires_at is not None and consent.expires_at<=now:
+            expired+=1
+            continue
+        granted+=1
+        address=contact.email if campaign.channel=="email" else contact.phone
+        if not address or not address.strip():
+            missing_address+=1
+    eligible=granted-missing_address
+    return {
+        "campaign_id":campaign.id,
+        "channel":campaign.channel,
+        "status":campaign.status,
+        "audience_limit":5000,
+        "truncated":len(rows)>5000,
+        "contacts_with_latest_consent":len(rows),
+        "currently_granted":granted,
+        "revoked_or_not_granted":revoked_or_missing,
+        "expired_consent":expired,
+        "missing_channel_address":missing_address,
+        "eligible_recipients":eligible,
+        "recipient_snapshot_created":False,
+        "delivery_started":False,
+    }
+
+
 @router.post("/crm/campaigns/{campaign_id}/prepare")
 def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
     user: User=Depends(current_user),db: Session=Depends(get_db)):
