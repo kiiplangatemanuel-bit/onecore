@@ -337,6 +337,8 @@ def pause_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(c
     require_permission(m,"manage")
     row=db.query(CRMCampaignSchedule).filter_by(organization_id=m.organization_id,campaign_id=campaign_id).first()
     if not row:raise HTTPException(404,"Schedule not found")
+    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
+    if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.status!="scheduled":raise HTTPException(409,"Schedule cannot be paused in its current state")
     if row.lease_until and _utc(row.lease_until)>datetime.now(timezone.utc):raise HTTPException(409,"Schedule run is active")
     row.status="paused";row.next_run_at=None
@@ -366,8 +368,7 @@ def cancel_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(
     if row.status=="running" or (row.lease_until and _utc(row.lease_until)>datetime.now(timezone.utc)):
         raise HTTPException(409,"Schedule is currently being processed")
     row.status="cancelled";row.next_run_at=None;row.lease_until=None
-    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
-    if campaign and campaign.status=="scheduled":campaign.status="ready"
+    if campaign.status=="scheduled":campaign.status="ready"
     db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="crm.schedule.cancelled",
         resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
     return {"cancelled":True}
