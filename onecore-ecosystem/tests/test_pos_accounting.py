@@ -16,6 +16,11 @@ def test_pos_accounting_models_and_routes_are_registered():
     assert "/api/v1/accounting/pos-integrations" in paths
     assert "/api/v1/accounting/pos-integrations/post-pending" in paths
     assert "/api/v1/accounting/pos-integrations/backfill" in paths
+    from pathlib import Path
+    workspace = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    html = workspace.read_text(encoding="utf-8")
+    assert 'id="posMapping"' in html
+    assert 'id="backfillPOS"' in html
 
 
 def test_pos_accounting_mapping_requires_all_control_accounts():
