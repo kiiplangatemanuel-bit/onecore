@@ -179,8 +179,8 @@ def test_supplier_b2c_callback_rejects_amount_mismatch_and_duplicate_receipt():
     mismatch = {"Result": {
         "ConversationID": "AG_SUPPLIER_2", "ResultCode": 0,
         "ResultParameters": {"ResultParameter": [
-            {"Key": "TransactionReceipt", "Value": "QABNEW"},
-            {"Key": "TransactionAmount", "Value": 100},
+            {"Key": "TransactionReceipt", "Value": "QABUSED"},
+            {"Key": "TransactionAmount", "Value": 125},
         ]},
     }}
     assert _supplier_b2c_callback(db, token, mismatch) is True
