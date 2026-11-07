@@ -19,14 +19,14 @@ The domain API is registered in the OneCore application under `/api/v1`. The int
 
 ## Laboratory workflows
 
-- Configurable test catalogue with specimen type, unit, reference range, critical low/high thresholds, price and turnaround target.
+- Configurable test catalogue with specimen type, unit, reference range, critical low/high thresholds, price and turnaround target; tests can be updated or deactivated while historical order snapshots remain intact.
 - Configurable panels; panel tests are restricted to a single specimen type because each order has a specimen-specific collection workflow.
-- Lab orders require an open encounter assigned to the ordering clinician and snapshot test catalogue data at order time.
+- Lab orders require an open encounter assigned to the ordering clinician and snapshot test catalogue data at order time. Accepted specimens move through an explicit processing state before result verification.
 - Multiple sample/accession records per order, specimen collection, barcode/accession, acceptance/rejection, handoff/receipt custody events and chain-of-custody history.
 - Result entry requires an accepted sample. Numeric critical thresholds automatically queue critical alerts; authorized users can additionally flag a result critical.
 - Independent result validation prevents the result author from validating their own work.
 - Analyzer instruments have one-time API credentials, rotation and revocation. Analyzer result ingestion is authenticated by the instrument key and is blocked unless the latest QC passed and calibration remains in date.
-- QC, calibration, critical-alert acknowledgement, secure clinician delivery and one-time expiring patient result links are audited.
+- QC records have an explicit validity date; analyzer ingestion is blocked when QC has expired or failed. Calibration due dates are enforced. QC, calibration, critical-alert acknowledgement, secure clinician delivery and one-time expiring patient result links are audited.
 - Laboratory orders can be invoiced only after result validation. Pharmacy dispense invoices use the actual batch selling prices. Insurance claims can be submitted, approved/rejected and settled through the shared healthcare claim settlement route so invoice balances are reconciled.
 
 ## API and workspace
@@ -35,9 +35,9 @@ The workspace is a signed-in API workbench for the pharmacy and laboratory route
 
 - `POST /api/v1/pharmacy/prescriptions`, `/dispense`, `/refill`, `/cancel`
 - `POST /api/v1/pharmacy/dispenses/{id}/return` and `/pharmacy/returns/{id}/disposition`
-- `POST /api/v1/lab/orders`, `/samples`, `/results`, `/validate`
-- `POST /api/v1/lab/instruments/{id}/results` using `X-Instrument-Key`
-- `POST /api/v1/pharmacy-lab/billing`, `/claims/{id}/decision`, `/claims/{id}/settle`
+- `POST /api/v1/lab/orders`, `/start-processing`, `/samples`, `/results`, `/validate`; `PUT /api/v1/lab/tests/{id}` and `POST /api/v1/lab/tests/{id}/deactivate`
+- `POST /api/v1/lab/instruments/{id}/results` using `X-Instrument-Key` and a unique analyzer `result_id`
+- `POST /api/v1/pharmacy-lab/billing`, `/claims/{id}/decision`, `/claims/{id}/settle`; `GET /api/v1/pharmacy/reports/stock` and `GET /api/v1/lab/reports/operations`
 
 ## Production release gates and external dependencies
 
