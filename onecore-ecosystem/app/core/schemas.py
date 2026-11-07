@@ -271,6 +271,31 @@ class AccountingInvoicePaymentIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
+class AccountingInvoiceApprovalDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
+
+
+class AccountingCreditNoteLineIn(BaseModel):
+    invoice_line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999"), multiple_of=Decimal("0.001"))
+
+
+class AccountingCreditNoteIn(BaseModel):
+    credit_note_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
+    issue_date: date
+    reason: str = Field(min_length=5, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    lines: list[AccountingCreditNoteLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_invoice_lines(self):
+        ids = [line.invoice_line_id for line in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each invoice line may be credited only once per credit note")
+        return self
+
+
 class AccountingFiscalPeriodIn(BaseModel):
     code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
     start_date: date
