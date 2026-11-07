@@ -126,7 +126,9 @@ def _create(db, m, u, kind: str, data: dict, branch_id=None, patient_id=None,
             organization_id=m.organization_id, resource_type=kind,
             idempotency_key=idempotency_key).first()
         if existing:
-            if existing.patient_id != patient_id or _stable(_payload(existing)) != _stable(data):
+            if (existing.patient_id != patient_id or existing.parent_id != parent_id
+                or existing.amount != amount or existing.currency != currency
+                or _stable(_payload(existing)) != _stable(data)):
                 raise HTTPException(409, "Idempotency key was already used with different data")
             return existing
     if external_key and db.query(HealthcareResource.id).filter_by(
