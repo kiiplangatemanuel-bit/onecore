@@ -314,3 +314,17 @@ are not provider verification.
 Verified earlier completed runs before POS changes: CRM run `42362416897` passed
 35 tests; procurement run `42362626229` passed 39 tests. POS migration, code and
 new tests require a fresh CI run before they can be marked verified.
+
+
+### Verified CI for Accounting, CRM, Procurement and POS foundations
+
+- Accounting migration/code run `42362261548` passed; pytest: **30 passed, 5 warnings**.
+- CRM code run `42362416897` passed; pytest: **35 passed, 5 warnings**.
+- Procurement code run `42362626229` passed; pytest: **39 passed, 5 warnings**.
+- POS plus current platform code run `42362993129` completed successfully; database
+  migration upgrade, downgrade/re-upgrade and Python compilation passed; pytest:
+  **43 passed, 5 warnings**.
+- This verifies the current automated suite and migration chain in the CI SQLite
+  environment only. It is not evidence of PostgreSQL production rehearsal, race/load
+  testing, external provider certification, production deployment, penetration test
+  or user acceptance approval.
