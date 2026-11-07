@@ -806,13 +806,13 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
     snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
     if not snaps:
         raise HTTPException(409, "Payroll calculation snapshots are missing")
-    totals = {k: ZERO for k in ("gross_pay","net_pay","paye","nssf_employee","nssf_employer","shif_employee","housing_levy_employee","housing_levy_employer","employee_pension","other_deductions")}
+    totals = {k: ZERO for k in ("gross_pay","net_pay","paye","nssf_employee","nssf_employer","shif_employee","housing_levy_employee","housing_levy_employer","employee_pension","post_retirement_medical_fund","other_deductions")}
     for s in snaps:
         c=s["calculation"]
         for k in totals:
             totals[k] += D(c.get(k,"0"))
     mapping = payload.get("accounts", {})
-    keys = {"salary_expense","salary_payable","paye_payable","nssf_payable","shif_payable","housing_levy_payable","pension_payable","other_deductions_payable"}
+    keys = {"salary_expense","salary_payable","paye_payable","nssf_payable","shif_payable","housing_levy_payable","pension_payable","prmf_payable","other_deductions_payable"}
     if not keys.issubset(mapping):
         raise HTTPException(422, {"message":"Map all required payroll accounts","required":sorted(keys)})
     ids = {int(mapping[k]) for k in keys}
@@ -835,6 +835,7 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
         "shif_payable": totals["shif_employee"],
         "housing_levy_payable": totals["housing_levy_employee"] + totals["housing_levy_employer"],
         "pension_payable": totals["employee_pension"],
+        "prmf_payable": totals["post_retirement_medical_fund"],
         "other_deductions_payable": totals["other_deductions"]
     }
     debit = totals["gross_pay"] + totals["nssf_employer"] + totals["housing_levy_employer"]
