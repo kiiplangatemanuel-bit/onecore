@@ -265,7 +265,7 @@ The POS completion API adds organization/branch-scoped device registration and a
 ## Customer membership and loyalty
 
 - `POST /api/v1/pos/customers`, `GET /api/v1/pos/customers?q=...`, and `GET /api/v1/pos/customers/{id}/history` maintain tenant-owned customer membership and purchase history.
-- `POST /api/v1/pos/customers/{id}/sales` links an already-posted sale to a customer and earns one point per 100 currency units of sale value. The unique sale/ledger keys make repeat linking safe and prevent double earning.
+- Checkout accepts an optional `customer_id` on `POSSaleSyncIn`; online and offline queued sales are linked to that tenant customer atomically when posted and earn one point per 100 currency units of sale value. Customer ID is part of the canonical offline request hash, so changing the customer on a replay is a conflict. `POST /api/v1/pos/customers/{id}/sales` remains available to link a previously posted sale. Unique sale/ledger keys prevent double earning.
 - `POST /api/v1/pos/customers/{id}/rewards/redeem` performs supervisor-authorized, idempotent point redemption and refuses negative balances. Redemption is a points ledger operation; it is not automatically a cash discount or tender allocation. A configured reward-to-currency policy and checkout discount integration remain required before points can reduce an invoice total.
 - Customer points and spend are tenant-scoped. Do not put payment-card data or sensitive identity documents in customer profile fields.
 
