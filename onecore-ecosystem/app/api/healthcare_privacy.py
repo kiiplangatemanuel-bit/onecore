@@ -29,7 +29,7 @@ def role(m,allowed):
     if (m.role or "").lower() not in allowed: raise HTTPException(403,"Healthcare role is not authorized")
 def patient(db,pid,m):
     p=db.query(HealthcarePatient).filter_by(id=pid,organization_id=m.organization_id).first()
-    if not p: raise HTTPException(404,"Patient not found")
+    if not p or not can_access_branch(m,p.branch_id): raise HTTPException(404,"Patient not found")
     return p
 def access(db,p,m,u,level="read"):
     role(m,READ_ROLES)
@@ -47,15 +47,19 @@ def audit(db,p,m,u,action,reason=""):
 def create_patient(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     role(m,{"org_admin","healthcare_admin"}); mrn=str(payload.get("medical_record_number","")).strip()
     profile=payload.get("profile")
-    if not mrn or len(mrn)>60 or not isinstance(profile,dict): raise HTTPException(422,"medical_record_number and profile object required")
-    branch_id=payload.get("branch_id")\n    if branch_id:\n        b=db.query(Branch).filter_by(id=branch_id,organization_id=m.organization_id,is_active=True).first()\n        if not b or not can_access_branch(m,branch_id): raise HTTPException(404,"Branch not found")\n    p=HealthcarePatient(organization_id=m.organization_id,branch_id=branch_id,medical_record_number=mrn,
+    if not mrn or len(mrn)>60 or not isinstance(profile,dict) or len(json.dumps(profile,ensure_ascii=False))>65536: raise HTTPException(422,"medical_record_number and profile (max 64 KiB) object required")
+    branch_id=payload.get("branch_id")
+    if branch_id:
+        b=db.query(Branch).filter_by(id=branch_id,organization_id=m.organization_id,is_active=True).first()
+        if not b or not can_access_branch(m,branch_id): raise HTTPException(404,"Branch not found")
+    p=HealthcarePatient(organization_id=m.organization_id,branch_id=branch_id,medical_record_number=mrn,
         encrypted_profile=encrypt(profile),created_by=u.id)
     db.add(p); db.flush(); audit(db,p,m,u,"patient_created"); return {"id":p.id,"medical_record_number":p.medical_record_number}
 
 @router.get("/patients/{patient_id}")
 def get_patient(patient_id:int,reason:str="",m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     p=patient(db,patient_id,m); access(db,p,m,u)
-    if m.role=="clinical_auditor" and not reason.strip(): raise HTTPException(422,"Audit reason required")
+    if (m.role or "").lower()=="clinical_auditor" and not reason.strip(): raise HTTPException(422,"Audit reason required")
     audit(db,p,m,u,"patient_read",reason)
     return {"id":p.id,"medical_record_number":p.medical_record_number,"status":p.status,"profile":decrypt(p.encrypted_profile)}
 
@@ -79,7 +83,7 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
 def create_encounter(patient_id:int,payload:dict,reason:str,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     role(m,WRITE_ROLES); p=patient(db,patient_id,m); access(db,p,m,u,"write")
     note=payload.get("clinical_note")
-    if not isinstance(note,dict) or not reason.strip(): raise HTTPException(422,"clinical_note object and reason required")
+    if not isinstance(note,dict) or len(json.dumps(note,ensure_ascii=False))>65536 or not reason.strip(): raise HTTPException(422,"clinical_note object (max 64 KiB) and reason required")
     e=HealthcareEncounter(organization_id=m.organization_id,patient_id=p.id,branch_id=p.branch_id,
         encounter_type=str(payload.get("encounter_type","consultation"))[:32],encrypted_clinical_note=encrypt(note),clinician_user_id=u.id)
     db.add(e); db.flush(); audit(db,p,m,u,"encounter_created",reason); return {"encounter_id":e.id,"status":e.status}
