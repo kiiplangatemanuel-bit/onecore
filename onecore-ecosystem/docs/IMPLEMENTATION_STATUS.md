@@ -658,3 +658,19 @@ compilation and pytest before merge.
 - Pending CI: migration upgrade/downgrade/re-upgrade, compilation and pytest.
 - Not included: bulk promotion, capacity/waitlists, guardian consent, eligibility
   rules, fee carry-forward, transcript migration or guardian notifications.
+
+
+
+## CRM accepted quote to sales order increment (7 November 2026)
+
+Implemented on branch `feature/crm-sales-order-conversion`:
+
+- Convert only accepted, unexpired tenant quotes into confirmed sales orders.
+- One order per source quote; repeat conversion is idempotent and returns the existing order.
+- Snapshot quote lines, quantities, prices, tax rates and calculated totals.
+- Tenant/branch-scoped conversion, listing and detail APIs with audit events.
+- Migration `0020_crm_sales_orders`; tests cover conversion request validation,
+  model registration and API route contracts.
+
+Boundaries: sales orders do not reserve/deduct stock, generate invoices, collect deposits,
+dispatch or notify customers. CI and reviewer acceptance are required before merge.
