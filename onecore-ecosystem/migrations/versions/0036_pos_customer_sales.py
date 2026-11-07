@@ -12,10 +12,15 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("pos_sales", sa.Column("customer_id", sa.Integer(), sa.ForeignKey("pos_customers.id"), nullable=True))
-    op.create_index("ix_pos_sales_customer_id", "pos_sales", ["customer_id"])
+    # Batch mode supports SQLite test/development databases and PostgreSQL.
+    with op.batch_alter_table("pos_sales") as batch:
+        batch.add_column(sa.Column("customer_id", sa.Integer(), nullable=True))
+        batch.create_foreign_key("fk_pos_sales_customer_id", "pos_customers", ["customer_id"], ["id"])
+        batch.create_index("ix_pos_sales_customer_id", ["customer_id"])
 
 
 def downgrade():
-    op.drop_index("ix_pos_sales_customer_id", table_name="pos_sales")
-    op.drop_column("pos_sales", "customer_id")
+    with op.batch_alter_table("pos_sales") as batch:
+        batch.drop_index("ix_pos_sales_customer_id")
+        batch.drop_constraint("fk_pos_sales_customer_id", type_="foreignkey")
+        batch.drop_column("customer_id")
