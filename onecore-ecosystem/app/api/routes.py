@@ -5731,15 +5731,6 @@ def disburse_sacco_loan(application_id: int, payload: SaccoLoanDisbursementIn,
         is_active=True).first()
     if not product:
         raise HTTPException(409, "The originating loan product is no longer active")
-    if product.requires_guarantor:
-        approved_guarantees = db.query(func.coalesce(func.sum(SaccoLoanGuarantor.guaranteed_amount), 0)).filter(
-            SaccoLoanGuarantor.organization_id == membership.organization_id,
-            SaccoLoanGuarantor.loan_id == db.query(SaccoLoan.id).filter_by(
-                organization_id=membership.organization_id, application_id=application.id).scalar_subquery(),
-            SaccoLoanGuarantor.status == "approved",
-        ).scalar()
-        if Decimal(str(approved_guarantees or 0)) < Decimal(str(application.requested_principal)):
-            raise HTTPException(409, "Approved guarantor coverage must equal or exceed the requested principal")
     disbursed_at = datetime.now(timezone.utc)
     first_due_date = add_months(disbursed_at.date(), 1)
     try:
