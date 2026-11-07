@@ -185,7 +185,9 @@ def sync_monitor(membership=Depends(active_membership),db:Session=Depends(get_db
         "never_synced":sum(x.last_sync_at is None for x in rows),
         "stale":sum(x.status=="active" and (x.last_sync_at is None or x.last_sync_at<now-timedelta(hours=1)) for x in rows),
         "failed":sum(x.last_sync_status in {"failed","partial","conflict"} for x in rows),
-        "pending_conflicts":db.query(func.count(POSOfflineConflict.id)).filter_by(organization_id=membership.organization_id,status="pending").scalar() or 0,
+        "pending_conflicts":db.query(func.count(POSOfflineConflict.id)).filter(
+            POSOfflineConflict.organization_id==membership.organization_id,POSOfflineConflict.status=="pending",
+            POSOfflineConflict.branch_id.in_(allowed or ["__none__"]) if allowed is not None else True).scalar() or 0,
         "items":[{"device_id":x.id,"device":x.name,"branch_id":x.branch_id,"status":x.status,"last_sync_at":x.last_sync_at,
             "sync_status":x.last_sync_status,"error":x.last_sync_error} for x in rows]}
 
@@ -231,8 +233,12 @@ def link_customer_sale(customer_id:int,payload:CustomerSaleIn,membership=Depends
 def customer_history(customer_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
     customer=db.query(POSCustomer).filter_by(id=customer_id,organization_id=membership.organization_id).first()
     if not customer:raise HTTPException(404,"Customer not found")
-    rows=db.query(POSSale).join(POSCustomerSale,POSCustomerSale.sale_id==POSSale.id).filter(
-        POSCustomerSale.customer_id==customer.id,POSSale.organization_id==membership.organization_id).order_by(POSSale.created_at.desc()).limit(200).all()
+    allowed=branch_scope_ids(membership)
+    if customer.branch_id:_branch(membership,customer.branch_id)
+    query=db.query(POSSale).join(POSCustomerSale,POSCustomerSale.sale_id==POSSale.id).filter(
+        POSCustomerSale.customer_id==customer.id,POSSale.organization_id==membership.organization_id)
+    if allowed is not None:query=query.filter(POSSale.branch_id.in_(allowed or ["__none__"]))
+    rows=query.order_by(POSSale.created_at.desc()).limit(200).all()
     return {"customer":{"id":customer.id,"name":customer.full_name,"tier":customer.membership_tier,"points_balance":customer.points_balance,
         "lifetime_spend":str(customer.lifetime_spend)},"purchases":[{"sale_id":x.id,"branch_id":x.branch_id,"total":str(x.total_amount),"currency":x.currency,"created_at":x.created_at} for x in rows]}
 
@@ -245,6 +251,7 @@ def redeem_points(customer_id:int,payload:LoyaltyRedeemIn,membership=Depends(act
     if existing:
         if existing.customer_id!=customer.id or existing.points_delta!=-payload.points:raise HTTPException(409,"Idempotency key reused with different redemption")
         return {"id":existing.id,"points_balance":customer.points_balance,"idempotent":True}
+    if customer.branch_id:_branch(membership,customer.branch_id)
     if customer.points_balance<payload.points:raise HTTPException(422,"Insufficient loyalty points")
     customer.points_balance-=payload.points
     row=POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,entry_type="redeem",
@@ -313,13 +320,16 @@ def operations_report(branch_id:str|None=None,membership=Depends(active_membersh
     if branch_id:shifts=shifts.filter_by(branch_id=branch_id)
     elif allowed is not None:shifts=shifts.filter(POSShift.branch_id.in_(allowed or ["__none__"]))
     shift_rows=shifts.all()
+    tender_query=db.query(func.count(POSPayment.id)).join(POSSale,POSPayment.sale_id==POSSale.id).filter(
+        POSPayment.organization_id==membership.organization_id,POSPayment.status=="unsettled")
+    if branch_id:tender_query=tender_query.filter(POSSale.branch_id==branch_id)
+    elif allowed is not None:tender_query=tender_query.filter(POSSale.branch_id.in_(allowed or ["__none__"]))
     return {"sales_count":len(rows),"sales_total":str(sum((Decimal(x.total_amount) for x in rows),Decimal("0"))),
         "by_branch":[{"branch_id":b,"sales_count":sum(x.branch_id==b for x in rows),
         "sales_total":str(sum((Decimal(x.total_amount) for x in rows if x.branch_id==b),Decimal("0")))} for b in sorted({x.branch_id for x in rows})],
         "shifts":{"open":sum(x.status=="open" for x in shift_rows),"closed":sum(x.status!="open" for x in shift_rows),
         "pending_review":sum(x.reconciliation_status=="pending_review" for x in shift_rows)},
-        "unsettled_tenders":db.query(func.count(POSPayment.id)).join(POSSale,POSPayment.sale_id==POSSale.id).filter(
-            POSPayment.organization_id==membership.organization_id,POSPayment.status=="unsettled",POSSale.branch_id.in_(allowed or ["__none__"]) if allowed is not None else True).scalar() or 0}
+        "unsettled_tenders":tender_query.scalar() or 0}
 
 @router.post("/refunds/{refund_id}/confirm-execution")
 def confirm_refund_execution(refund_id:int,payload:SettlementIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
