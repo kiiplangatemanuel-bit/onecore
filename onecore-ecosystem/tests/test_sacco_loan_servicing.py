@@ -94,7 +94,6 @@ def test_sacco_arrears_ageing_ui_is_read_only():
     assert "No late fees or penalties are calculated or posted" in html
 
 
-
 def test_sacco_guarantor_and_collateral_contracts():
     from app.core.schemas import (SaccoLoanGuarantorIn, SaccoLoanCollateralIn,
         SaccoLoanGuarantorDecisionIn, SaccoLoanCollateralDecisionIn)
@@ -112,3 +111,16 @@ def test_sacco_guarantor_and_collateral_contracts():
     assert "/api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/decision" in paths
     assert "/api/v1/sacco/loans/{loan_id}/collateral" in paths
     assert "/api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/decision" in paths
+
+
+def test_sacco_security_workspace_ui_uses_merged_api_contract():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "sacco.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="guarantor"' in html
+    assert 'id="collateral"' in html
+    assert 'id="securityReview"' in html
+    # The UI builds these endpoint paths from the selected loan and record IDs.
+    assert "'/guarantors'" in html and "'/decision'" in html
+    assert "'/collateral'" in html and "'/decision'" in html
+    assert "/review" not in html
