@@ -277,6 +277,42 @@ def reserve_stock(payload:ReservationIn,membership=Depends(active_membership),us
     return {"id":row.id,"status":row.status,"quantity":str(row.quantity),"expires_at":row.expires_at.isoformat()}
 
 
+@router.post("/reservations/{reservation_id}/consume")
+def consume_reservation(reservation_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    row=db.query(InventoryReservation).filter_by(id=reservation_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row: raise HTTPException(404,"Reservation not found")
+    if row.status=="consumed": return {"id":row.id,"status":"consumed"}
+    if row.status!="active": raise HTTPException(409,"Reservation is not active")
+    expiry=row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    if expiry<=datetime.now(timezone.utc):
+        row.status="expired";db.commit();raise HTTPException(409,"Reservation has expired")
+    wh=get_warehouse(db,membership.organization_id,row.warehouse_id,membership)
+    product=db.query(InventoryProduct).filter_by(id=row.product_id,organization_id=membership.organization_id).with_for_update().first()
+    if not product: raise HTTPException(404,"Product not found")
+    remaining=dec(row.quantity)
+    batches=db.query(InventoryBatch).filter(InventoryBatch.organization_id==membership.organization_id,
+        InventoryBatch.warehouse_id==wh.id,InventoryBatch.product_id==row.product_id,
+        InventoryBatch.status=="available",InventoryBatch.quantity_on_hand>0).order_by(
+        InventoryBatch.expiry_date.asc().nullslast(),InventoryBatch.created_at.asc()).with_for_update().all()
+    for batch in batches:
+        exp=batch.expiry_date
+        if exp and (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc))<datetime.now(timezone.utc): continue
+        take=min(dec(batch.quantity_on_hand),remaining)
+        batch.quantity_on_hand=dec(batch.quantity_on_hand)-take
+        remaining-=take
+        if remaining<=0: break
+    if remaining>0 and batches: raise HTTPException(409,"Insufficient eligible batch quantity to fulfil reservation")
+    db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=row.product_id,
+        branch_id=wh.branch_id,warehouse_id=wh.id,quantity_delta=-dec(row.quantity),
+        movement_type="reservation_consume",reference=f"reservation:{row.id}",
+        idempotency_key=f"reservation-{row.id}-consume",created_by=user.id))
+    row.status="consumed"
+    audit(db,user,membership.organization_id,"inventory.stock.reservation_consumed","inventory_reservation",row.id)
+    db.commit()
+    return {"id":row.id,"status":row.status,"quantity":str(row.quantity)}
+
+
 @router.post("/reservations/{reservation_id}/release")
 def release_reservation(reservation_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
