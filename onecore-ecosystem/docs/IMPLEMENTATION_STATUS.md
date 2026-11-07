@@ -599,3 +599,19 @@ import/export, team assignment and UAT.
 - Branch: feature/accounting-credit-notes-approvals.
 - GitHub Actions run `42373824056` passed migration upgrade, downgrade/re-upgrade,
   Python compilation and pytest at commit `3f3083b25fc7a9d8d16e60a967921e493060d474`.
+
+
+## Accounting fiscal period close controls increment (CI pending)
+
+- Added a read-only pre-close checklist endpoint reporting draft invoices,
+  pending invoice approvals, draft credit notes, draft journals, unreconciled
+  overlapping bank statements and unbalanced posted journals.
+- Fiscal period close now returns structured blocker codes/counts and refuses
+  closure until all detected blockers are resolved.
+- Added API contract coverage and documented the endpoint and its boundaries.
+- No schema migration is required for this logic-only increment.
+- Branch: feature/accounting-fiscal-close-controls.
+- Verification pending GitHub Actions migration upgrade/downgrade/re-upgrade,
+  Python compilation and pytest.
+- Not yet included: retained earnings transfer, subledger reconciliation,
+  statutory/tax close validation, depreciation certification and sign-off pack.
