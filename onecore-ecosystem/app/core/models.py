@@ -170,7 +170,6 @@ class AccountingAccount(Base):
     code: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(180))
     account_type: Mapped[str] = mapped_column(String(20))
-    is_cash_equivalent: Mapped[bool] = mapped_column(Boolean, default=False)
     cash_flow_category: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -1095,20 +1094,26 @@ class AccountingCreditNoteLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
-class AccountingInvoiceRefund(Base):
-    __tablename__ = "accounting_invoice_refunds"
+class AccountingRefund(Base):
+    __tablename__ = "accounting_refunds"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    refund_number: Mapped[str] = mapped_column(String(60))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
     payment_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
     journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"))
-    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     refund_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     reference: Mapped[str] = mapped_column(String(120), default="")
     idempotency_key: Mapped[str] = mapped_column(String(100))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("ix_accounting_refund_org_key", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index("ix_accounting_refund_org_number", "organization_id", "refund_number", unique=True),
+        Index("ix_accounting_refund_org_key", "organization_id", "idempotency_key", unique=True),
+    )
 
 
 class AccountingFiscalPeriod(Base):
