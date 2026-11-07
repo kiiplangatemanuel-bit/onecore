@@ -4873,3 +4873,342 @@ def list_school_learner_placements(learner_id: int,
             "reason": row.reason, "changed_by": row.changed_by})
     return {"learner_id": learner.id, "current_class_id": learner.class_id, "placements": results}
 
+
+
+# SACCO member, savings and loan-origination APIs.
+def _sacco_member_or_404(db, membership, member_id):
+    member = db.query(SaccoMember).filter_by(
+        id=member_id, organization_id=membership.organization_id
+    ).first()
+    if not member or (member.branch_id and not can_access_branch(membership, member.branch_id)):
+        raise HTTPException(404, "SACCO member not found")
+    return member
+
+
+def _sacco_account_balance(db, organization_id, account_id):
+    rows = db.query(SaccoTransaction.transaction_type, SaccoTransaction.amount).filter_by(
+        organization_id=organization_id, account_id=account_id
+    ).all()
+    balance = Decimal("0.00")
+    for transaction_type, amount in rows:
+        amount = Decimal(str(amount))
+        if transaction_type == "withdrawal":
+            balance -= amount
+        else:
+            balance += amount
+    return balance.quantize(Decimal("0.01"))
+
+
+@router.post("/sacco/members", status_code=201)
+def create_sacco_member(payload: SaccoMemberIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    if payload.branch_id:
+        branch = db.query(Branch).filter_by(
+            id=payload.branch_id, organization_id=membership.organization_id, is_active=True
+        ).first()
+        if not branch or not can_access_branch(membership, branch.id):
+            raise HTTPException(404, "Branch not found")
+    row = SaccoMember(organization_id=membership.organization_id,
+        branch_id=payload.branch_id, member_number=payload.member_number.strip(),
+        full_name=payload.full_name.strip(), phone=payload.phone, email=payload.email,
+        status="pending", kyc_status="pending", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.member.created", resource_type="sacco_member",
+        resource_id=payload.member_number, detail="KYC pending"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Member number already exists in this organization")
+    db.refresh(row)
+    return {"id": row.id, "member_number": row.member_number, "full_name": row.full_name,
+        "status": row.status, "kyc_status": row.kyc_status, "branch_id": row.branch_id}
+
+
+@router.get("/sacco/members")
+def list_sacco_members(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(SaccoMember).filter_by(
+        organization_id=membership.organization_id
+    ).order_by(SaccoMember.created_at.desc(), SaccoMember.id.desc()).all()
+    return [{"id": row.id, "member_number": row.member_number, "full_name": row.full_name,
+        "phone": row.phone, "email": row.email, "status": row.status,
+        "kyc_status": row.kyc_status, "branch_id": row.branch_id,
+        "created_at": row.created_at.isoformat()} for row in rows
+        if not row.branch_id or can_access_branch(membership, row.branch_id)]
+
+
+@router.post("/sacco/members/{member_id}/kyc-decision")
+def decide_sacco_member_kyc(member_id: int, payload: SaccoKYCDecisionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    member = _sacco_member_or_404(db, membership, member_id)
+    if member.kyc_status != "pending":
+        raise HTTPException(409, "KYC has already been decided")
+    member.kyc_status = payload.decision
+    member.status = "active" if payload.decision == "verified" else "rejected"
+    member.reviewed_by = user.id
+    member.reviewed_at = datetime.now(timezone.utc)
+    member.review_note = payload.note.strip()
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.member.kyc_decided", resource_type="sacco_member",
+        resource_id=member.id, detail=f"{payload.decision}:{payload.note.strip()}"))
+    db.commit()
+    return {"id": member.id, "status": member.status, "kyc_status": member.kyc_status}
+
+
+@router.post("/sacco/accounts", status_code=201)
+def create_sacco_account(payload: SaccoAccountIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    member = _sacco_member_or_404(db, membership, payload.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member must pass KYC before opening an account")
+    account_number = f"SAC-{membership.organization_id}-{uuid.uuid4().hex[:10].upper()}"
+    row = SaccoAccount(organization_id=membership.organization_id,
+        member_id=member.id, branch_id=member.branch_id, account_number=account_number,
+        account_type=payload.account_type, currency=payload.currency,
+        status="active", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.account.opened", resource_type="sacco_account",
+        resource_id=account_number, detail=f"member:{member.id};type:{payload.account_type}"))
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "account_number": row.account_number, "member_id": row.member_id,
+        "account_type": row.account_type, "currency": row.currency, "status": row.status,
+        "balance": "0.00"}
+
+
+@router.get("/sacco/accounts")
+def list_sacco_accounts(member_id: int | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoAccount).filter_by(organization_id=membership.organization_id)
+    if member_id is not None:
+        member = _sacco_member_or_404(db, membership, member_id)
+        query = query.filter(SaccoAccount.member_id == member.id)
+    rows = query.order_by(SaccoAccount.created_at.desc(), SaccoAccount.id.desc()).all()
+    result = []
+    for row in rows:
+        if row.branch_id and not can_access_branch(membership, row.branch_id):
+            continue
+        result.append({"id": row.id, "account_number": row.account_number,
+            "member_id": row.member_id, "account_type": row.account_type,
+            "currency": row.currency, "status": row.status,
+            "balance": str(_sacco_account_balance(db, membership.organization_id, row.id))})
+    return result
+
+
+@router.post("/sacco/accounts/{account_id}/transactions", status_code=201)
+def post_sacco_transaction(account_id: int, payload: SaccoTransactionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    account = db.query(SaccoAccount).filter_by(
+        id=account_id, organization_id=membership.organization_id, status="active"
+    ).with_for_update().first()
+    if not account or (account.branch_id and not can_access_branch(membership, account.branch_id)):
+        raise HTTPException(404, "Active SACCO account not found")
+    member = _sacco_member_or_404(db, membership, account.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member KYC is not active")
+    expected_type = {"savings": {"deposit", "withdrawal"},
+        "shares": {"share_contribution"}, "contributions": {"contribution"}}
+    if payload.transaction_type not in expected_type[account.account_type]:
+        raise HTTPException(422, "Transaction type does not match the account type")
+    if payload.transaction_type == "withdrawal":
+        require_permission(membership, "manage")
+    amount = Decimal(str(payload.amount)).quantize(Decimal("0.01"))
+    request_body = {"account_id": account.id, "transaction_type": payload.transaction_type,
+        "amount": str(amount), "reference": payload.reference.strip()}
+    request_hash = hashlib.sha256(json.dumps(request_body, sort_keys=True,
+        separators=(",", ":")).encode()).hexdigest()
+    existing = db.query(SaccoTransaction).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Idempotency key was used for different transaction data")
+        return {"id": existing.id, "account_id": account.id, "status": "already_recorded",
+            "balance": str(_sacco_account_balance(db, membership.organization_id, account.id))}
+    balance = _sacco_account_balance(db, membership.organization_id, account.id)
+    if payload.transaction_type == "withdrawal" and amount > balance:
+        raise HTTPException(422, "Withdrawal exceeds available savings balance")
+    row = SaccoTransaction(organization_id=membership.organization_id,
+        account_id=account.id, transaction_type=payload.transaction_type,
+        amount=amount, reference=payload.reference.strip(),
+        idempotency_key=payload.idempotency_key, request_hash=request_hash,
+        created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action=f"sacco.transaction.{payload.transaction_type}", resource_type="sacco_account",
+        resource_id=account.id, detail=f"amount:{amount};reference:{payload.reference.strip()}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoTransaction).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key).first()
+        if existing and existing.request_hash == request_hash:
+            return {"id": existing.id, "account_id": account.id, "status": "already_recorded",
+                "balance": str(_sacco_account_balance(db, membership.organization_id, account.id))}
+        raise HTTPException(409, "Concurrent transaction conflicts with this idempotency key")
+    db.refresh(row)
+    return {"id": row.id, "account_id": account.id, "transaction_type": row.transaction_type,
+        "amount": str(row.amount), "balance": str(_sacco_account_balance(db, membership.organization_id, account.id)),
+        "status": "recorded"}
+
+
+@router.get("/sacco/accounts/{account_id}/transactions")
+def list_sacco_transactions(account_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    account = db.query(SaccoAccount).filter_by(
+        id=account_id, organization_id=membership.organization_id).first()
+    if not account or (account.branch_id and not can_access_branch(membership, account.branch_id)):
+        raise HTTPException(404, "SACCO account not found")
+    rows = db.query(SaccoTransaction).filter_by(
+        organization_id=membership.organization_id, account_id=account.id
+    ).order_by(SaccoTransaction.created_at, SaccoTransaction.id).all()
+    balance = Decimal("0.00")
+    result = []
+    for row in rows:
+        amount = Decimal(str(row.amount))
+        balance += -amount if row.transaction_type == "withdrawal" else amount
+        result.append({"id": row.id, "transaction_type": row.transaction_type,
+            "amount": str(row.amount), "reference": row.reference,
+            "created_at": row.created_at.isoformat(), "running_balance": str(balance)})
+    return {"account_id": account.id, "currency": account.currency,
+        "balance": str(balance), "transactions": result}
+
+
+@router.post("/sacco/loan-products", status_code=201)
+def create_sacco_loan_product(payload: SaccoLoanProductIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = SaccoLoanProduct(organization_id=membership.organization_id,
+        code=payload.code.strip(), name=payload.name.strip(),
+        minimum_principal=payload.minimum_principal, maximum_principal=payload.maximum_principal,
+        annual_interest_rate=payload.annual_interest_rate,
+        minimum_term_months=payload.minimum_term_months, maximum_term_months=payload.maximum_term_months,
+        interest_method=payload.interest_method, requires_guarantor=payload.requires_guarantor,
+        is_active=True, created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan_product.created", resource_type="sacco_loan_product",
+        resource_id=payload.code, detail=payload.name))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Loan product code already exists")
+    db.refresh(row)
+    return {"id": row.id, "code": row.code, "name": row.name,
+        "minimum_principal": str(row.minimum_principal), "maximum_principal": str(row.maximum_principal),
+        "annual_interest_rate": str(row.annual_interest_rate), "interest_method": row.interest_method,
+        "requires_guarantor": row.requires_guarantor, "is_active": row.is_active}
+
+
+@router.get("/sacco/loan-products")
+def list_sacco_loan_products(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(SaccoLoanProduct).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(SaccoLoanProduct.name).all()
+    return [{"id": row.id, "code": row.code, "name": row.name,
+        "minimum_principal": str(row.minimum_principal), "maximum_principal": str(row.maximum_principal),
+        "annual_interest_rate": str(row.annual_interest_rate), "minimum_term_months": row.minimum_term_months,
+        "maximum_term_months": row.maximum_term_months, "interest_method": row.interest_method,
+        "requires_guarantor": row.requires_guarantor} for row in rows]
+
+
+@router.post("/sacco/loan-applications", status_code=201)
+def create_sacco_loan_application(payload: SaccoLoanApplicationIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    member = _sacco_member_or_404(db, membership, payload.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member must pass KYC before applying for a loan")
+    product = db.query(SaccoLoanProduct).filter_by(
+        id=payload.loan_product_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not product:
+        raise HTTPException(404, "Active loan product not found")
+    principal = Decimal(str(payload.requested_principal)).quantize(Decimal("0.01"))
+    if principal < product.minimum_principal or principal > product.maximum_principal:
+        raise HTTPException(422, "Requested principal is outside loan product limits")
+    if not product.minimum_term_months <= payload.term_months <= product.maximum_term_months:
+        raise HTTPException(422, "Requested term is outside loan product limits")
+    application_number = f"LA-{membership.organization_id}-{uuid.uuid4().hex[:12].upper()}"
+    row = SaccoLoanApplication(organization_id=membership.organization_id,
+        member_id=member.id, loan_product_id=product.id, branch_id=member.branch_id,
+        application_number=application_number, requested_principal=principal,
+        term_months=payload.term_months, purpose=payload.purpose.strip(),
+        status="submitted", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan_application.submitted", resource_type="sacco_loan_application",
+        resource_id=application_number, detail=f"principal:{principal};term:{payload.term_months}"))
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "application_number": row.application_number,
+        "requested_principal": str(row.requested_principal), "term_months": row.term_months,
+        "status": row.status}
+
+
+@router.get("/sacco/loan-applications")
+def list_sacco_loan_applications(status: str | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoLoanApplication).filter_by(organization_id=membership.organization_id)
+    if status:
+        if status not in {"submitted", "approved", "rejected"}:
+            raise HTTPException(422, "Invalid application status filter")
+        query = query.filter(SaccoLoanApplication.status == status)
+    rows = query.order_by(SaccoLoanApplication.created_at.desc()).all()
+    result = []
+    for row in rows:
+        if row.branch_id and not can_access_branch(membership, row.branch_id):
+            continue
+        result.append({"id": row.id, "application_number": row.application_number,
+            "member_id": row.member_id, "loan_product_id": row.loan_product_id,
+            "requested_principal": str(row.requested_principal), "term_months": row.term_months,
+            "purpose": row.purpose, "status": row.status, "review_note": row.review_note,
+            "created_at": row.created_at.isoformat()})
+    return result
+
+
+@router.post("/sacco/loan-applications/{application_id}/decision")
+def decide_sacco_loan_application(application_id: int, payload: SaccoLoanDecisionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(SaccoLoanApplication).filter_by(
+        id=application_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or (row.branch_id and not can_access_branch(membership, row.branch_id)):
+        raise HTTPException(404, "Loan application not found")
+    if row.status != "submitted":
+        raise HTTPException(409, "Loan application has already been decided")
+    if row.created_by == user.id:
+        raise HTTPException(403, "The loan applicant cannot approve their own application")
+    row.status = payload.decision
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    row.review_note = payload.note.strip()
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action=f"sacco.loan_application.{payload.decision}", resource_type="sacco_loan_application",
+        resource_id=row.application_number, detail=payload.note.strip()))
+    db.commit()
+    return {"id": row.id, "application_number": row.application_number,
+        "status": row.status, "reviewed_by": row.reviewed_by,
+        "review_note": row.review_note}
