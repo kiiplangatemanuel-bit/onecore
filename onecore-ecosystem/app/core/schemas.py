@@ -69,7 +69,7 @@ class InventoryProductOut(BaseModel):
     is_active: bool
 
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -93,3 +93,38 @@ class AccountingJournalIn(BaseModel):
     reference: str = Field(default="", max_length=120)
     memo: str = Field(default="", max_length=500)
     lines: list[AccountingJournalLineIn] = Field(min_length=2, max_length=200)
+
+
+class CRMContactIn(BaseModel):
+    full_name: str = Field(min_length=2, max_length=180)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    company: str = Field(default="", max_length=180)
+    notes: str = Field(default="", max_length=4000)
+    branch_id: str | None = Field(default=None, max_length=36)
+
+
+class CRMLeadIn(BaseModel):
+    title: str = Field(min_length=2, max_length=180)
+    contact_id: int | None = Field(default=None, gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    source: str = Field(default="other", pattern=r"^(website|referral|campaign|event|partner|walk_in|other)$")
+    stage: str = Field(default="new", pattern=r"^(new|qualified|proposal|negotiation|won|lost)$")
+    estimated_value: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    assigned_to: int | None = Field(default=None, gt=0)
+    next_step: str = Field(default="", max_length=500)
+
+
+class CRMLeadStageIn(BaseModel):
+    stage: str = Field(pattern=r"^(new|qualified|proposal|negotiation|won|lost)$")
+    next_step: str = Field(default="", max_length=500)
+
+
+class CRMActivityIn(BaseModel):
+    contact_id: int | None = Field(default=None, gt=0)
+    lead_id: int | None = Field(default=None, gt=0)
+    activity_type: str = Field(pattern=r"^(call|email|meeting|task|note)$")
+    subject: str = Field(min_length=2, max_length=180)
+    notes: str = Field(default="", max_length=4000)
+    due_at: datetime | None = None
