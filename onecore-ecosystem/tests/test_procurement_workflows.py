@@ -244,3 +244,21 @@ def test_supplier_b2c_callback_rejects_wrong_transaction_amount():
     assert row.provider_reference == ""
     assert row.journal_id is None
     db.close()
+
+
+def test_procurement_workspace_exposes_settlement_approval_portal_and_reconciliation_controls():
+    from pathlib import Path
+    html = Path(__file__).resolve().parents[1] / "app" / "web" / "procurement.html"
+    source = html.read_text(encoding="utf-8")
+    for control in (
+        'id="autoApIntegration"', 'id="supplierSettlement"', 'id="settlementVerify"',
+        'id="remittance"', 'id="delegation"', 'id="approvalEscalation"',
+        'id="portalToken"', 'id="supplierStatement"', 'id="supplierStatementMatch"',
+        'id="supplierCreditNote"', 'id="autoResolveDiscrepancy"',
+        'id="runProcurementReconciliation"',
+    ):
+        assert control in source
+    assert "/supplier-settlements" in source
+    assert "/post-credit-note" in source
+    assert "/escalate-approval" in source
+    assert "/auto-resolve" in source
