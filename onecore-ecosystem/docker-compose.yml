@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/onecore.db}
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:///./data/onecore.db}
     ports:
       - "8000:8000"
     volumes:
@@ -18,7 +18,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/onecore.db}
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:///./data/onecore.db}
     command: ["python", "-m", "app.workers.crm_scheduler"]
     volumes:
       - onecore_data:/app/data
