@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import (
     AccountingAccount, AccountingCreditNote, AccountingInvoice, AccountingInvoiceLine,
-    AccountingJournal, AccountingJournalLine, AccountingProcurementLink, AccountingRefund,
+    AccountingJournal, AccountingJournalLine, AccountingProcurementLink, AccountingRefund, AccountingFiscalPeriod,
     AccountingInvoiceApproval, AuditEvent, Organization, ProcurementSupplierInvoice,
     ProcurementSupplierInvoiceLine, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine,
 )
@@ -20,7 +20,7 @@ from app.core.authorization import require_permission, branch_scope_ids, can_acc
 from app.core.models import ProcurementSupplier
 
 # The existing ledger helpers centralize period validation and balanced journal creation.
-from app.api.routes import _accounting_make_journal, _accounting_assert_period_open, _procurement_branch_check
+from app.api.routes import (_accounting_make_journal, _accounting_assert_period_open, _procurement_branch_check, _accounting_period_close_check)
 
 router = APIRouter(prefix="/api/v1/accounting", tags=["accounting-completion"])
 CENT = Decimal("0.01")
@@ -471,3 +471,159 @@ def list_accounting_refunds(
     return [{"id": x.id, "invoice_id": x.invoice_id, "credit_note_id": x.credit_note_id,
              "amount": str(x.amount), "refund_date": x.refund_date.date().isoformat(),
              "reference": x.reference, "journal_id": x.journal_id} for x in rows]
+
+
+
+class AccountingYearEndCloseIn(BaseModel):
+    retained_earnings_account_id: int = Field(gt=0)
+    confirmation_code: str = Field(min_length=2, max_length=40)
+
+
+def _year_end_close_calculation(db, membership, period, retained_earnings_account_id):
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Year-end close requires organization-wide branch access")
+    retained = db.query(AccountingAccount).filter_by(
+        id=retained_earnings_account_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not retained or retained.account_type != "equity":
+        raise HTTPException(422, "Retained-earnings account must be an active organization equity account")
+    start, end = period.start_date, period.end_date
+    q = db.query(AccountingAccount, AccountingJournalLine).join(
+        AccountingJournalLine, AccountingJournalLine.account_id == AccountingAccount.id
+    ).join(AccountingJournal, AccountingJournal.id == AccountingJournalLine.journal_id).filter(
+        AccountingAccount.organization_id == membership.organization_id,
+        AccountingJournalLine.organization_id == membership.organization_id,
+        AccountingJournal.organization_id == membership.organization_id,
+        AccountingJournal.status == "posted",
+        AccountingJournal.entry_date >= start,
+        AccountingJournal.entry_date <= end,
+        AccountingAccount.account_type.in_(("revenue", "expense")),
+    )
+    balances = {}
+    for account, line in q.all():
+        row = balances.setdefault(account.id, {
+            "account": account, "debit": Decimal("0.00"), "credit": Decimal("0.00")
+        })
+        row["debit"] += Decimal(line.debit)
+        row["credit"] += Decimal(line.credit)
+    journal_lines = []
+    revenue_total = Decimal("0.00")
+    expense_total = Decimal("0.00")
+    for item in balances.values():
+        account = item["account"]
+        if account.account_type == "revenue":
+            balance = item["credit"] - item["debit"]
+            revenue_total += balance
+            if balance > 0:
+                journal_lines.append({"account_id": account.id, "description": "Close revenue " + account.code,
+                                      "debit": balance, "credit": Decimal("0.00")})
+            elif balance < 0:
+                journal_lines.append({"account_id": account.id, "description": "Close revenue reversal " + account.code,
+                                      "debit": Decimal("0.00"), "credit": -balance})
+        else:
+            balance = item["debit"] - item["credit"]
+            expense_total += balance
+            if balance > 0:
+                journal_lines.append({"account_id": account.id, "description": "Close expense " + account.code,
+                                      "debit": Decimal("0.00"), "credit": balance})
+            elif balance < 0:
+                journal_lines.append({"account_id": account.id, "description": "Close expense reversal " + account.code,
+                                      "debit": -balance, "credit": Decimal("0.00")})
+    net_income = revenue_total - expense_total
+    if net_income > 0:
+        journal_lines.append({"account_id": retained.id, "description": "Transfer net income to retained earnings",
+                              "debit": Decimal("0.00"), "credit": net_income})
+    elif net_income < 0:
+        journal_lines.append({"account_id": retained.id, "description": "Transfer net loss to retained earnings",
+                              "debit": -net_income, "credit": Decimal("0.00")})
+    return {
+        "retained_earnings_account": {"id": retained.id, "code": retained.code, "name": retained.name},
+        "revenue": revenue_total, "expenses": expense_total, "net_income": net_income,
+        "lines": journal_lines,
+    }
+
+
+@router.get("/fiscal-periods/{period_id}/year-end-close-preview")
+def accounting_year_end_close_preview(
+    period_id: int,
+    retained_earnings_account_id: int = Query(..., gt=0),
+    membership=Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    require_permission(membership, "read")
+    period = db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id, organization_id=membership.organization_id
+    ).first()
+    if not period:
+        raise HTTPException(404, "Fiscal period not found")
+    if period.status != "open":
+        raise HTTPException(409, "Year-end preview requires an open fiscal period")
+    calculation = _year_end_close_calculation(db, membership, period, retained_earnings_account_id)
+    checks = _accounting_period_close_check(db, membership.organization_id, period)
+    return {
+        "period_id": period.id, "period_code": period.code,
+        "start_date": period.start_date.date().isoformat(), "end_date": period.end_date.date().isoformat(),
+        "close_checks": checks, "ready_to_close": checks["ready_to_close"],
+        "retained_earnings_account": calculation["retained_earnings_account"],
+        "revenue": str(calculation["revenue"]), "expenses": str(calculation["expenses"]),
+        "net_income": str(calculation["net_income"]),
+        "journal_lines": [{"account_id": x["account_id"], "description": x["description"],
+                           "debit": str(x["debit"]), "credit": str(x["credit"])}
+                          for x in calculation["lines"]],
+        "requires_confirmation": period.code,
+    }
+
+
+@router.post("/fiscal-periods/{period_id}/year-end-close")
+def post_accounting_year_end_close(
+    period_id: int,
+    payload: AccountingYearEndCloseIn,
+    membership=Depends(active_membership),
+    user=Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    require_permission(membership, "manage")
+    period = db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not period:
+        raise HTTPException(404, "Fiscal period not found")
+    if period.status != "open":
+        raise HTTPException(409, "Fiscal period is already closed")
+    if payload.confirmation_code != period.code:
+        raise HTTPException(422, "Fiscal period confirmation code does not match")
+    checks = _accounting_period_close_check(db, membership.organization_id, period)
+    if not checks["ready_to_close"]:
+        raise HTTPException(409, detail={
+            "message": "Fiscal period has unresolved close blockers",
+            "period_id": period.id, "blockers": checks["blockers"], "checks": checks["checks"],
+        })
+    reference = "YEAR-END-CLOSE-" + str(period.id)
+    duplicate = db.query(AccountingJournal).filter_by(
+        organization_id=membership.organization_id, reference=reference, status="posted"
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "A year-end closing journal already exists for this fiscal period")
+    calculation = _year_end_close_calculation(db, membership, period, payload.retained_earnings_account_id)
+    journal = None
+    if calculation["lines"]:
+        journal = _accounting_make_journal(
+            db, membership, user, period.end_date.date(), reference,
+            "Fiscal year-end close " + period.code, calculation["lines"], None,
+        )
+    period.status = "closed"
+    period.closed_by = user.id
+    period.closed_at = datetime.now(timezone.utc)
+    _audit(db, user.id, membership.organization_id, "accounting.period.year_end_closed",
+           "accounting_period", period.id, reference)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Year-end close conflicted with another posting")
+    return {
+        "period_id": period.id, "period_code": period.code, "status": period.status,
+        "journal_id": journal.id if journal else None,
+        "journal_number": journal.journal_number if journal else None,
+        "net_income": str(calculation["net_income"]), "closed_at": period.closed_at.isoformat(),
+    }
