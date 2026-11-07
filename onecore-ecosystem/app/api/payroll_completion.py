@@ -229,6 +229,7 @@ KENYA_2026_RULES = {
     "status": "active", "reviewed_on": "2026-11-08",
     "sources": [
         {"authority": "KRA", "url": "https://www.kra.go.ke/individual/filing-paying/types-of-taxes/paye", "verified_on": "2026-11-08"},
+        {"authority": "KRA", "url": "https://www.kra.go.ke/finance-act-2026-what-it-means-for-you", "verified_on": "2026-11-08", "note": "Reviewed Finance Act 2026 commencement and published changes; payroll rates remain subject to administrator and tax adviser sign-off."},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2157-amendments-to-paye-computation-pursuant-to-the-tax-laws-amendment-act%2C-2024", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/1979-affordable-housing-levy-ahl", "verified_on": "2026-11-08"},
@@ -262,11 +263,14 @@ def seed_kenya_rules(membership=Depends(active_membership), user=Depends(current
     existing = _record(db, membership.organization_id, "statutory_rule_set", KENYA_2026_RULES["version"]).first()
     if existing:
         return {"id": existing.id, "version": existing.data["version"], "status": existing.data["status"], "existing": True}
+    seed = {**KENYA_2026_RULES, "status": "draft",
+            "activation_note": "Seeded from published sources; requires payroll administrator review and explicit activation."}
     row = _save_record(db, membership.organization_id, user.id, "statutory_rule_set",
-                       {"key": KENYA_2026_RULES["version"], **KENYA_2026_RULES})
+                       {"key": KENYA_2026_RULES["version"], **seed})
     _audit(db, membership.organization_id, user.id, "hr.payroll.statutory_rules.seeded", "statutory_rule_set", row.id, KENYA_2026_RULES["version"])
     db.commit()
-    return {"id": row.id, "version": KENYA_2026_RULES["version"], "status": "active"}
+    return {"id": row.id, "version": KENYA_2026_RULES["version"], "status": "draft",
+            "activation_required": True}
 
 
 @router.post("/hr/payroll/statutory-rules", status_code=201)
@@ -417,6 +421,9 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
             raise HTTPException(409, "Calculation snapshot already exists; create a new payroll run to recalculate")
         _save_record(db, membership.organization_id, user.id, "calculation_snapshot",
                      {"key": f"{run.id}:{line.employee_id}", **snapshot}, line.branch_id)
+        line.gross_pay = money(result["gross_pay"])
+        line.deductions_total = money(D(result["gross_pay"]) - D(result["net_pay"]))
+        line.net_pay = money(result["net_pay"])
         snapshots.append(snapshot)
     gross_total = sum((D(x["calculation"]["gross_pay"]) for x in snapshots), ZERO)
     deductions_total = sum((D(x["calculation"]["gross_pay"]) - D(x["calculation"]["net_pay"]) for x in snapshots), ZERO)
@@ -437,7 +444,10 @@ def list_snapshots(run_id: int, membership=Depends(active_membership), user=Depe
     run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).first()
     if not run:
         raise HTTPException(404, "Payroll run not found")
-    return [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
+    rows = _record(db, membership.organization_id, "calculation_snapshot").all()
+    allowed = branch_scope_ids(membership)
+    return [r.data for r in rows if r.data.get("run_id") == run_id
+            and (allowed is None or r.branch_id in allowed)]
 
 
 @router.post("/hr/payroll/runs/{run_id}/approve-calculation")
@@ -522,8 +532,8 @@ def authorize_batch(batch_id: int, payload: dict=Body(default={}), membership=De
     if not batch or batch.data["status"] != "prepared":
         raise HTTPException(409, "Only prepared payment batches can be authorized")
     run = db.query(HRPayrollRun).filter_by(id=batch.data["run_id"], organization_id=membership.organization_id).first()
-    if not run or run.approved_by == user.id:
-        raise HTTPException(403, "Payment authorizer must be independent of payroll approver")
+    if not run or run.approved_by == user.id or batch.created_by == user.id:
+        raise HTTPException(403, "Payment authorizer must be independent of both payroll approver and payment-batch preparer")
     if not _record(db, membership.organization_id, "payroll_journal").filter(Record.data["run_id"].as_integer() == run.id).first():
         raise HTTPException(409, "Post the approved payroll accrual journal before authorizing salary payments")
     d = dict(batch.data); d["status"] = "authorized"; d["authorized_by"] = user.id
@@ -629,6 +639,9 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
         raise HTTPException(404, "Payment instruction not found")
     if not row.get("conversation_id") or payload.get("conversation_id") != row.get("conversation_id"):
         raise HTTPException(409, "Provider callback conversation does not match the submitted payment")
+    callback_hash = hashlib.sha256(raw).hexdigest()
+    if row.get("callback_hash") == callback_hash:
+        return {"batch_id": batch.id, "status": d.get("status"), "duplicate_callback": True}
     status = payload.get("status")
     if status not in ("paid", "failed"):
         raise HTTPException(422, "Callback status must be paid or failed")
@@ -641,7 +654,7 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     if status == "paid" and any(x is not row and x.get("provider_reference") == payload.get("provider_reference") for x in d["rows"]):
         raise HTTPException(409, "Provider transaction reference is already assigned to another employee")
     row.update({"status": status, "provider_reference": payload.get("provider_reference"),
-                "verified_at": datetime.now(timezone.utc).isoformat(), "callback_hash": hashlib.sha256(raw).hexdigest()})
+                "verified_at": datetime.now(timezone.utc).isoformat(), "callback_hash": callback_hash})
     d["status"] = "paid" if all(x["status"] == "paid" for x in d["rows"]) else ("partial" if any(x["status"] == "paid" for x in d["rows"]) else "failed")
     batch.data = d
     if any(x["status"] == "paid" for x in d["rows"]):
@@ -738,8 +751,10 @@ def year_end_reconciliation(year: int, membership=Depends(active_membership), us
              if r.data.get("run_id") in approved_ids and r.data.get("period_end", "").startswith(str(year))]
     totals = {}
     for s in snaps:
-        for key in ("gross_pay","paye","nssf_employee","shif_employee","housing_levy_employee","net_pay"):
-            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"][key])))
+        for key in ("gross_pay","paye","nssf_employee","nssf_employer","shif_employee",
+                    "housing_levy_employee","housing_levy_employer","employee_pension",
+                    "other_deductions","net_pay","employer_statutory_cost"):
+            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"].get(key, "0"))))
     return {"year": year, "months_covered": sorted({s["period_end"][:7] for s in snaps}),
             "employee_months": len(snaps), "totals": totals,
             "reconciliation_status": "workpaper_ready" if snaps else "no_payroll_data"}
