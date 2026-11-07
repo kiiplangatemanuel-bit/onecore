@@ -1055,6 +1055,10 @@ def get_supplier_statement(statement_id: int, membership=Depends(active_membersh
     ).first()
     if not row:
         raise HTTPException(404, "Supplier statement not found")
+    if row.status == "reconciled":
+        return {"id": row.id, "status": "already_reconciled"}
+    if row.status != "open":
+        raise HTTPException(409, "Only an open supplier statement can be reconciled")
     lines = db.query(ProcurementSupplierStatementLine).filter_by(
         statement_id=row.id, organization_id=membership.organization_id
     ).order_by(ProcurementSupplierStatementLine.line_number).all()
@@ -1260,6 +1264,12 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
             raise HTTPException(409, "Credit-note idempotency key was used for different data")
         return {"id": duplicate.id, "status": "already_posted" if duplicate.status == "posted" else duplicate.status,
                 "journal_id": duplicate.journal_id, "total": str(duplicate.total)}
+    duplicate_number = db.query(AccountingCreditNote).filter_by(
+        organization_id=membership.organization_id,
+        credit_note_number=payload.credit_note_number.strip().upper(),
+    ).first()
+    if duplicate_number:
+        raise HTTPException(409, "Supplier credit-note number already exists")
     ret = db.query(ProcurementSupplierReturn).filter_by(
         id=return_id, organization_id=membership.organization_id, status="posted"
     ).with_for_update().first()
@@ -1397,6 +1407,7 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
     invoice.status = "paid" if Decimal(invoice.amount_paid) >= Decimal(invoice.total) else (
         "partially_paid" if Decimal(invoice.amount_paid) > 0 else "posted"
     )
+    ret.credit_note_reference = note.credit_note_number
     db.commit()
     audit(db, user.id, membership.organization_id, "procurement.supplier_return.credit_note_posted",
           "accounting_credit_note", note.id, f"return:{ret.id};total:{total}")
@@ -1520,21 +1531,26 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
     if row.code == "tax" and Decimal(source.tax_total) < 0:
         valid = False
     if row.code in {"quantity", "receipt"}:
+        billed_by_po_line = {}
         for line in source_lines:
+            billed_by_po_line[line.purchase_order_line_id] = (
+                billed_by_po_line.get(line.purchase_order_line_id, Decimal("0.00")) + Decimal(line.quantity)
+            )
+        for po_line_id, billed_quantity in billed_by_po_line.items():
             accepted = db.query(func.coalesce(func.sum(ProcurementGoodsReceiptLine.quantity_accepted), 0)).join(
                 ProcurementGoodsReceipt, ProcurementGoodsReceipt.id == ProcurementGoodsReceiptLine.goods_receipt_id
             ).filter(ProcurementGoodsReceipt.organization_id == membership.organization_id,
                      ProcurementGoodsReceipt.purchase_order_id == order.id,
                      ProcurementGoodsReceipt.status == "inspected",
-                     ProcurementGoodsReceiptLine.purchase_order_line_id == line.purchase_order_line_id).scalar() or Decimal("0")
+                     ProcurementGoodsReceiptLine.purchase_order_line_id == po_line_id).scalar() or Decimal("0")
             returned = db.query(func.coalesce(func.sum(ProcurementSupplierReturnLine.quantity), 0)).join(
                 ProcurementSupplierReturn, ProcurementSupplierReturn.id == ProcurementSupplierReturnLine.return_id
             ).join(ProcurementGoodsReceiptLine,
                    ProcurementGoodsReceiptLine.id == ProcurementSupplierReturnLine.receipt_line_id).filter(
                 ProcurementSupplierReturn.organization_id == membership.organization_id,
                 ProcurementSupplierReturn.status == "posted",
-                ProcurementGoodsReceiptLine.purchase_order_line_id == line.purchase_order_line_id).scalar() or Decimal("0")
-            if Decimal(line.quantity) > Decimal(accepted) - Decimal(returned):
+                ProcurementGoodsReceiptLine.purchase_order_line_id == po_line_id).scalar() or Decimal("0")
+            if billed_quantity > Decimal(accepted) - Decimal(returned):
                 valid = False
                 break
     if row.code == "other":
