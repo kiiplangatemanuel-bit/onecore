@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -4846,6 +4846,64 @@ def change_school_learner_placement(learner_id: int, payload: SchoolLearnerPlace
     return {"learner_id": learner.id, "from_class_id": source.id, "to_class_id": target.id,
         "change_type": history.change_type, "effective_date": payload.effective_date.isoformat(),
         "history_id": history.id}
+
+
+@router.post("/school/classes/{source_class_id}/bulk-promote", status_code=201)
+def bulk_promote_school_learners(source_class_id: int, payload: SchoolBulkPromotionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Promote a selected class cohort atomically and preserve each learner's history."""
+    require_permission(membership, "manage")
+    source = db.query(SchoolClass).filter_by(
+        id=source_class_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    target = db.query(SchoolClass).filter_by(
+        id=payload.target_class_id, organization_id=membership.organization_id,
+        is_active=True
+    ).first()
+    if not source or not target:
+        raise HTTPException(404, "Source or target class not found")
+    if not can_access_branch(membership, source.branch_id) or not can_access_branch(membership, target.branch_id):
+        raise HTTPException(403, "Access to both source and target branches is required")
+    if source.id == target.id or target.academic_year <= source.academic_year:
+        raise HTTPException(422, "Bulk promotion must move learners to a later academic year")
+    if payload.effective_date < source.created_at.date():
+        raise HTTPException(422, "Effective date cannot precede the source class creation date")
+    learners = db.query(SchoolLearner).filter(
+        SchoolLearner.organization_id == membership.organization_id,
+        SchoolLearner.class_id == source.id,
+        SchoolLearner.status == "active",
+        SchoolLearner.id.in_(payload.learner_ids),
+    ).order_by(SchoolLearner.id).with_for_update().all()
+    if len(learners) != len(payload.learner_ids):
+        raise HTTPException(409, "Every selected learner must be active and currently enrolled in the source class")
+    histories = []
+    for learner in learners:
+        if not can_access_branch(membership, learner.branch_id):
+            raise HTTPException(403, "Access to every learner's current branch is required")
+        history = SchoolEnrollmentHistory(
+            organization_id=membership.organization_id, learner_id=learner.id,
+            from_class_id=source.id, to_class_id=target.id,
+            effective_date=datetime.combine(payload.effective_date, time.min, tzinfo=timezone.utc),
+            change_type="promotion", reason=payload.reason.strip(), changed_by=user.id,
+        )
+        learner.class_id = target.id
+        learner.branch_id = target.branch_id
+        db.add(history)
+        db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+            action="school.learner.promotion", resource_type="school_learner",
+            resource_id=str(learner.id),
+            detail=f"from_class:{source.id};to_class:{target.id};effective:{payload.effective_date.isoformat()};bulk:true"))
+        histories.append(history)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "A learner placement changed concurrently; reload the class and retry")
+    return {"source_class_id": source.id, "target_class_id": target.id,
+        "promoted_count": len(histories), "effective_date": payload.effective_date.isoformat(),
+        "learner_ids": [learner.id for learner in learners],
+        "history_ids": [history.id for history in histories]}
 
 
 @router.get("/school/learners/{learner_id}/placements")
