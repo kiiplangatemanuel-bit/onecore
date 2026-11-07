@@ -30,6 +30,7 @@ def canonical_request_hash(payload) -> str:
         "branch_id": payload.branch_id,
         "shift_id": payload.shift_id,
         "currency": payload.currency,
+        "customer_ref": payload.customer_ref,
         "lines": sorted([
             {"product_id": line.product_id, "quantity": str(line.quantity),
              "discount_percent": str(line.discount_percent)}
