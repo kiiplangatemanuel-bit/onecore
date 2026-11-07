@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1437,43 +1437,85 @@ def open_pos_shift(payload: POSShiftOpenIn, membership=Depends(active_membership
             "opening_cash": str(shift.opening_cash)}
 
 
+def _pos_shift_cash_totals(db,shift):
+    sales=db.query(func.coalesce(func.sum(POSPayment.amount),0)).join(POSSale,POSSale.id==POSPayment.sale_id).filter(
+        POSSale.organization_id==shift.organization_id,POSSale.shift_id==shift.id,POSPayment.method=="cash",POSPayment.status=="recorded").scalar()
+    refunds=db.query(func.coalesce(func.sum(POSRefund.amount),0)).join(POSReturn,POSReturn.id==POSRefund.return_id).join(
+        POSSale,POSSale.id==POSReturn.sale_id).filter(POSRefund.organization_id==shift.organization_id,
+        POSReturn.organization_id==shift.organization_id,POSSale.organization_id==shift.organization_id,
+        POSSale.shift_id==shift.id,POSRefund.method=="cash",POSRefund.status=="recorded").scalar()
+    moves=db.query(POSCashMovement).filter_by(organization_id=shift.organization_id,shift_id=shift.id,status="recorded").all()
+    ci=sum((Decimal(str(x.amount)) for x in moves if x.movement_type=="cash_in"),Decimal("0"))
+    co=sum((Decimal(str(x.amount)) for x in moves if x.movement_type in ("cash_out","safe_drop")),Decimal("0"))
+    sales,refunds=Decimal(str(sales or 0)),Decimal(str(refunds or 0))
+    return {"sales":sales,"refunds":refunds,"cash_in":ci,"cash_out":co,"expected":Decimal(str(shift.opening_cash))+sales-refunds+ci-co,"moves":moves}
+
+
+@router.post("/pos/shifts/{shift_id}/cash-movements",status_code=201)
+def create_pos_cash_movement(shift_id:int,payload:POSCashMovementIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    shift=db.query(POSShift).filter_by(id=shift_id,organization_id=membership.organization_id,cashier_user_id=user.id,status="open").with_for_update().first()
+    if not shift or not can_access_branch(membership,shift.branch_id): raise HTTPException(404,"Open cashier shift not found")
+    old=db.query(POSCashMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if old:
+        if old.shift_id!=shift.id or old.movement_type!=payload.movement_type or Decimal(str(old.amount))!=payload.amount: raise HTTPException(409,"Idempotency key conflict")
+        return {"id":old.id,"status":"already_recorded","amount":str(old.amount)}
+    if payload.movement_type in ("cash_out","safe_drop"): require_permission(membership,"manage")
+    row=POSCashMovement(organization_id=membership.organization_id,branch_id=shift.branch_id,shift_id=shift.id,
+        movement_type=payload.movement_type,amount=payload.amount,reason=payload.reason.strip(),reference=payload.reference.strip(),
+        idempotency_key=payload.idempotency_key,created_by=user.id,authorized_by=user.id if payload.movement_type!="cash_in" else None)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError: db.rollback(); raise HTTPException(409,"Cash movement conflicts with another request")
+    db.refresh(row); audit(db,user.id,membership.organization_id,"pos.cash_movement.recorded","pos_cash_movement",row.id,f"{row.movement_type}:{row.amount}:{row.reason}")
+    return {"id":row.id,"status":row.status,"movement_type":row.movement_type,"amount":str(row.amount)}
+
+
+@router.get("/pos/shifts/{shift_id}/reconciliation")
+def pos_shift_reconciliation(shift_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    shift=db.query(POSShift).filter_by(id=shift_id,organization_id=membership.organization_id).first()
+    if not shift or not can_access_branch(membership,shift.branch_id): raise HTTPException(404,"POS shift not found")
+    if shift.cashier_user_id!=user.id: require_permission(membership,"manage")
+    x=_pos_shift_cash_totals(db,shift)
+    return {"id":shift.id,"status":shift.status,"reconciliation_status":shift.reconciliation_status,"opening_cash":str(shift.opening_cash),
+        "cash_sales":str(x["sales"]),"cash_refunds":str(x["refunds"]),"cash_in":str(x["cash_in"]),"cash_out_and_safe_drops":str(x["cash_out"]),
+        "expected_cash":str(shift.expected_cash if shift.expected_cash is not None else x["expected"]),
+        "counted_cash":str(shift.counted_cash) if shift.counted_cash is not None else None,
+        "variance":str(shift.cash_variance) if shift.cash_variance is not None else None,
+        "denominations":shift.counted_denominations or {},"close_note":shift.close_note,"review_note":shift.review_note,
+        "reviewed_by":shift.reviewed_by,"movements":[{"id":v.id,"type":v.movement_type,"amount":str(v.amount),"reason":v.reason,
+        "reference":v.reference,"created_by":v.created_by} for v in x["moves"]]}
+
+
 @router.post("/pos/shifts/{shift_id}/close")
-def close_pos_shift(shift_id: int, payload: POSShiftCloseIn,
-                    membership=Depends(active_membership), user: User = Depends(current_user),
-                    db: Session = Depends(get_db)):
-    require_permission(membership, "update")
-    shift = db.query(POSShift).filter_by(
-        id=shift_id, organization_id=membership.organization_id,
-        cashier_user_id=user.id, status="open"
-    ).with_for_update().first()
-    if not shift or not can_access_branch(membership, shift.branch_id):
-        raise HTTPException(404, "Open shift not found")
-    cash_sales = db.query(func.coalesce(func.sum(POSPayment.amount), 0)).join(
-        POSSale, POSSale.id == POSPayment.sale_id
-    ).filter(POSSale.organization_id == membership.organization_id,
-             POSSale.shift_id == shift.id, POSPayment.method == "cash",
-             POSPayment.status == "recorded").scalar()
-    cash_refunds = db.query(func.coalesce(func.sum(POSRefund.amount), 0)).join(
-        POSReturn, POSReturn.id == POSRefund.return_id
-    ).join(POSSale, POSSale.id == POSReturn.sale_id).filter(
-        POSRefund.organization_id == membership.organization_id,
-        POSReturn.organization_id == membership.organization_id,
-        POSSale.organization_id == membership.organization_id,
-        POSSale.shift_id == shift.id,
-        POSRefund.method == "cash",
-        POSRefund.status == "recorded",
-    ).scalar()
-    expected = (Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
-                - Decimal(str(cash_refunds or 0)))
-    shift.closing_cash = payload.closing_cash
-    shift.status = "closed"
-    shift.closed_at = datetime.now(timezone.utc)
+def close_pos_shift(shift_id:int,payload:POSShiftCloseIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"update")
+    shift=db.query(POSShift).filter_by(id=shift_id,organization_id=membership.organization_id,cashier_user_id=user.id,status="open").with_for_update().first()
+    if not shift or not can_access_branch(membership,shift.branch_id): raise HTTPException(404,"Open shift not found")
+    x=_pos_shift_cash_totals(db,shift); expected=x["expected"]; variance=payload.closing_cash-expected
+    shift.closing_cash=payload.closing_cash; shift.counted_cash=payload.closing_cash; shift.expected_cash=expected
+    shift.cash_variance=variance; shift.counted_denominations=payload.cash_count; shift.close_note=payload.note.strip()
+    shift.status="closed"; shift.closed_at=datetime.now(timezone.utc)
+    shift.reconciliation_status="reconciled" if variance==0 else "pending_review"
+    if variance==0:
+        shift.reviewed_by=user.id; shift.reviewed_at=datetime.now(timezone.utc); shift.review_note="Automatically reconciled: no variance"
     db.commit()
-    variance = payload.closing_cash - expected
-    audit(db, user.id, membership.organization_id, "pos.shift.closed",
-          "pos_shift", shift.id, f"expected:{expected};cash_refunds:{cash_refunds};counted:{payload.closing_cash};variance:{variance}")
-    return {"id": shift.id, "status": shift.status, "expected_cash": str(expected),
-            "closing_cash": str(payload.closing_cash), "variance": str(variance)}
+    audit(db,user.id,membership.organization_id,"pos.shift.closed","pos_shift",shift.id,f"expected:{expected};counted:{payload.closing_cash};variance:{variance}")
+    return {"id":shift.id,"status":shift.status,"reconciliation_status":shift.reconciliation_status,"expected_cash":str(expected),
+        "closing_cash":str(payload.closing_cash),"variance":str(variance),"requires_review":variance!=0}
+
+
+@router.post("/pos/shifts/{shift_id}/review")
+def review_pos_shift(shift_id:int,payload:POSShiftReviewIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    shift=db.query(POSShift).filter_by(id=shift_id,organization_id=membership.organization_id,status="closed").with_for_update().first()
+    if not shift or not can_access_branch(membership,shift.branch_id): raise HTTPException(404,"Closed POS shift not found")
+    if shift.reconciliation_status!="pending_review": raise HTTPException(409,"Only pending variances can be reviewed")
+    shift.reconciliation_status="approved" if payload.decision=="approve" else "rejected"
+    shift.reviewed_by=user.id; shift.reviewed_at=datetime.now(timezone.utc); shift.review_note=payload.note.strip()
+    db.commit(); audit(db,user.id,membership.organization_id,"pos.shift.reconciliation_reviewed","pos_shift",shift.id,payload.decision+":"+payload.note)
+    return {"id":shift.id,"reconciliation_status":shift.reconciliation_status,"reviewed_by":user.id}
 
 
 @router.post("/pos/sync", status_code=201)
