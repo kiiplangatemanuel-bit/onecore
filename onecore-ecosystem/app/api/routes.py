@@ -5529,3 +5529,616 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
         "publication_basis": "Published assessments only",
         **report, "attendance": attendance,
     }
+
+
+# Pharmacy prescription, dispensing, patient safety and traceability operations.
+def _pharm_lab_record(db, membership, user, record_type, key, payload, parent_id=None,
+                      branch_id=None, status="pending"):
+    if key:
+        prior = db.query(PharmacyLabWorkflowRecord).filter_by(
+            organization_id=membership.organization_id, record_type=record_type,
+            idempotency_key=key).first()
+        if prior:
+            if prior.payload != payload or prior.parent_id != parent_id:
+                raise HTTPException(409, "Idempotency key was reused with different data")
+            return prior, False
+    row = PharmacyLabWorkflowRecord(
+        organization_id=membership.organization_id, branch_id=branch_id,
+        record_type=record_type, parent_id=parent_id, status=status,
+        idempotency_key=key, payload=payload, created_by=user.id)
+    db.add(row)
+    db.flush()
+    return row, True
+
+
+def _pharmacy_batch_or_404(db, membership, batch_id, lock=False):
+    query = db.query(PharmacyBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id)
+    if lock: query = query.with_for_update()
+    row = query.first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Pharmacy batch not found")
+    return row
+
+
+def _prescription_or_404(db, membership, prescription_id, lock=False):
+    query = db.query(PharmacyPrescription).filter_by(
+        id=prescription_id, organization_id=membership.organization_id)
+    if lock: query = query.with_for_update()
+    row = query.first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Prescription not found")
+    return row
+
+
+@router.post("/pharmacy/allergies", status_code=201)
+def record_pharmacy_allergy(payload: PharmacyAllergyIn,
+    membership=Depends(active_membership), user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=payload.patient_id, organization_id=membership.organization_id).first()
+    if not patient or not can_access_branch(membership, patient.branch_id):
+        raise HTTPException(404, "Patient not found")
+    row = PharmacyAllergy(organization_id=membership.organization_id, patient_id=patient.id,
+        allergen=payload.allergen.strip(), reaction=payload.reaction.strip(),
+        severity=payload.severity, status="active", recorded_by=user.id)
+    db.add(row); db.commit(); db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.allergy.recorded",
+          "pharmacy_allergy", row.id, f"patient:{patient.id};severity:{row.severity}")
+    return {"id": row.id, "patient_id": patient.id, "allergen": row.allergen,
+            "severity": row.severity, "status": row.status}
+
+
+@router.get("/pharmacy/allergies/{patient_id}")
+def list_pharmacy_allergies(patient_id: int, membership=Depends(active_membership),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=patient_id, organization_id=membership.organization_id).first()
+    if not patient or not can_access_branch(membership, patient.branch_id):
+        raise HTTPException(404, "Patient not found")
+    rows = db.query(PharmacyAllergy).filter_by(
+        organization_id=membership.organization_id, patient_id=patient_id, status="active").all()
+    return [{"id": x.id, "allergen": x.allergen, "reaction": x.reaction,
+             "severity": x.severity} for x in rows]
+
+
+@router.post("/pharmacy/safety-rules", status_code=201)
+def create_pharmacy_safety_rule(payload: PharmacySafetyRuleIn,
+    membership=Depends(active_membership), user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    a = db.query(PharmacyMedicine).filter_by(
+        id=payload.medicine_a_id, organization_id=membership.organization_id, is_active=True).first()
+    b = None
+    if payload.medicine_b_id:
+        b = db.query(PharmacyMedicine).filter_by(
+            id=payload.medicine_b_id, organization_id=membership.organization_id, is_active=True).first()
+    if not a or (payload.medicine_b_id and not b) or (b and a.id == b.id):
+        raise HTTPException(404, "Active medicine rule target not found")
+    if payload.rule_type == "interaction" and not b:
+        raise HTTPException(422, "Interaction rules require two medicines")
+    if payload.rule_type == "allergy" and b:
+        raise HTTPException(422, "Allergy rules target one medicine")
+    row = PharmacyDrugSafetyRule(organization_id=membership.organization_id,
+        medicine_a_id=a.id, medicine_b_id=b.id if b else None,
+        rule_type=payload.rule_type, severity=payload.severity,
+        description=payload.description.strip(), is_active=True, created_by=user.id)
+    db.add(row); db.commit(); db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.safety_rule.created",
+          "pharmacy_drug_safety_rule", row.id, row.rule_type+":"+row.severity)
+    return {"id": row.id, "rule_type": row.rule_type, "severity": row.severity}
+
+
+@router.post("/pharmacy/prescriptions", status_code=201)
+def create_pharmacy_prescription(payload: PharmacyPrescriptionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    encounter = db.query(HealthcareEncounter).filter_by(
+        id=payload.encounter_id, organization_id=membership.organization_id, status="signed").first()
+    if not encounter or not can_access_branch(membership, encounter.branch_id):
+        raise HTTPException(404, "Signed encounter not found")
+    if encounter.provider_user_id != user.id:
+        raise HTTPException(403, "Only the encounter's assigned prescriber may issue a prescription")
+    if payload.valid_until < date.today():
+        raise HTTPException(422, "Prescription validity date cannot be in the past")
+    if len({x.medicine_id for x in payload.lines}) != len(payload.lines):
+        raise HTTPException(422, "A medicine may appear only once per prescription")
+    medicines = db.query(PharmacyMedicine).filter(
+        PharmacyMedicine.organization_id == membership.organization_id,
+        PharmacyMedicine.is_active == True,
+        PharmacyMedicine.id.in_([x.medicine_id for x in payload.lines])).all()
+    if len(medicines) != len(payload.lines):
+        raise HTTPException(404, "One or more active medicines were not found")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=encounter.patient_id, organization_id=membership.organization_id).first()
+    allergies = db.query(PharmacyAllergy).filter_by(
+        organization_id=membership.organization_id, patient_id=patient.id, status="active").all()
+    rules = db.query(PharmacyDrugSafetyRule).filter_by(
+        organization_id=membership.organization_id, is_active=True).all()
+    medicine_ids = {x.medicine_id for x in payload.lines}
+    warnings, blockers = [], []
+    for item in payload.lines:
+        med = next(x for x in medicines if x.id == item.medicine_id)
+        names = {med.generic_name.casefold(), med.brand_name.casefold()} - {""}
+        for allergy in allergies:
+            if allergy.allergen.casefold() in names:
+                (blockers if allergy.severity == "severe" else warnings).append(
+                    {"type":"allergy","medicine_id":med.id,"allergen":allergy.allergen,
+                     "severity":allergy.severity,"reaction":allergy.reaction})
+        for rule in rules:
+            if rule.rule_type == "allergy" and rule.medicine_a_id == med.id:
+                (blockers if rule.severity == "block" else warnings).append(
+                    {"type":"configured_allergy","medicine_id":med.id,"description":rule.description,
+                     "severity":rule.severity})
+    for rule in rules:
+        if rule.rule_type == "interaction" and rule.medicine_b_id and (
+            rule.medicine_a_id in medicine_ids and rule.medicine_b_id in medicine_ids):
+            target = blockers if rule.severity == "block" else warnings
+            target.append({"type":"interaction","medicine_ids":[rule.medicine_a_id,rule.medicine_b_id],
+                           "description":rule.description,"severity":rule.severity})
+    if blockers:
+        raise HTTPException(422, {"message":"Prescription blocked by configured patient-safety rules",
+                                  "safety_blockers":blockers,"warnings":warnings})
+    if db.query(PharmacyPrescription).filter_by(
+        organization_id=membership.organization_id,
+        prescription_number=payload.prescription_number.strip().upper()).first():
+        raise HTTPException(409, "Prescription number already exists")
+    row = PharmacyPrescription(organization_id=membership.organization_id,
+        patient_id=encounter.patient_id, encounter_id=encounter.id, branch_id=encounter.branch_id,
+        prescriber_id=user.id, prescription_number=payload.prescription_number.strip().upper(),
+        status="active", valid_until=payload.valid_until, created_by=user.id)
+    db.add(row); db.flush()
+    for item in payload.lines:
+        db.add(PharmacyPrescriptionLine(organization_id=membership.organization_id,
+            prescription_id=row.id, medicine_id=item.medicine_id, dose=item.dose.strip(),
+            frequency=item.frequency.strip(), duration_days=item.duration_days,
+            quantity_prescribed=item.quantity, quantity_dispensed=Decimal("0"),
+            refills_allowed=item.refills_allowed, refills_used=0, status="pending"))
+    db.commit(); db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.prescription.issued",
+          "pharmacy_prescription", row.id, f"encounter:{encounter.id};warnings:{len(warnings)}")
+    return {"id":row.id,"prescription_number":row.prescription_number,"status":row.status,
+            "patient_id":row.patient_id,"prescriber_id":row.prescriber_id,
+            "safety_warnings":warnings}
+
+
+@router.get("/pharmacy/prescriptions")
+def list_pharmacy_prescriptions(status: str | None=None,
+    membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(PharmacyPrescription).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(PharmacyPrescription.branch_id.in_(allowed))
+    if status:
+        if status not in {"active","partially_dispensed","dispensed","cancelled","expired"}:
+            raise HTTPException(422,"Invalid prescription status")
+        q=q.filter(PharmacyPrescription.status==status)
+    return [{"id":x.id,"prescription_number":x.prescription_number,"patient_id":x.patient_id,
+             "encounter_id":x.encounter_id,"status":x.status,"valid_until":x.valid_until.isoformat()}
+            for x in q.order_by(PharmacyPrescription.created_at.desc()).limit(limit).all()]
+
+
+@router.get("/pharmacy/prescriptions/{prescription_id}")
+def get_pharmacy_prescription(prescription_id:int,membership=Depends(active_membership),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rx=_prescription_or_404(db,membership,prescription_id)
+    lines=db.query(PharmacyPrescriptionLine,PharmacyMedicine).join(
+        PharmacyMedicine,PharmacyMedicine.id==PharmacyPrescriptionLine.medicine_id).filter(
+        PharmacyPrescriptionLine.organization_id==membership.organization_id,
+        PharmacyPrescriptionLine.prescription_id==rx.id).all()
+    return {"id":rx.id,"prescription_number":rx.prescription_number,"patient_id":rx.patient_id,
+        "prescriber_id":rx.prescriber_id,"status":rx.status,"valid_until":rx.valid_until.isoformat(),
+        "lines":[{"id":line.id,"medicine_id":med.id,"medicine":med.generic_name,
+          "dose":line.dose,"frequency":line.frequency,"duration_days":line.duration_days,
+          "quantity_prescribed":str(line.quantity_prescribed),"quantity_dispensed":str(line.quantity_dispensed),
+          "refills_allowed":line.refills_allowed,"refills_used":line.refills_used,"status":line.status}
+          for line,med in lines]}
+
+
+@router.post("/pharmacy/prescriptions/{prescription_id}/dispense",status_code=201)
+def dispense_pharmacy_prescription(prescription_id:int,payload:PharmacyDispenseIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    rx=_prescription_or_404(db,membership,prescription_id,lock=True)
+    if rx.status not in {"active","partially_dispensed"} or rx.valid_until<date.today():
+        raise HTTPException(409,"Prescription is not valid for dispensing")
+    line=db.query(PharmacyPrescriptionLine).filter_by(
+        id=payload.line_id,organization_id=membership.organization_id,
+        prescription_id=rx.id).with_for_update().first()
+    if not line: raise HTTPException(404,"Prescription line not found")
+    verifier=db.query(Membership).filter_by(
+        organization_id=membership.organization_id,user_id=payload.verifier_id,is_active=True).first()
+    if not verifier or payload.verifier_id==user.id:
+        raise HTTPException(403,"A second active organization member must verify dispensing")
+    med=db.query(PharmacyMedicine).filter_by(
+        id=line.medicine_id,organization_id=membership.organization_id,is_active=True).first()
+    if not med: raise HTTPException(404,"Medicine not found")
+    batch=_pharmacy_batch_or_404(db,membership,payload.batch_id,lock=True)
+    if batch.medicine_id!=med.id or batch.expiry_date<date.today() or batch.status!="active":
+        raise HTTPException(409,"Batch is expired, recalled, quarantined or belongs to another medicine")
+    prior=db.query(PharmacyDispense).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if prior:
+        if prior.prescription_line_id!=line.id or prior.batch_id!=batch.id or prior.quantity!=payload.quantity:
+            raise HTTPException(409,"Dispense idempotency key conflicts with another request")
+        return {"id":prior.id,"status":"already_recorded","quantity":str(prior.quantity)}
+    total_authorized=line.quantity_prescribed*Decimal(1+line.refills_allowed)
+    if line.quantity_dispensed+payload.quantity>total_authorized:
+        raise HTTPException(422,"Dispense quantity exceeds prescribed amount and authorized refills")
+    if batch.remaining_quantity<payload.quantity:
+        raise HTTPException(409,"Insufficient batch stock")
+    batch.remaining_quantity-=payload.quantity
+    line.quantity_dispensed+=payload.quantity
+    line.refills_used=max(0,int(line.quantity_dispensed//line.quantity_prescribed)-1)
+    line.status="dispensed" if line.quantity_dispensed>=total_authorized else "partially_dispensed"
+    rx.status="dispensed" if all(
+        x.status=="dispensed" for x in db.query(PharmacyPrescriptionLine).filter_by(
+            organization_id=membership.organization_id,prescription_id=rx.id).all()) else "partially_dispensed"
+    dispense=PharmacyDispense(organization_id=membership.organization_id,
+        prescription_line_id=line.id,batch_id=batch.id,quantity=payload.quantity,
+        unit_price=batch.selling_price,idempotency_key=payload.idempotency_key,
+        status="dispensed",pharmacist_id=user.id,verified_by=payload.verifier_id)
+    db.add(dispense);db.flush()
+    db.add(InventoryStockMovement(organization_id=membership.organization_id,
+        product_id=med.inventory_product_id,branch_id=batch.branch_id,
+        quantity_delta=-payload.quantity,movement_type="issue",
+        reference=f"pharmacy-dispense:{dispense.id}",
+        idempotency_key="pharmacy-dispense:"+hashlib.sha256(payload.idempotency_key.encode()).hexdigest()[:40],
+        created_by=user.id))
+    amount=(payload.quantity*batch.selling_price).quantize(Decimal("0.01"))
+    invoice,_=_pharm_lab_record(db,membership,user,"pharmacy_invoice",
+        f"pharmacy-invoice:{dispense.id}",{"patient_id":rx.patient_id,"dispense_id":dispense.id,
+        "amount":str(amount),"currency":"KES","status":"unpaid"},parent_id=dispense.id,
+        branch_id=batch.branch_id,status="unpaid")
+    if med.is_controlled:
+        db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+            medicine_id=med.id,batch_id=batch.id,prescription_id=rx.id,dispense_id=dispense.id,
+            event_type="dispensed",quantity=payload.quantity,reason="Prescription dispensing",
+            actor_id=user.id,witness_id=payload.verifier_id))
+    db.commit();db.refresh(dispense)
+    audit(db,user.id,membership.organization_id,"pharmacy.dispense.completed",
+        "pharmacy_dispense",dispense.id,f"prescription:{rx.id};batch:{batch.id};qty:{payload.quantity}")
+    return {"id":dispense.id,"status":dispense.status,"quantity":str(dispense.quantity),
+            "remaining_batch_quantity":str(batch.remaining_quantity),"invoice_record_id":invoice.id,
+            "amount":str(amount),"prescription_status":rx.status}
+
+
+@router.post("/pharmacy/dispenses/{dispense_id}/return",status_code=201)
+def return_pharmacy_dispense(dispense_id:int,payload:PharmacyReturnIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    disp=db.query(PharmacyDispense).filter_by(
+        id=dispense_id,organization_id=membership.organization_id).with_for_update().first()
+    if not disp:raise HTTPException(404,"Dispense not found")
+    batch=_pharmacy_batch_or_404(db,membership,disp.batch_id,lock=True)
+    line=db.query(PharmacyPrescriptionLine).filter_by(
+        id=disp.prescription_line_id,organization_id=membership.organization_id).with_for_update().first()
+    if not line or disp.status!="dispensed":raise HTTPException(409,"Dispense is not returnable")
+    returned=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="pharmacy_return",parent_id=disp.id).all()
+    already=sum((Decimal(x.payload["quantity"]) for x in returned),Decimal("0"))
+    if already+payload.quantity>disp.quantity:raise HTTPException(422,"Return exceeds dispensed quantity")
+    record,_=_pharm_lab_record(db,membership,user,"pharmacy_return",None,
+        {"dispense_id":disp.id,"quantity":str(payload.quantity),"reason":payload.reason.strip(),
+         "batch_id":batch.id,"stock_disposition":"quarantine_pending"},parent_id=disp.id,
+        branch_id=batch.branch_id,status="quarantine_pending")
+    if med:=db.query(PharmacyMedicine).filter_by(id=line.medicine_id,organization_id=membership.organization_id).first():
+        if med.is_controlled:
+            db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+                medicine_id=med.id,batch_id=batch.id,prescription_id=None,dispense_id=disp.id,
+                event_type="returned",quantity=payload.quantity,reason=payload.reason.strip(),actor_id=user.id))
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.dispense.returned",
+          "pharmacy_dispense",disp.id,f"return_record:{record.id};qty:{payload.quantity}")
+    return {"return_id":record.id,"status":"quarantine_pending",
+            "note":"Returned medicine is not restored to saleable stock."}
+
+
+@router.post("/pharmacy/batches/{batch_id}/recall")
+def recall_pharmacy_batch(batch_id:int,payload:PharmacyRecallIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    batch=_pharmacy_batch_or_404(db,membership,batch_id,lock=True)
+    if batch.status=="recalled":return {"id":batch.id,"status":"recalled"}
+    if batch.status not in {"active","quarantined"}:raise HTTPException(409,"Batch cannot be recalled")
+    qty=batch.remaining_quantity
+    med=db.query(PharmacyMedicine).filter_by(
+        id=batch.medicine_id,organization_id=membership.organization_id).first()
+    if qty>0 and med:
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,
+            product_id=med.inventory_product_id,branch_id=batch.branch_id,quantity_delta=-qty,
+            movement_type="issue",reference=f"pharmacy-recall:{batch.id}",
+            idempotency_key=f"pharmacy-recall:{batch.id}",created_by=user.id))
+    batch.remaining_quantity=Decimal("0");batch.status="recalled"
+    row,_=_pharm_lab_record(db,membership,user,"pharmacy_recall",f"pharmacy-recall:{batch.id}",
+        {"batch_id":batch.id,"reason":payload.reason.strip(),"quantity_removed":str(qty)},
+        parent_id=batch.id,branch_id=batch.branch_id,status="completed")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.batch.recalled",
+          "pharmacy_batch",batch.id,payload.reason.strip())
+    return {"id":batch.id,"status":"recalled","quantity_removed":str(qty),"recall_record_id":row.id}
+
+
+@router.post("/pharmacy/replenishment")
+def request_pharmacy_replenishment(payload: dict,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    medicine_id=int(payload.get("medicine_id",0));branch_id=str(payload.get("branch_id",""))
+    quantity=Decimal(str(payload.get("quantity","0")))
+    supplier_id=payload.get("supplier_id")
+    if quantity<=0 or not branch_id:raise HTTPException(422,"Positive quantity and branch are required")
+    med=db.query(PharmacyMedicine).filter_by(
+        id=medicine_id,organization_id=membership.organization_id,is_active=True).first()
+    if not med or not can_access_branch(membership,branch_id):raise HTTPException(404,"Medicine or branch not found")
+    data={"medicine_id":med.id,"branch_id":branch_id,"quantity":str(quantity),
+          "supplier_id":supplier_id,"reason":str(payload.get("reason",""))[:500],
+          "purchase_order_status":"awaiting_procurement_conversion"}
+    row,_=_pharm_lab_record(db,membership,user,"pharmacy_replenishment",
+        str(payload.get("idempotency_key") or uuid.uuid4()),data,branch_id=branch_id)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.replenishment.requested",
+          "pharmacy_replenishment",row.id,f"medicine:{med.id};qty:{quantity}")
+    return {"id":row.id,"status":row.status,"procurement_conversion":"queued_not_submitted"}
+
+
+@router.post("/pharmacy-lab/billing")
+def create_pharmacy_lab_bill(payload:PharmacyLabBillingIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    patient=db.query(HealthcarePatient).filter_by(
+        id=payload.patient_id,organization_id=membership.organization_id).first()
+    if not patient or not can_access_branch(membership,patient.branch_id):raise HTTPException(404,"Patient not found")
+    if payload.source_type=="pharmacy_dispense":
+        source=db.query(PharmacyDispense).filter_by(
+            id=payload.source_id,organization_id=membership.organization_id,status="dispensed").first()
+        if not source:raise HTTPException(404,"Dispense not found")
+        line=db.query(PharmacyPrescriptionLine).filter_by(id=source.prescription_line_id,
+            organization_id=membership.organization_id).first()
+        rx=_prescription_or_404(db,membership,db.query(PharmacyPrescriptionLine).filter_by(
+            id=line.id).first().prescription_id)
+        if rx.patient_id!=patient.id:raise HTTPException(422,"Billing patient does not match source")
+    else:
+        source=db.query(LaboratoryOrder).filter_by(
+            id=payload.source_id,organization_id=membership.organization_id).first()
+        if not source or source.patient_id!=patient.id:raise HTTPException(404,"Validated laboratory order not found")
+        if source.status!="validated":raise HTTPException(409,"Only validated laboratory orders can be billed")
+    key=f"billing:{payload.source_type}:{payload.source_id}"
+    data={"patient_id":patient.id,"source_type":payload.source_type,"source_id":payload.source_id,
+          "amount":str(payload.amount),"currency":payload.currency,"insurer_name":payload.insurer_name,
+          "policy_number":payload.member_policy_number,"invoice_status":"unpaid"}
+    bill,created=_pharm_lab_record(db,membership,user,"clinical_invoice",key,data,
+        parent_id=payload.source_id,branch_id=patient.branch_id,status="unpaid")
+    claim=None
+    if payload.insurer_name.strip():
+        claim,_=_pharm_lab_record(db,membership,user,"insurance_claim",
+            f"claim:{payload.source_type}:{payload.source_id}",
+            {"invoice_id":bill.id,"insurer":payload.insurer_name.strip(),
+             "policy_number":payload.member_policy_number,"amount":str(payload.amount),
+             "status":"submitted_for_review"},parent_id=bill.id,branch_id=patient.branch_id,status="submitted")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"clinical.billing.created",
+          "clinical_invoice",bill.id,f"source:{payload.source_type}:{payload.source_id}")
+    return {"invoice_id":bill.id,"status":bill.status,"claim_id":claim.id if claim else None}
+
+
+@router.post("/lab/panels",status_code=201)
+def create_laboratory_panel(payload:LaboratoryPanelIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    tests=db.query(LaboratoryTest).filter(
+        LaboratoryTest.organization_id==membership.organization_id,LaboratoryTest.is_active==True,
+        LaboratoryTest.id.in_(payload.test_ids)).all()
+    if len(tests)!=len(set(payload.test_ids)):raise HTTPException(404,"One or more active tests not found")
+    if db.query(LaboratoryTestPanel).filter_by(
+        organization_id=membership.organization_id,code=payload.code.strip().upper()).first():
+        raise HTTPException(409,"Panel code already exists")
+    panel=LaboratoryTestPanel(organization_id=membership.organization_id,
+        code=payload.code.strip().upper(),name=payload.name.strip(),
+        description=payload.description.strip(),created_by=user.id)
+    db.add(panel);db.flush()
+    for test_id in sorted(set(payload.test_ids)):
+        db.add(LaboratoryTestPanelLine(organization_id=membership.organization_id,
+            panel_id=panel.id,test_id=test_id))
+    db.commit();db.refresh(panel)
+    audit(db,user.id,membership.organization_id,"lab.panel.created","laboratory_test_panel",panel.id)
+    return {"id":panel.id,"code":panel.code,"name":panel.name,"test_count":len(tests)}
+
+
+@router.get("/lab/panels")
+def list_laboratory_panels(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(LaboratoryTestPanel).filter_by(
+        organization_id=membership.organization_id,is_active=True).order_by(LaboratoryTestPanel.name).all()
+    return [{"id":p.id,"code":p.code,"name":p.name,"description":p.description,
+        "test_ids":[x.test_id for x in db.query(LaboratoryTestPanelLine).filter_by(
+            organization_id=membership.organization_id,panel_id=p.id).all()]} for p in rows]
+
+
+@router.post("/lab/samples/{sample_id}/decision")
+def decide_laboratory_sample(sample_id:int,payload:LaboratorySampleDecisionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    sample=db.query(LaboratorySample).filter_by(
+        id=sample_id,organization_id=membership.organization_id).with_for_update().first()
+    if not sample:raise HTTPException(404,"Sample not found")
+    order=db.query(LaboratoryOrder).filter_by(
+        id=sample.order_id,organization_id=membership.organization_id).first()
+    if not order or not can_access_branch(membership,order.branch_id):raise HTTPException(404,"Sample not found")
+    if sample.status not in {"collected","accepted"}:raise HTTPException(409,"Sample is already rejected or processing")
+    if payload.decision=="rejected":
+        sample.status="rejected";order.status="sample_rejected"
+    else:
+        sample.status="accepted";order.status="sample_collected"
+    _pharm_lab_record(db,membership,user,"lab_chain_of_custody",None,
+        {"sample_id":sample.id,"accession_number":sample.accession_number,
+         "action":payload.decision,"reason":payload.reason.strip(),"actor_id":user.id},
+        parent_id=sample.id,branch_id=order.branch_id,status=payload.decision)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.sample."+payload.decision,
+          "laboratory_sample",sample.id,payload.reason.strip())
+    return {"sample_id":sample.id,"status":sample.status,"order_status":order.status}
+
+
+@router.post("/lab/instruments",status_code=201)
+def register_laboratory_instrument(payload:LaboratoryInstrumentIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if payload.branch_id and not can_access_branch(membership,payload.branch_id):
+        raise HTTPException(404,"Branch not found")
+    secret=uuid.uuid4().hex+uuid.uuid4().hex
+    row,_=_pharm_lab_record(db,membership,user,"lab_instrument",None,
+        {"name":payload.name.strip(),"manufacturer":payload.manufacturer.strip(),
+         "model":payload.model.strip(),"api_key_hash":hashlib.sha256(secret.encode()).hexdigest(),
+         "last_seen_at":None,"branch_id":payload.branch_id},branch_id=payload.branch_id,status="active")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.instrument.registered",
+          "lab_instrument",row.id,payload.name.strip())
+    return {"id":row.id,"status":"active","instrument_key":secret,
+            "warning":"Store this key securely; it is shown only once."}
+
+
+@router.post("/lab/instruments/{instrument_id}/results")
+def receive_instrument_result(instrument_id:int,payload:LaboratoryInstrumentResultIn,
+    x_instrument_key:str=Query(...,min_length=32),membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=instrument_id,organization_id=membership.organization_id,
+        record_type="lab_instrument",status="active").with_for_update().first()
+    if not instrument or not hashlib.sha256(x_instrument_key.encode()).hexdigest()==instrument.payload.get("api_key_hash"):
+        raise HTTPException(401,"Invalid instrument credential")
+    sample=db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id,accession_number=payload.accession_number.strip().upper()).first()
+    if not sample or sample.status not in {"accepted","collected"}:raise HTTPException(404,"Accepted sample not found")
+    order=db.query(LaboratoryOrder).filter_by(
+        id=sample.order_id,organization_id=membership.organization_id).first()
+    if not order or not can_access_branch(membership,order.branch_id):raise HTTPException(404,"Order not found")
+    line=db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id,order_id=order.id,test_code=payload.test_code.strip().upper()).with_for_update().first()
+    if not line or line.status!="pending":raise HTTPException(409,"Matching pending test line not found")
+    failed_qc=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="lab_qc",parent_id=instrument.id,status="failed").first()
+    if failed_qc:raise HTTPException(409,"Instrument is blocked by failed quality control")
+    line.result_value=payload.result_value.strip();line.result_notes=payload.result_notes.strip()
+    line.entered_by=instrument.created_by;line.status="entered"
+    order_lines=db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id,order_id=order.id).all()
+    order.status="results_entered" if all(x.status=="entered" for x in order_lines) else "processing"
+    instrument.payload={**instrument.payload,"last_seen_at":datetime.now(timezone.utc).isoformat()}
+    if payload.is_critical:
+        _pharm_lab_record(db,membership,user,"lab_critical_alert",
+            f"critical:{line.id}",{"order_id":order.id,"line_id":line.id,
+            "patient_id":order.patient_id,"accession_number":sample.accession_number,
+            "test_code":line.test_code,"result_value":line.result_value,
+            "status":"queued","escalation_required":True},parent_id=order.id,
+            branch_id=order.branch_id,status="queued")
+    _pharm_lab_record(db,membership,user,"lab_instrument_result",
+        f"instrument-result:{instrument.id}:{line.id}",
+        {"instrument_id":instrument.id,"sample_id":sample.id,"line_id":line.id,
+         "result_value":line.result_value,"result_unit":payload.result_unit},
+        parent_id=order.id,branch_id=order.branch_id,status="received")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.instrument.result_received",
+          "laboratory_order_line",line.id,f"instrument:{instrument.id};critical:{payload.is_critical}")
+    return {"line_id":line.id,"status":line.status,"critical_alert":payload.is_critical}
+
+
+@router.post("/lab/instruments/{instrument_id}/qc")
+def record_laboratory_qc(instrument_id:int,payload:LaboratoryQCIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=instrument_id,organization_id=membership.organization_id,
+        record_type="lab_instrument",status="active").first()
+    if not instrument:raise HTTPException(404,"Instrument not found")
+    row,_=_pharm_lab_record(db,membership,user,"lab_qc",None,
+        {"instrument_id":instrument.id,"control_lot":payload.control_lot,
+         "result":payload.result,"expected_range":payload.expected_range,"passed":payload.passed},
+        parent_id=instrument.id,branch_id=instrument.branch_id,
+        status="passed" if payload.passed else "failed")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.quality_control.recorded",
+          "lab_qc",row.id,row.status)
+    return {"id":row.id,"status":row.status,"instrument_blocked":not payload.passed}
+
+
+@router.post("/lab/instruments/{instrument_id}/calibration")
+def record_laboratory_calibration(instrument_id:int,payload:LaboratoryCalibrationIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=instrument_id,organization_id=membership.organization_id,
+        record_type="lab_instrument",status="active").first()
+    if not instrument:raise HTTPException(404,"Instrument not found")
+    row,_=_pharm_lab_record(db,membership,user,"lab_calibration",None,
+        {"instrument_id":instrument.id,"reference":payload.calibration_reference,
+         "outcome":payload.outcome,"next_due":payload.next_due.isoformat()},
+        parent_id=instrument.id,branch_id=instrument.branch_id,status=payload.outcome)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.calibration.recorded",
+          "lab_calibration",row.id,row.status)
+    return {"id":row.id,"status":row.status,"next_due":payload.next_due.isoformat()}
+
+
+@router.post("/lab/orders/{order_id}/deliver")
+def queue_laboratory_result_delivery(order_id:int,payload:dict,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    order=db.query(LaboratoryOrder).filter_by(
+        id=order_id,organization_id=membership.organization_id,status="validated").first()
+    if not order or not can_access_branch(membership,order.branch_id):raise HTTPException(404,"Validated result not found")
+    recipient_type=str(payload.get("recipient_type","clinician"))
+    if recipient_type not in {"clinician","patient"}:raise HTTPException(422,"Invalid recipient type")
+    recipient_id=int(payload.get("recipient_id") or (order.ordering_provider_id if recipient_type=="clinician" else order.patient_id))
+    lines=db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id,order_id=order.id,status="validated").all()
+    content=[{"test_code":x.test_code,"test_name":x.test_name,"result":x.result_value,
+              "unit":x.result_unit,"reference_range":x.reference_range_snapshot} for x in lines]
+    key=f"lab-delivery:{order.id}:{recipient_type}:{recipient_id}"
+    row,_=_pharm_lab_record(db,membership,user,"lab_result_delivery",key,
+        {"order_id":order.id,"patient_id":order.patient_id,"recipient_type":recipient_type,
+         "recipient_id":recipient_id,"results":content,"delivery_channel":"secure_in_app",
+         "delivery_status":"queued"},parent_id=order.id,branch_id=order.branch_id,status="queued")
+    db.commit()
+    audit(db,user.id,membership.organization_id,"lab.result.delivery_queued",
+          "lab_result_delivery",row.id,f"recipient:{recipient_type}:{recipient_id}")
+    return {"delivery_id":row.id,"status":row.status,"channel":"secure_in_app"}
+
+
+@router.get("/lab/deliveries/{delivery_id}")
+def get_laboratory_delivery(delivery_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    row=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=delivery_id,organization_id=membership.organization_id,
+        record_type="lab_result_delivery").first()
+    if not row or not can_access_branch(membership,row.branch_id):raise HTTPException(404,"Delivery not found")
+    if row.payload.get("recipient_type")=="clinician" and row.payload.get("recipient_id")!=user.id:
+        raise HTTPException(403,"Delivery is addressed to another clinician")
+    if row.payload.get("recipient_type")=="patient":
+        raise HTTPException(403,"Patient delivery requires a patient portal identity; use clinician delivery until enabled")
+    audit(db,user.id,membership.organization_id,"lab.result.delivery_accessed",
+          "lab_result_delivery",row.id)
+    return {"id":row.id,"status":row.status,"results":row.payload["results"]}
+
+
+@router.get("/pharmacy-lab/traceability")
+def pharmacy_lab_traceability(record_type:str|None=None,parent_id:int|None=None,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=200,ge=1,le=1000)):
+    require_permission(membership,"read")
+    q=db.query(PharmacyLabWorkflowRecord).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(PharmacyLabWorkflowRecord.branch_id.in_(allowed))
+    if record_type:q=q.filter(PharmacyLabWorkflowRecord.record_type==record_type)
+    if parent_id is not None:q=q.filter(PharmacyLabWorkflowRecord.parent_id==parent_id)
+    rows=q.order_by(PharmacyLabWorkflowRecord.created_at.desc()).limit(limit).all()
+    return [{"id":x.id,"record_type":x.record_type,"parent_id":x.parent_id,
+        "status":x.status,"payload":x.payload,"created_by":x.created_by,
+        "created_at":x.created_at.isoformat()} for x in rows]
