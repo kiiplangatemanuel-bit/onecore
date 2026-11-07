@@ -92,3 +92,41 @@ def test_sacco_arrears_ageing_ui_is_read_only():
     assert 'id="arrearsRows"' in html
     assert "/sacco/loans/arrears" in html
     assert "No late fees or penalties are calculated or posted" in html
+
+
+
+def test_guarantor_and_collateral_schema_validation():
+    from app.core.schemas import (
+        SaccoLoanGuarantorIn, SaccoLoanGuarantorReviewIn,
+        SaccoLoanCollateralIn, SaccoLoanCollateralReviewIn,
+    )
+    assert SaccoLoanGuarantorIn(
+        member_id=2, guaranteed_amount=Decimal("5000.00"),
+        consent_reference="signed-form-22"
+    ).member_id == 2
+    assert SaccoLoanGuarantorReviewIn(decision="approved", note="Consent checked").decision == "approved"
+    assert SaccoLoanCollateralIn(
+        collateral_type="vehicle", description="Toyota pickup 2019",
+        owner_name="Member Two", estimated_value=Decimal("800000.00")
+    ).estimated_value == Decimal("800000.00")
+    approved = SaccoLoanCollateralReviewIn(
+        decision="approved", note="Independent valuation confirmed",
+        assessed_value=Decimal("750000.00"), valuation_date=date(2026, 10, 1),
+        valuation_reference="valuer-report-18"
+    )
+    assert approved.valuation_reference == "valuer-report-18"
+    with pytest.raises(ValidationError):
+        SaccoLoanGuarantorIn(member_id=2, guaranteed_amount=Decimal("0"), consent_reference="x")
+    with pytest.raises(ValidationError):
+        SaccoLoanCollateralIn(
+            collateral_type=" ", description="valid description",
+            owner_name="Owner", estimated_value=Decimal("10.00")
+        )
+
+
+def test_guarantor_and_collateral_route_contracts():
+    paths = app.openapi()["paths"]
+    assert "/api/v1/sacco/loans/{loan_id}/guarantors" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/review" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/collateral" in paths
+    assert "/api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/review" in paths
