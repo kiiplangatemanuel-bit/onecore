@@ -1458,9 +1458,16 @@ def create_pos_cash_movement(shift_id:int,payload:POSCashMovementIn,membership=D
     if not shift or not can_access_branch(membership,shift.branch_id): raise HTTPException(404,"Open cashier shift not found")
     old=db.query(POSCashMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if old:
-        if old.shift_id!=shift.id or old.movement_type!=payload.movement_type or Decimal(str(old.amount))!=payload.amount: raise HTTPException(409,"Idempotency key conflict")
+        if (old.shift_id!=shift.id or old.movement_type!=payload.movement_type
+            or Decimal(str(old.amount))!=payload.amount or old.reason!=payload.reason.strip()
+            or old.reference!=payload.reference.strip()):
+            raise HTTPException(409,"Idempotency key conflict")
         return {"id":old.id,"status":"already_recorded","amount":str(old.amount)}
-    if payload.movement_type in ("cash_out","safe_drop"): require_permission(membership,"manage")
+    if payload.movement_type in ("cash_out","safe_drop"):
+        require_permission(membership,"manage")
+        totals=_pos_shift_cash_totals(db,shift)
+        if payload.amount > totals["expected"]:
+            raise HTTPException(422,"Cash out or safe drop exceeds the available till cash")
     row=POSCashMovement(organization_id=membership.organization_id,branch_id=shift.branch_id,shift_id=shift.id,
         movement_type=payload.movement_type,amount=payload.amount,reason=payload.reason.strip(),reference=payload.reference.strip(),
         idempotency_key=payload.idempotency_key,created_by=user.id,authorized_by=user.id if payload.movement_type!="cash_in" else None)
