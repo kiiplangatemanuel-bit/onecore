@@ -40,5 +40,6 @@ def downgrade():
     for name in ("ix_pos_cash_movement_shift","ix_pos_cash_movement_org_key","ix_pos_cash_movements_shift_id","ix_pos_cash_movements_branch_id","ix_pos_cash_movements_organization_id"):
         op.drop_index(name,table_name="pos_cash_movements")
     op.drop_table("pos_cash_movements")
-    for col in ("review_note","reviewed_at","reviewed_by","close_note","counted_denominations","reconciliation_status","cash_variance","counted_cash","expected_cash"):
-        op.drop_column("pos_shifts",col)
+    with op.batch_alter_table("pos_shifts") as batch:
+        for col in ("review_note","reviewed_at","reviewed_by","close_note","counted_denominations","reconciliation_status","cash_variance","counted_cash","expected_cash"):
+            batch.drop_column(col)
