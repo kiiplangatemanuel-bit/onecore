@@ -451,3 +451,101 @@ class GoodsReceiptInspectionIn(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Each receipt line may be inspected only once per request")
         return self
+
+
+class RequisitionConvertIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    notes: str = Field(default="", max_length=1000)
+    unit_costs: dict[int, Decimal] = Field(default_factory=dict)
+
+
+class ProcurementApprovalRuleIn(BaseModel):
+    minimum_amount: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+    maximum_amount: Decimal | None = Field(default=None, gt=0, le=Decimal("9999999999999999"))
+    approval_level: int = Field(ge=1, le=5)
+    approver_role: str = Field(default="org_admin", pattern=r"^(org_admin|manager)$")
+
+    @model_validator(mode="after")
+    def valid_amount_range(self):
+        if self.maximum_amount is not None and self.maximum_amount <= self.minimum_amount:
+            raise ValueError("Maximum must exceed minimum")
+        return self
+
+
+class ProcurementRFQIn(BaseModel):
+    branch_id: str | None = Field(default=None, max_length=36)
+    closing_date: datetime
+    notes: str = Field(default="", max_length=1000)
+    supplier_ids: list[int] = Field(min_length=2, max_length=100)
+    lines: list[ProcurementRequisitionLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_suppliers_products(self):
+        if len(set(self.supplier_ids)) != len(self.supplier_ids):
+            raise ValueError("Supplier invitations must be unique")
+        ids = [x.product_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("RFQ products must be unique")
+        return self
+
+
+class ProcurementRFQQuoteLineIn(BaseModel):
+    rfq_line_id: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class ProcurementRFQQuoteIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    delivery_days: int = Field(ge=0, le=3650)
+    lines: list[ProcurementRFQQuoteLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_lines(self):
+        ids = [x.rfq_line_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Quote lines must be unique")
+        return self
+
+
+class SupplierInvoiceLineIn(BaseModel):
+    purchase_order_line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+
+
+class SupplierInvoiceIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    purchase_order_id: int = Field(gt=0)
+    invoice_number: str = Field(min_length=2, max_length=80)
+    invoice_date: date
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    tax_total: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    lines: list[SupplierInvoiceLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_po_lines(self):
+        ids = [x.purchase_order_line_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Invoice purchase order lines must be unique")
+        return self
+
+
+class SupplierReturnLineIn(BaseModel):
+    receipt_line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+
+
+class SupplierReturnIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+    credit_note_reference: str = Field(default="", max_length=100)
+    lines: list[SupplierReturnLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_receipt_lines(self):
+        ids = [x.receipt_line_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Return receipt lines must be unique")
+        return self
