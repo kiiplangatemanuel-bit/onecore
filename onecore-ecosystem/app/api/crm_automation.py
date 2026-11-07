@@ -47,6 +47,9 @@ def create_template(payload:CRMTemplateIn,membership=Depends(active_membership),
     validate_template_content(payload.subject,payload.body)
     version=(db.query(func.max(CRMMessageTemplate.version)).filter_by(
         organization_id=membership.organization_id,name=payload.name.strip()).scalar() or 0)+1
+    db.query(CRMMessageTemplate).filter_by(
+        organization_id=membership.organization_id,name=payload.name.strip(),is_active=True
+    ).update({"is_active":False},synchronize_session=False)
     row=CRMMessageTemplate(organization_id=membership.organization_id,branch_id=payload.branch_id or None,
         name=payload.name.strip(),channel=payload.channel,purpose=payload.purpose,
         subject=payload.subject,body=payload.body,version=version,is_active=True,created_by=user.id)
@@ -105,6 +108,42 @@ def create_segment(payload:CRMSegmentIn,membership=Depends(active_membership),
     db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
         action="crm.segment.created",resource_type="crm_audience_segment",resource_id=str(row.id)));db.commit()
     return {"id":row.id,"name":row.name,"branch_id":row.branch_id,"filters":row.filters}
+
+
+@router.put("/segments/{segment_id}")
+def update_segment(segment_id:int,payload:CRMSegmentIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(CRMAudienceSegment).filter_by(
+        id=segment_id,organization_id=membership.organization_id,is_active=True).first()
+    if not row or (row.branch_id is not None and not can_access_branch(membership,row.branch_id)):
+        raise HTTPException(404,"Active audience segment not found")
+    _branch(db,membership,payload.branch_id)
+    validate_segment_filters(payload.filters)
+    row.name=payload.name.strip()
+    row.branch_id=payload.branch_id or None
+    row.filters=payload.filters
+    row.updated_at=datetime.now(timezone.utc)
+    try:db.commit()
+    except IntegrityError:db.rollback();raise HTTPException(409,"Segment name already exists")
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="crm.segment.updated",resource_type="crm_audience_segment",resource_id=str(row.id)));db.commit()
+    return {"id":row.id,"name":row.name,"branch_id":row.branch_id,"filters":row.filters}
+
+
+@router.post("/segments/{segment_id}/deactivate")
+def deactivate_segment(segment_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(CRMAudienceSegment).filter_by(
+        id=segment_id,organization_id=membership.organization_id,is_active=True).first()
+    if not row or (row.branch_id is not None and not can_access_branch(membership,row.branch_id)):
+        raise HTTPException(404,"Active audience segment not found")
+    row.is_active=False;row.updated_at=datetime.now(timezone.utc)
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="crm.segment.deactivated",resource_type="crm_audience_segment",resource_id=str(row.id)))
+    db.commit()
+    return {"id":row.id,"status":"deactivated"}
 
 
 @router.get("/segments")
