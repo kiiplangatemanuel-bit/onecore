@@ -20,8 +20,8 @@ from app.core.models import (
     ProcurementPurchaseOrderLine, ProcurementApprovalRule, ProcurementApprovalAction,
     ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine,
     ProcurementSupplierReturn, ProcurementSupplierReturnLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine,
-    ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine,
-    ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, Record, Membership, User,
+    ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, MpesaPaymentIntent, MpesaRefundIntent,
+    Record, Membership, User,
 )
 from app.core.procurement_workflow_models import (
     ProcurementSettlement, ProcurementSettlementAllocation, ProcurementApprovalDelegation,
@@ -99,7 +99,13 @@ class SupplierStatementLineIn(BaseModel):
     transaction_date: date
     description: str = Field(min_length=1, max_length=240)
     reference: str = Field(default="", max_length=120)
-    amount: Decimal = Field(ne=0, multiple_of=CENT, le=Decimal("9999999999999999"), ge=Decimal("-9999999999999999"))
+    amount: Decimal = Field(multiple_of=CENT, le=Decimal("9999999999999999"), ge=Decimal("-9999999999999999"))
+
+    @model_validator(mode="after")
+    def nonzero_amount(self):
+        if self.amount == 0:
+            raise ValueError("Statement line amount cannot be zero")
+        return self
 
 
 class SupplierStatementIn(BaseModel):
