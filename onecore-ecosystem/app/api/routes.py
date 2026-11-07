@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -2122,3 +2122,71 @@ def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depen
             "weighted_value":str(v["weighted"])} for stage,v in sorted(data["stages"].items())]}
         for currency,data in sorted(currencies.items())],
         "method":"Fixed stage probability assumptions; not a statistical prediction"}
+
+
+@router.post("/school/attendance", status_code=200)
+def record_school_attendance(payload: SchoolAttendanceIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Create or correct a daily register; one entry per learner/date."""
+    require_permission(membership, "create")
+    cls=db.query(SchoolClass).filter_by(
+        id=payload.class_id, organization_id=membership.organization_id, is_active=True).first()
+    if not cls or not can_access_branch(membership, cls.branch_id):
+        raise HTTPException(404, "Class not found")
+    learner_ids=[entry.learner_id for entry in payload.entries]
+    learners=db.query(SchoolLearner).filter(
+        SchoolLearner.organization_id==membership.organization_id,
+        SchoolLearner.class_id==cls.id, SchoolLearner.status=="active",
+        SchoolLearner.id.in_(learner_ids)).all()
+    if {x.id for x in learners} != set(learner_ids):
+        raise HTTPException(422, "Every learner must be active and enrolled in this class")
+    stamp=datetime.combine(payload.attendance_date,time.min,tzinfo=timezone.utc)
+    saved=[]
+    try:
+        for entry in payload.entries:
+            row=db.query(SchoolAttendance).filter_by(
+                organization_id=membership.organization_id,
+                attendance_date=stamp, learner_id=entry.learner_id).with_for_update().first()
+            if row:
+                if row.class_id != cls.id:
+                    raise HTTPException(409, "Learner already has an attendance entry for this date")
+                row.status=entry.status
+                row.note=entry.note
+                row.recorded_by=user.id
+            else:
+                row=SchoolAttendance(organization_id=membership.organization_id,
+                    branch_id=cls.branch_id,class_id=cls.id,learner_id=entry.learner_id,
+                    attendance_date=stamp,status=entry.status,note=entry.note,recorded_by=user.id)
+                db.add(row)
+            saved.append(row)
+        db.flush()
+        db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+            action="school.attendance.recorded",resource_type="school_attendance",
+            resource_id=str(cls.id),detail=f"{payload.attendance_date.isoformat()}:{len(saved)}"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"class_id":cls.id,"attendance_date":payload.attendance_date.isoformat(),
+        "count":len(saved),"entries":[{"learner_id":x.learner_id,"status":x.status,"note":x.note} for x in saved]}
+
+
+@router.get("/school/attendance")
+def list_school_attendance(class_id:int, attendance_date:date,
+    membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    cls=db.query(SchoolClass).filter_by(
+        id=class_id,organization_id=membership.organization_id,is_active=True).first()
+    if not cls or not can_access_branch(membership,cls.branch_id):
+        raise HTTPException(404,"Class not found")
+    stamp=datetime.combine(attendance_date,time.min,tzinfo=timezone.utc)
+    rows=db.query(SchoolAttendance,SchoolLearner).join(
+        SchoolLearner,SchoolLearner.id==SchoolAttendance.learner_id).filter(
+        SchoolAttendance.organization_id==membership.organization_id,
+        SchoolAttendance.class_id==cls.id,SchoolAttendance.attendance_date==stamp).order_by(
+        SchoolLearner.admission_number).all()
+    return {"class_id":cls.id,"attendance_date":attendance_date.isoformat(),
+        "entries":[{"learner_id":a.learner_id,"admission_number":l.admission_number,
+        "learner":f"{l.first_name} {l.last_name}","status":a.status,"note":a.note}
+        for a,l in rows]}
