@@ -44,6 +44,11 @@ async function loadReceipt(saleId){
   const td=document.createElement('td'),input=document.createElement('input');input.type='number';input.min='0';input.max=line.returnable_quantity;input.step='0.001';input.value='0';input.dataset.saleLineId=String(line.id);input.dataset.unitPrice=String(line.unit_price);input.dataset.lineTotal=String(line.line_total);input.dataset.originalQuantity=String(line.quantity);input.dataset.returnableValue=String(line.returnable_value);input.dataset.returnableQuantity=String(line.returnable_quantity);input.className='return-qty';input.setAttribute('aria-label','Return quantity for '+line.name);td.append(input);tr.append(td);table.append(tr);
  });out.append(table);
  const tenders=document.createElement('p');tenders.textContent='Tenders: '+data.payments.map(p=>p.method+' '+p.amount+' ('+p.status+')').join(' · ');out.append(tenders);
+ const mpesaPayments=await api('/integrations/mpesa/pos/sales/'+saleId+'/payments');
+ if(mpesaPayments.length){
+  const paymentHeading=document.createElement('h4');paymentHeading.textContent='M-Pesa collection status';out.append(paymentHeading);
+  mpesaPayments.forEach(item=>{const p=document.createElement('p');p.textContent='Tender '+item.payment_id+' · KES '+item.amount+' · '+item.status+(item.receipt?' · receipt '+item.receipt:'')+(item.result_description?' · '+item.result_description:'');out.append(p);});
+ }
  const mpesaRefunds=await api('/integrations/mpesa/pos/sales/'+saleId+'/refunds');
  const pendingRefund=mpesaRefunds.find(item=>item.refund_status==='pending');
  if(pendingRefund){
