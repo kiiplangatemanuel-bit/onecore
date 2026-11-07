@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
 import pytest
@@ -115,3 +116,74 @@ def test_healthcare_role_matrix_is_least_privilege():
     assert "audit.read" in ROLE_PERMISSIONS["privacy_officer"]
     assert "patient.read" not in ROLE_PERMISSIONS["privacy_officer"]
     assert "breakglass" in ROLE_PERMISSIONS["clinician"]
+
+
+def test_hospital_operations_models_and_routes_are_registered():
+    from app.core.models import HealthcareResource, HealthcareEvent
+    from app.api.healthcare_hospital import RESOURCE_TYPES, _money, _stable
+    paths=set(app.openapi()["paths"])
+    expected={
+        "/api/v1/healthcare/wards","/api/v1/healthcare/wards/{ward_id}/rooms",
+        "/api/v1/healthcare/wards/{ward_id}/rooms","/api/v1/healthcare/rooms/{room_id}/beds",
+        "/api/v1/healthcare/beds","/api/v1/healthcare/occupancy","/api/v1/healthcare/admissions",
+        "/api/v1/healthcare/admissions/{admission_id}/discharge",
+        "/api/v1/healthcare/admissions/{admission_id}/transfer",
+        "/api/v1/healthcare/patients/{patient_id}/movement-history",
+        "/api/v1/healthcare/patients/{patient_id}/observations",
+        "/api/v1/healthcare/patients/{patient_id}/care-plans",
+        "/api/v1/healthcare/patients/{patient_id}/nursing-tasks",
+        "/api/v1/healthcare/nursing-tasks/{task_id}/complete",
+        "/api/v1/healthcare/patients/{patient_id}/doctor-orders",
+        "/api/v1/healthcare/doctor-orders/{order_id}/decision",
+        "/api/v1/healthcare/patients/{patient_id}/treatment-plans",
+        "/api/v1/healthcare/patients/{patient_id}/invoices",
+        "/api/v1/healthcare/invoices/{invoice_id}/payments",
+        "/api/v1/healthcare/patients/{patient_id}/insurance/eligibility",
+        "/api/v1/healthcare/patients/{patient_id}/insurance/preauthorizations",
+        "/api/v1/healthcare/preauthorizations/{preauth_id}/decision",
+        "/api/v1/healthcare/patients/{patient_id}/insurance/claims",
+        "/api/v1/healthcare/insurance/claims/{claim_id}/settle",
+        "/api/v1/healthcare/patients/{patient_id}/pharmacy/dispense",
+        "/api/v1/healthcare/patients/{patient_id}/laboratory/orders",
+        "/api/v1/healthcare/integrations/jobs/{job_id}/result",
+        "/api/v1/healthcare/patients/{patient_id}/emergency/triage",
+        "/api/v1/healthcare/emergency/{visit_id}/status",
+        "/api/v1/healthcare/theatres","/api/v1/healthcare/patients/{patient_id}/procedures",
+        "/api/v1/healthcare/procedures/{procedure_id}/complete",
+        "/api/v1/healthcare/patients/{patient_id}/documents",
+        "/api/v1/healthcare/privacy/monitor","/api/v1/healthcare/retention/policy",
+        "/api/v1/healthcare/recovery/drills","/api/v1/healthcare/dashboard",
+    }
+    assert expected.issubset(paths)
+    assert HealthcareResource.__tablename__=="healthcare_resources"
+    assert HealthcareEvent.__tablename__=="healthcare_events"
+    assert {"admission","bed","vital_observation","doctor_order","invoice","insurance_claim",
+            "pharmacy_job","laboratory_job","emergency_visit","procedure","clinical_document"}.issubset(RESOURCE_TYPES)
+    assert _money("125.50")==Decimal("125.50")
+    assert _stable({"created_at":"now","amount":"2.00","nested":{"updated_at":"now","code":"X"}})=={
+        "amount":"2.00","nested":{"code":"X"}}
+    with pytest.raises(HTTPException): _money("-1")
+    with pytest.raises(HTTPException): _money("1.001")
+
+
+def test_hospital_roles_are_separated_by_workflow():
+    from app.api.healthcare_privacy import ROLE_PERMISSIONS
+    assert "observations.manage" in ROLE_PERMISSIONS["nurse"]
+    assert "orders.manage" in ROLE_PERMISSIONS["clinician"]
+    assert "pharmacy.manage" in ROLE_PERMISSIONS["pharmacist"]
+    assert "lab.manage" in ROLE_PERMISSIONS["lab_technician"]
+    assert "insurance.manage" in ROLE_PERMISSIONS["insurance_officer"]
+    assert "recovery.manage" not in ROLE_PERMISSIONS["privacy_officer"]
+
+
+def test_hospital_workspace_and_migration_are_present():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    page=root/"app"/"web"/"healthcare_hospital.html"
+    migration=root/"migrations"/"versions"/"0033_healthcare_hospital_operations.py"
+    assert page.exists() and migration.exists()
+    html=page.read_text(encoding="utf-8")
+    assert "/admissions" in html and "/occupancy" in html
+    assert "X-Organization-ID" in html
+    migration_text=migration.read_text(encoding="utf-8")
+    assert 'down_revision = "0032_crm_forecast_attribution"' in migration_text
