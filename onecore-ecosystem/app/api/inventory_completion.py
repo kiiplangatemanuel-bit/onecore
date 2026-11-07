@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone, date
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -136,6 +136,17 @@ class ReorderRuleIn(BaseModel):
     minimum_quantity: Decimal = Field(ge=0)
     maximum_quantity: Decimal = Field(gt=0)
     lead_time_days: int = Field(default=7, ge=0, le=365)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.maximum_quantity < self.minimum_quantity:
+            raise ValueError("maximum_quantity must be at least minimum_quantity")
+        return self
+
+
+class BatchStatusIn(BaseModel):
+    status: str = Field(pattern=r"^(damaged|expired|quarantined)$")
+    reason: str = Field(min_length=3, max_length=300)
 
 
 class PriceListIn(BaseModel):
@@ -345,6 +356,21 @@ def quarantine_batch(batch_id:int,reason:str=Query(min_length=3,max_length=300),
     if not row: raise HTTPException(404,"Batch not found")
     if row.status!="available": raise HTTPException(409,"Only available batches can be quarantined")
     row.status="quarantined";audit(db,user,membership.organization_id,"inventory.batch.quarantined","inventory_batch",row.id,reason);db.commit()
+    return {"id":row.id,"status":row.status}
+
+
+@router.patch("/batches/{batch_id}/status")
+def update_batch_status(batch_id:int,payload:BatchStatusIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(InventoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row: raise HTTPException(404,"Batch not found")
+    if row.status not in ("available","quarantined"): raise HTTPException(409,"Only available or quarantined batches can be dispositioned")
+    if payload.status=="expired" and row.expiry_date:
+        exp=row.expiry_date if row.expiry_date.tzinfo else row.expiry_date.replace(tzinfo=timezone.utc)
+        if exp>datetime.now(timezone.utc): raise HTTPException(422,"Batch has not reached its expiry date")
+    row.status=payload.status
+    audit(db,user,membership.organization_id,"inventory.batch.dispositioned","inventory_batch",row.id,payload.reason)
+    db.commit()
     return {"id":row.id,"status":row.status}
 
 
