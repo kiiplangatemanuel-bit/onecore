@@ -75,3 +75,11 @@ def test_break_glass_requires_specific_justification():
     assert HealthcareBreakGlassIn(justification="Immediate emergency clinical treatment").justification
     with pytest.raises(ValidationError):
         HealthcareBreakGlassIn(justification="urgent")
+
+
+def test_production_requires_separately_managed_healthcare_key(monkeypatch):
+    monkeypatch.setattr(settings,"healthcare_encryption_key","")
+    monkeypatch.setattr(settings,"app_env","production")
+    monkeypatch.setattr(settings,"secret_key","a-strong-enough-development-secret-key")
+    with pytest.raises(RuntimeError):
+        encrypt_health_data({"patient":"private"})
