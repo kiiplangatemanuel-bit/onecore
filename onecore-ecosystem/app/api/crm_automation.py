@@ -13,6 +13,7 @@ from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.services.crm_automation import validate_segment_filters, matches_segment, validate_template_content
+from app.services.datetime_utils import as_utc
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM automation"])
 
@@ -208,7 +209,7 @@ def resume_schedule(schedule_id:int,membership=Depends(active_membership),
     if not campaign or not can_access_branch(membership,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.status not in {"paused","failed"}:raise HTTPException(409,"Schedule is not paused or failed")
     if row.recurrence=="once" and row.run_count>0:raise HTTPException(409,"One-time schedule has already run")
-    row.status="scheduled";row.next_run_at=max(row.scheduled_at,datetime.now(timezone.utc));row.lease_until=None;row.last_error=None;db.commit()
+    row.status="scheduled";row.next_run_at=max(as_utc(row.scheduled_at),datetime.now(timezone.utc));row.lease_until=None;row.last_error=None;db.commit()
     db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
         action="crm.campaign.schedule_resumed",resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
     return {"id":row.id,"status":row.status,"next_run_at":row.next_run_at.isoformat()}
