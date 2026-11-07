@@ -53,3 +53,4 @@ def test_pos_models_and_routes_are_registered():
     assert "/api/v1/pos/shifts/open" in paths
     assert "/api/v1/pos/shifts/{shift_id}/close" in paths
     assert "/api/v1/pos/sync" in paths
+    assert "/pos" in paths
