@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.api.routes import router
 from app.api.platform_routes import router as platform_router
 from app.api.accounting_statements import router as accounting_statements_router
+from app.api.accounting_completion import router as accounting_completion_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +32,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
 app.include_router(router)
 app.include_router(platform_router)
 app.include_router(accounting_statements_router)
+app.include_router(accounting_completion_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
