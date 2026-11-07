@@ -292,6 +292,8 @@ def schedule_campaign(campaign_id:int,payload:dict,m=Depends(active_membership),
     segment=_segment(db,int(payload["segment_id"]),m) if payload.get("segment_id") else None
     if template and (template.channel!=campaign.channel or template.purpose!=campaign.purpose):
         raise HTTPException(422,"Template channel and purpose must match the campaign")
+    if template is None and re.search(r"{{\\s*[a-z_]+\\s*}}",(campaign.subject or "")+" "+(campaign.message or "")):
+        raise HTTPException(422,"Select a versioned template to render personalized campaign variables")
     if template and template.branch_id and template.branch_id!=campaign.branch_id:
         raise HTTPException(422,"Template and campaign branch must match")
     if segment and segment.branch_id and campaign.branch_id and segment.branch_id!=campaign.branch_id:
