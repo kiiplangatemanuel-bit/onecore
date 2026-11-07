@@ -511,6 +511,97 @@ class LaboratorySample(Base):
     )
 
 
+class SaccoMember(Base):
+    __tablename__ = "sacco_members"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    member_number: Mapped[str] = mapped_column(String(40))
+    full_name: Mapped[str] = mapped_column(String(180))
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    kyc_status: Mapped[str] = mapped_column(String(16), default="pending")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_member_org_number", "organization_id", "member_number", unique=True),)
+
+
+class SaccoAccount(Base):
+    __tablename__ = "sacco_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    account_number: Mapped[str] = mapped_column(String(40))
+    account_type: Mapped[str] = mapped_column(String(20))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_sacco_account_org_number", "organization_id", "account_number", unique=True),
+        Index("ix_sacco_account_org_member_type", "organization_id", "member_id", "account_type"),
+    )
+
+
+class SaccoTransaction(Base):
+    __tablename__ = "sacco_transactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("sacco_accounts.id"), index=True)
+    transaction_type: Mapped[str] = mapped_column(String(24))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_transaction_org_idempotency", "organization_id", "idempotency_key", unique=True),)
+
+
+class SaccoLoanProduct(Base):
+    __tablename__ = "sacco_loan_products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    minimum_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    maximum_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    minimum_term_months: Mapped[int] = mapped_column(Integer)
+    maximum_term_months: Mapped[int] = mapped_column(Integer)
+    interest_method: Mapped[str] = mapped_column(String(16), default="reducing")
+    requires_guarantor: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_product_org_code", "organization_id", "code", unique=True),)
+
+
+class SaccoLoanApplication(Base):
+    __tablename__ = "sacco_loan_applications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    loan_product_id: Mapped[int] = mapped_column(ForeignKey("sacco_loan_products.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    application_number: Mapped[str] = mapped_column(String(40))
+    requested_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    term_months: Mapped[int] = mapped_column(Integer)
+    purpose: Mapped[str] = mapped_column(String(1000))
+    status: Mapped[str] = mapped_column(String(16), default="submitted")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_app_org_number", "organization_id", "application_number", unique=True),)
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"
