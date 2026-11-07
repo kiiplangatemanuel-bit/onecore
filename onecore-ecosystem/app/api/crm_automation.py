@@ -352,6 +352,8 @@ def resume_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(
     require_permission(m,"manage")
     row=db.query(CRMCampaignSchedule).filter_by(organization_id=m.organization_id,campaign_id=campaign_id).first()
     if not row or row.status not in {"paused","failed"}:raise HTTPException(404,"Paused or failed schedule not found")
+    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
+    if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.recurrence=="once" and row.run_count:raise HTTPException(409,"One-time schedule already ran")
     row.status="scheduled";row.next_run_at=max(_utc(row.scheduled_at),datetime.now(timezone.utc))
     row.lease_until=None;row.claimed_at=None;row.last_error=""
@@ -365,6 +367,8 @@ def cancel_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(
     require_permission(m,"manage")
     row=db.query(CRMCampaignSchedule).filter_by(organization_id=m.organization_id,campaign_id=campaign_id).first()
     if not row:raise HTTPException(404,"Schedule not found")
+    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
+    if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.status=="running" or (row.lease_until and _utc(row.lease_until)>datetime.now(timezone.utc)):
         raise HTTPException(409,"Schedule is currently being processed")
     row.status="cancelled";row.next_run_at=None;row.lease_until=None
