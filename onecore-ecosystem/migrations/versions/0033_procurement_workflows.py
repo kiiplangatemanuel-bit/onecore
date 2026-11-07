@@ -133,6 +133,7 @@ def upgrade():
         sa.Column("matched_invoice_id", sa.Integer(), sa.ForeignKey("accounting_invoices.id")),
         sa.Column("matched_payment_id", sa.Integer(), sa.ForeignKey("accounting_invoice_payments.id")),
         sa.Column("matched_credit_note_id", sa.Integer(), sa.ForeignKey("accounting_credit_notes.id")),
+        sa.Column("matched_settlement_id", sa.Integer(), sa.ForeignKey("procurement_settlements.id")),
         sa.Column("matched_by", sa.Integer(), sa.ForeignKey("users.id")),
         sa.Column("matched_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
