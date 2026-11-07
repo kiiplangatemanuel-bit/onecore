@@ -455,11 +455,14 @@ def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = 
             db.commit()
             return True
         duplicate = db.query(ProcurementSettlement).filter(
-            ProcurementSettlement.organization_id == settlement.organization_id,
             ProcurementSettlement.provider_reference == receipt,
             ProcurementSettlement.id != settlement.id,
         ).first()
-        if duplicate:
+        cross_system_duplicate = (
+            db.query(MpesaPaymentIntent).filter_by(mpesa_receipt_number=receipt).first()
+            or db.query(MpesaRefundIntent).filter_by(mpesa_receipt_number=receipt).first()
+        )
+        if duplicate or cross_system_duplicate:
             settlement.status = "exception"
             settlement.provider_result_description = "M-Pesa receipt has already been used by another supplier settlement"
             db.commit()
@@ -1076,8 +1079,18 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
             id=payload.invoice_id, organization_id=membership.organization_id,
             supplier_id=statement.supplier_id, invoice_type="payable",
         ).first()
-        if not target or Decimal(target.total) != abs(Decimal(line.amount)):
-            raise HTTPException(422, "Invoice supplier or statement amount does not match")
+        duplicate_target = db.query(ProcurementSupplierStatementLine).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSupplierStatementLine.matched_invoice_id == payload.invoice_id,
+            ProcurementSupplierStatementLine.id != line.id,
+        ).first()
+        if (not target or Decimal(target.total) != abs(Decimal(line.amount))
+                or Decimal(line.amount) <= 0
+                or target.issue_date.date() < statement.start_date.date()
+                or target.issue_date.date() > statement.end_date.date()
+                or target.status not in {"posted", "partially_paid", "paid"}
+                or duplicate_target):
+            raise HTTPException(422, "Invoice supplier, period, sign, status or amount does not match the statement line")
         line.matched_invoice_id = target.id
     else:
         target = db.query(AccountingInvoicePayment).join(
@@ -1085,8 +1098,17 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
         ).filter(AccountingInvoicePayment.id == payload.payment_id,
                  AccountingInvoicePayment.organization_id == membership.organization_id,
                  AccountingInvoice.supplier_id == statement.supplier_id).first()
-        if not target or Decimal(target.amount) != abs(Decimal(line.amount)):
-            raise HTTPException(422, "Payment supplier or statement amount does not match")
+        duplicate_target = db.query(ProcurementSupplierStatementLine).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSupplierStatementLine.matched_payment_id == payload.payment_id,
+            ProcurementSupplierStatementLine.id != line.id,
+        ).first()
+        if (not target or Decimal(target.amount) != abs(Decimal(line.amount))
+                or Decimal(line.amount) >= 0
+                or target.payment_date.date() < statement.start_date.date()
+                or target.payment_date.date() > statement.end_date.date()
+                or duplicate_target):
+            raise HTTPException(422, "Payment supplier, period, sign or amount does not match the statement line")
         line.matched_payment_id = target.id
     if payload.credit_note_id:
         target = db.query(AccountingCreditNote).join(
@@ -1095,8 +1117,17 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
                  AccountingCreditNote.organization_id == membership.organization_id,
                  AccountingCreditNote.status == "posted",
                  AccountingInvoice.supplier_id == statement.supplier_id).first()
-        if not target or Decimal(target.total) != abs(Decimal(line.amount)):
-            raise HTTPException(422, "Credit note supplier or statement amount does not match")
+        duplicate_target = db.query(ProcurementSupplierStatementLine).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSupplierStatementLine.matched_credit_note_id == payload.credit_note_id,
+            ProcurementSupplierStatementLine.id != line.id,
+        ).first()
+        if (not target or Decimal(target.total) != abs(Decimal(line.amount))
+                or Decimal(line.amount) >= 0
+                or target.issue_date.date() < statement.start_date.date()
+                or target.issue_date.date() > statement.end_date.date()
+                or duplicate_target):
+            raise HTTPException(422, "Credit note supplier, period, sign or amount does not match the statement line")
         line.matched_credit_note_id = target.id
     line.matched_by = user.id
     line.matched_at = datetime.now(timezone.utc)
