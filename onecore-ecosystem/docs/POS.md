@@ -23,8 +23,8 @@ replays idempotent and conflicting reuse return HTTP 409.
 
 Shift close compares counted cash with opening float plus recorded cash tender and
 returns the variance. Credit tenders are stored as unsettled. Cash/card/bank are
-recorded tender types only; no acquiring gateway, M-Pesa, STK push or bank
-verification is connected.
+cash/card/bank tender records are manual; M-Pesa STK Push is available through
+the configured Safaricom Daraja integration and is settled only after verified callback.
 
 ## Sale receipts and returns
 
@@ -41,10 +41,10 @@ verification is connected.
 - Return stock is added through append-only inventory receipt movements in the
   original sale branch. Return IDs are tenant-unique and canonical request hashes
   protect safe retries; conflicting reuse returns HTTP 409.
-- Refund rows are accounting records only. `refunds_executed=false` is returned
-  because cash drawer payout or card/bank/M-Pesa gateway execution is not automated.
-- Return valuation uses the original stored sale line unit price. POS tax allocation,
-  discount allocation and accounting journal integration are not yet implemented.
+- Cash/card/bank refund rows remain operational records; M-Pesa refunds can be sent
+  through the Daraja B2C flow and are marked paid only after a successful result callback.
+- Return valuation uses the original tax-inclusive discounted line snapshots.
+  POS returns create a pending accounting bridge until every allocated payout is confirmed.
 
 ## Browser offline behavior
 
@@ -72,8 +72,9 @@ attestation.
   and cash drawer integration.
 - Cashier permissions, multi-user/multi-till shift reconciliation and approval
   thresholds beyond the manager permission on returns.
-- M-Pesa/card/bank gateway integrations, verified callbacks, settlement and
-  reconciliation. Manual tender/refund rows are not payment verification/execution.
+- Card/bank gateway integrations and automated settlement feeds remain future work.
+  M-Pesa requires approved Daraja credentials, a public HTTPS callback host and
+  production shortcode/B2C entitlements; sandbox CI does not prove live provider settlement.
 - Server-side stock reservations, supervisor review of stale offline stock conflicts,
   queue dead-letter/retry visibility, background sync and sync telemetry.
 - Bandwidth-aware catalogue refresh, crash recovery, cross-device/cross-branch
@@ -102,7 +103,9 @@ Partial and full returns now use the original tax-inclusive discounted line valu
 
 - Tax percentages are organization-configured product settings; no automatic KRA tax category mapping, VAT exemptions, withholding tax, eTIMS device certification, invoice numbering compliance or statutory filing is asserted.
 - Discounts are controlled by the existing `manage` permission, not a configurable threshold/approval matrix. Per-cashier discount limits and manager override PINs remain future work.
-- POS refunds remain accounting records only; no M-Pesa/card/bank/cash payout is executed.
+- M-Pesa B2C payout is supported for eligible refunds; cash/card/bank payout execution
+  remains manual. A B2C timeout is treated as an uncertain outcome and must be reconciled
+  with Safaricom before retrying to avoid duplicate disbursement.
 - The tax/discount calculation is tax-exclusive and rounds monetary line amounts to two decimal places. Confirm applicable product tax treatment with the organization's tax adviser before production use.
 
 
