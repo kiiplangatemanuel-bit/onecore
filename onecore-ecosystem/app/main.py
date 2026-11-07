@@ -112,18 +112,18 @@ async def platform_security_middleware(request, call_next):
     if not request_id or len(request_id) > 128 or any(ord(ch) < 32 for ch in request_id):
         request_id = str(uuid.uuid4())
 
+    client_ip = request.client.host if request.client else "unknown"
+    login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
+    response = None
     if settings.force_https and request.url.scheme != "https":
-        return JSONResponse({"detail": "HTTPS is required", "request_id": request_id}, status_code=400)
-
-    if request.url.path == "/api/v1/auth/login" and request.method == "POST":
-        client_ip = request.client.host if request.client else "unknown"
-        if not request.app.state.login_rate_limiter.allow(client_ip):
-            return JSONResponse(
-                {"detail": "Too many login attempts. Try again later.", "request_id": request_id},
-                status_code=429, headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
-            )
-
-    response = await call_next(request)
+        response = JSONResponse({"detail": "HTTPS is required", "request_id": request_id}, status_code=400)
+    elif login_request and not request.app.state.login_rate_limiter.allow(client_ip):
+        response = JSONResponse(
+            {"detail": "Too many login attempts. Try again later.", "request_id": request_id},
+            status_code=429, headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+        )
+    if response is None:
+        response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -131,12 +131,12 @@ async def platform_security_middleware(request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
         "img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; "
         "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
     )
     if request.url.scheme == "https":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
     if request.url.path.startswith("/api/v1/"):
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
