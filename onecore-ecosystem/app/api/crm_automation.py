@@ -86,7 +86,8 @@ def compile_rules(node,depth=0):
         raise HTTPException(422,"Audience rules must be nested all/any groups (maximum depth 3)")
     clauses=[]
     for group in ("all","any"):
-        items=node.get(group,[])
+        if group not in node:continue
+        items=node[group]
         if not isinstance(items,list) or not 1<=len(items)<=20:
             raise HTTPException(422,"Each audience group must contain 1–20 conditions")
         nested=[]
