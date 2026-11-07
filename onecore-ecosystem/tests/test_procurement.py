@@ -83,3 +83,15 @@ def test_requisition_models_and_workflow_routes_are_registered():
     assert "/api/v1/procurement/requisitions/{requisition_id}/submit" in paths
     assert "/api/v1/procurement/requisitions/{requisition_id}/approve" in paths
     assert "/api/v1/procurement/requisitions/{requisition_id}/reject" in paths
+
+
+def test_procurement_workspace_exposes_requisition_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "procurement.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="requisition"' in html
+    assert 'id="requisitions"' in html
+    assert "/procurement/requisitions" in html
+    assert "/submit" in html
+    assert "/approve" in html
+    assert "/reject" in html
