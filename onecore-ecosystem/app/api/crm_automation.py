@@ -1,5 +1,4 @@
 """CRM templates, saved audience segments and scheduled dispatch controls."""
-import re
 import secrets
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -14,7 +13,7 @@ from app.core.schemas import (CRMCampaignTemplateIn, CRMContactSegmentIn,
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch, branch_scope_ids
-from app.services.crm_audience import validate_segment_definition, apply_segment
+from app.services.crm_audience import validate_segment_definition, apply_segment, validate_template_text
 from app.api.crm_campaigns import dispatch_campaign
 
 router = APIRouter(prefix="/api/v1/crm", tags=["CRM campaign automation"])
@@ -30,21 +29,15 @@ def _campaign(db, campaign_id, membership):
     return row
 
 
-def _render(text, contact):
-    values = {"full_name": contact.full_name or "", "first_name": (contact.full_name or "").split(" ")[0],
-              "company": contact.company or "", "email": contact.email or "", "phone": contact.phone or ""}
-    def replace(match):
-        key = match.group(1)
-        if key not in VARIABLES:
-            raise HTTPException(422, f"Unsupported template variable: {key}")
-        return values[key]
-    return TOKEN.sub(replace, text or "")
-
-
 @router.post("/templates", status_code=201)
 def create_template(payload: CRMCampaignTemplateIn, membership=Depends(active_membership),
                     user: User=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "manage")
+    try:
+        validate_template_text(payload.subject)
+        validate_template_text(payload.body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     row = CRMCampaignTemplate(organization_id=membership.organization_id,
         name=payload.name.strip(), channel=payload.channel, purpose=payload.purpose,
         subject=payload.subject.strip(), body=payload.body.strip(),
@@ -74,6 +67,11 @@ def update_template(template_id: int, payload: CRMCampaignTemplateIn,
         id=template_id, organization_id=membership.organization_id, is_active=True
     ).first()
     if not row: raise HTTPException(404, "Template not found")
+    try:
+        validate_template_text(payload.subject)
+        validate_template_text(payload.body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     row.name=payload.name.strip(); row.channel=payload.channel; row.purpose=payload.purpose
     row.subject=payload.subject.strip(); row.body=payload.body.strip(); row.updated_by=user.id
     row.updated_at=datetime.now(timezone.utc)
@@ -208,7 +206,7 @@ def run_due_campaigns(x_crm_scheduler_secret: str | None = Header(None),
         membership=db.query(Membership).filter_by(
             organization_id=campaign.organization_id,user_id=campaign.created_by,is_active=True).first()
         user=db.get(User,campaign.created_by)
-        if not membership or not user or membership.role not in {"org_admin","branch_admin"}:
+        if not membership or not user or (membership.role or "").lower() != "org_admin":
             campaign.status="failed"
             db.commit()
             results.append({"campaign_id":campaign.id,"status":"failed","reason":"No active authorized campaign owner"})
