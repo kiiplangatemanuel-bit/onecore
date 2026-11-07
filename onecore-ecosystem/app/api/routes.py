@@ -1489,8 +1489,13 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     if existing:
         if existing.request_hash != request_hash:
             raise HTTPException(409, "Client transaction ID was already used for different sale data")
+        existing_payments = db.query(POSPayment).filter_by(
+            organization_id=membership.organization_id, sale_id=existing.id
+        ).order_by(POSPayment.id).all()
         return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
-                "status": "already_synced", "total_amount": str(existing.total_amount)}
+                "status": "already_synced", "total_amount": str(existing.total_amount),
+                "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                             for p in existing_payments]}
     shift = db.query(POSShift).filter_by(
         id=payload.shift_id, organization_id=membership.organization_id,
         branch_id=payload.branch_id, cashier_user_id=user.id, status="open"
