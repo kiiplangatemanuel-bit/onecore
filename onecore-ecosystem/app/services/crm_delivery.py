@@ -2,8 +2,16 @@
 import smtplib
 from email.message import EmailMessage
 import httpx
+from urllib.parse import urlsplit
 from fastapi import HTTPException
 from app.core.config import settings
+
+def build_unsubscribe_url(token, public_base_url):
+    base=(public_base_url or "").strip().rstrip("/")
+    parsed=urlsplit(base)
+    if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(503,"CRM_PUBLIC_BASE_URL must be configured with a public HTTPS URL")
+    return f"{base}/api/v1/crm/unsubscribe/{token}"
 
 def send_campaign_message(channel, address, subject, message, idempotency_key, unsubscribe_url=None):
     if channel == "email":
@@ -13,7 +21,9 @@ def send_campaign_message(channel, address, subject, message, idempotency_key, u
         mail["Subject"]=subject or "A message from us"; mail["X-OneCore-Idempotency-Key"]=idempotency_key
         body=message + (("\n\nUnsubscribe: "+unsubscribe_url) if unsubscribe_url else "")
         mail.set_content(body)
-        if unsubscribe_url: mail["List-Unsubscribe"]=f"<{unsubscribe_url}>"
+        if unsubscribe_url:
+            mail["List-Unsubscribe"]=f"<{unsubscribe_url}>"
+            mail["List-Unsubscribe-Post"]="List-Unsubscribe=One-Click"
         with smtplib.SMTP(settings.email_host, settings.email_port, timeout=20) as server:
             server.starttls()
             if settings.email_username: server.login(settings.email_username, settings.email_password)
