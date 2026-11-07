@@ -3561,6 +3561,10 @@ def create_hr_payroll_profile(payload: HRPayrollProfileIn,
     ).first()
     if not employee or not can_access_branch(membership, employee.branch_id):
         raise HTTPException(404, "Active employee not found")
+    if payload.effective_from < employee.start_date:
+        raise HTTPException(422, "Payroll profile cannot start before the employee start date")
+    if employee.end_date and (payload.effective_to is None or payload.effective_to > employee.end_date):
+        raise HTTPException(422, "Payroll profile must end no later than the employee end date")
     q = db.query(HRPayrollProfile).filter(
         HRPayrollProfile.organization_id == membership.organization_id,
         HRPayrollProfile.employee_id == employee.id,
