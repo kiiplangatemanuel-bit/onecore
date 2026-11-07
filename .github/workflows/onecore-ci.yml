@@ -25,6 +25,12 @@ jobs:
       - name: Install dependencies
         working-directory: onecore-ecosystem
         run: python -m pip install -r requirements.txt
+      - name: Apply database migrations
+        working-directory: onecore-ecosystem
+        run: alembic upgrade head
+      - name: Verify migration downgrade and upgrade
+        working-directory: onecore-ecosystem
+        run: alembic downgrade base && alembic upgrade head
       - name: Compile Python modules
         run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests
       - name: Run tests
