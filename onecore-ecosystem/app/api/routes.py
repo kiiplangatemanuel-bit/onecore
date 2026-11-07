@@ -3644,12 +3644,8 @@ def school_learner_fee_account(learner_id:int,membership=Depends(active_membersh
         id=learner_id,organization_id=membership.organization_id).first()
     if not learner or not can_access_branch(membership,learner.branch_id):
         raise HTTPException(404,"Learner not found")
-    linked=db.query(HREmployee).filter_by(
-        organization_id=membership.organization_id,user_id=user.id,status="active"
-    ).first()
-    if not linked:
-        # Guardian access is not implemented; learner fee accounts are manager-only.
-        require_permission(membership,"manage")
+    # Guardian identity linking/portal is not implemented; fee accounts are manager-only.
+    require_permission(membership,"manage")
     charges=db.query(SchoolFeeCharge).filter_by(
         organization_id=membership.organization_id,learner_id=learner.id
     ).order_by(SchoolFeeCharge.due_date,SchoolFeeCharge.id).all()
