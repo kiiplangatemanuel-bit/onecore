@@ -40,3 +40,12 @@ def test_qualifying_pension_and_other_allowable_deductions_are_capped():
     assert Decimal(result["mortgage_interest"]) == Decimal("30000.00")
     assert Decimal(result["post_retirement_medical_fund"]) == Decimal("15000.00")
     assert Decimal(result["insurance_relief"]) == Decimal("5000.00")
+
+
+def test_non_cash_taxable_benefit_increases_taxable_pay_not_cash_net():
+    cash = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES)
+    with_benefit = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                           {"taxable_benefits": "12000"})
+    assert Decimal(with_benefit["gross_pay"]) == Decimal(cash["gross_pay"])
+    assert Decimal(with_benefit["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("12000.00")
+    assert Decimal(with_benefit["net_pay"]) < Decimal(cash["net_pay"])
