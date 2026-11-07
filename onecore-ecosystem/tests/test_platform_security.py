@@ -56,3 +56,35 @@ def test_readiness_endpoint_checks_database():
         response = client.get("/ready")
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+
+def test_production_settings_require_secure_values():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    safe = dict(
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        cors_origins="https://app.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
+    Settings(_env_file=None, **safe)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{**safe, "secret_key": "unsafe-development-key-change-me"})
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{**safe, "cors_origins": "*"})
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{**safe, "database_url": "sqlite:///./onecore.db"})
+
+
+def test_bootstrap_credentials_must_be_explicit_and_strong():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, bootstrap_admin_email="admin@example.com")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, bootstrap_admin_email="admin@example.com",
+                 bootstrap_admin_password="short")
