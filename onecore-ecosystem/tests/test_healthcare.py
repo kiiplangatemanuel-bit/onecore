@@ -24,6 +24,9 @@ def test_healthcare_patient_contract_normalizes_names_and_validates_contacts():
         HealthcarePatientIn(patient_number="x", first_name="Ada", last_name="Patient")
     with pytest.raises(ValidationError):
         HealthcarePatientIn(patient_number="PT-2", first_name=" ", last_name="Patient")
+    with pytest.raises(ValidationError):
+        HealthcarePatientIn(patient_number="PT-3", first_name="Future", last_name="Patient",
+                            date_of_birth=date.today() + timedelta(days=1))
 
 
 def test_appointment_requires_timezone_and_positive_duration():
@@ -67,6 +70,7 @@ def test_encounter_requires_a_chief_complaint():
 def test_healthcare_models_and_api_routes_are_registered():
     assert HealthcarePatient.__tablename__ == "healthcare_patients"
     assert HealthcareAppointment.__tablename__ == "healthcare_appointments"
+    assert HealthcareAppointment.__table__.c.status_note.default.arg == ""
     assert HealthcareEncounter.__tablename__ == "healthcare_encounters"
     paths = set(app.openapi()["paths"])
     assert "/api/v1/healthcare/patients" in paths
