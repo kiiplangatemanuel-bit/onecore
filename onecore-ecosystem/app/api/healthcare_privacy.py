@@ -21,7 +21,7 @@ ROLE_PERMISSIONS={
         "appointment.manage","access.manage","consent.manage","audit.read","breakglass"},
     "clinician":{"patient.read","clinical.read","clinical.write","appointment.manage","breakglass"},
     "nurse":{"patient.read","clinical.read","appointment.manage","breakglass"},
-    "receptionist":{"patient.register","patient.read","appointment.manage"},
+    "receptionist":{"patient.register","appointment.manage"},
     "privacy_officer":{"access.manage","consent.manage","audit.read"},
     "clinical_auditor":{"patient.read","clinical.read","audit.read"},
     "lab_technician":{"patient.read","clinical.read"},
