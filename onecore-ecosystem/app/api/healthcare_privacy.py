@@ -81,7 +81,8 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
         try:
             expires=datetime.fromisoformat(str(payload["expires_at"]).replace("Z","+00:00"))
             if expires.tzinfo is None or expires<=datetime.now(timezone.utc): raise ValueError()
-        except Exception: raise HTTPException(422,"expires_at must be a future timezone-aware timestamp")\n    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id,expires_at=expires)
+        except Exception: raise HTTPException(422,"expires_at must be a future timezone-aware timestamp")
+    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id,expires_at=expires)
     db.add(g); audit(db,p,m,u,"access_granted",str(uid)); return {"grant_id":g.id}
 
 @router.post("/patients/{patient_id}/encounters")
