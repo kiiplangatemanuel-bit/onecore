@@ -76,6 +76,13 @@ class DelegationIn(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
 
 
+class ApprovalEscalationIn(BaseModel):
+    principal_user_id: int = Field(gt=0)
+    escalation_to_user_id: int = Field(gt=0)
+    reason: str = Field(min_length=5, max_length=500)
+    validity_hours: int = Field(default=24, ge=1, le=168)
+
+
 class PortalTokenIn(BaseModel):
     supplier_id: int = Field(gt=0)
     expires_at: datetime
@@ -602,6 +609,80 @@ def revoke_approval_delegation(delegation_id: int, membership=Depends(active_mem
         audit(db, user.id, membership.organization_id, "procurement.approval.delegation.revoked",
               "procurement_approval_delegation", row.id)
     return {"id": row.id, "status": "revoked"}
+
+
+
+
+@router.post("/orders/{order_id}/escalate-approval", status_code=201)
+def escalate_purchase_order_approval(order_id: int, payload: ApprovalEscalationIn,
+                                     membership=Depends(active_membership), user: User = Depends(current_user),
+                                     db: Session = Depends(get_db)):
+    """Create a time-limited substitution to a higher-level approver for the next outstanding tier."""
+    require_permission(membership, "manage")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Purchase order not found")
+    if order.status != "draft":
+        raise HTTPException(409, "Only a draft purchase order awaiting approval can be escalated")
+    principal = db.query(Membership).filter_by(
+        organization_id=membership.organization_id, user_id=payload.principal_user_id, is_active=True
+    ).first()
+    target = db.query(Membership).filter_by(
+        organization_id=membership.organization_id, user_id=payload.escalation_to_user_id, is_active=True
+    ).first()
+    if not principal or not target or principal.user_id == target.user_id:
+        raise HTTPException(422, "Escalation principal and target must be distinct active organization members")
+    if order.branch_id and any(
+        member.branch_scope != "*" and order.branch_id not in {v.strip() for v in member.branch_scope.split(",")}
+        for member in (principal, target)
+    ):
+        raise HTTPException(403, "Both approvers must have access to the purchase-order branch")
+    lines = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).all()
+    amount = sum((Decimal(x.quantity_ordered) * Decimal(x.unit_cost) for x in lines), Decimal("0.00"))
+    rules = db.query(ProcurementApprovalRule).filter(
+        ProcurementApprovalRule.organization_id == membership.organization_id,
+        ProcurementApprovalRule.is_active == True,
+        ProcurementApprovalRule.minimum_amount <= amount,
+    ).order_by(ProcurementApprovalRule.approval_level).all()
+    rules = [x for x in rules if x.maximum_amount is None or amount <= x.maximum_amount]
+    actions = db.query(ProcurementApprovalAction).filter_by(
+        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
+    ).all()
+    approved = {x.approval_level for x in actions if x.action == "approved"}
+    next_rule = next((x for x in rules if x.approval_level not in approved), None)
+    if not next_rule or principal.role != next_rule.approver_role:
+        raise HTTPException(403, "Principal is not the approver for the next outstanding tier")
+    hierarchy = {"staff": 0, "accountant": 1, "manager": 2, "branch_admin": 3, "org_admin": 4}
+    if hierarchy.get(target.role, -1) <= hierarchy.get(principal.role, -1):
+        raise HTTPException(422, "Escalation target must have a higher approval authority than the principal")
+    now = datetime.now(timezone.utc)
+    ends = now + timedelta(hours=payload.validity_hours)
+    overlap = db.query(ProcurementApprovalDelegation).filter(
+        ProcurementApprovalDelegation.organization_id == membership.organization_id,
+        ProcurementApprovalDelegation.principal_user_id == principal.user_id,
+        ProcurementApprovalDelegation.revoked_at.is_(None),
+        ProcurementApprovalDelegation.starts_at < ends,
+        ProcurementApprovalDelegation.ends_at > now,
+    ).first()
+    if overlap:
+        raise HTTPException(409, "Principal already has an active or overlapping delegation")
+    row = ProcurementApprovalDelegation(
+        organization_id=membership.organization_id, branch_id=order.branch_id,
+        principal_user_id=principal.user_id, delegate_user_id=target.user_id,
+        starts_at=now, ends_at=ends, reason=("Escalation for PO " + order.order_number + ": " + payload.reason.strip())[:500],
+        created_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.purchase_order.escalated",
+          "purchase_order", order.id, f"delegation:{row.id};from:{principal.user_id};to:{target.user_id}")
+    return {"order_id": order.id, "delegation_id": row.id, "principal_user_id": principal.user_id,
+            "escalated_to_user_id": target.user_id, "approval_level": next_rule.approval_level,
+            "expires_at": ends.isoformat(), "status": "escalated"}
 
 
 @router.post("/orders/{order_id}/approve-as-delegate")
@@ -1250,6 +1331,78 @@ def resolve_supplier_invoice_discrepancy(discrepancy_id: int, payload: Discrepan
     audit(db, user.id, membership.organization_id, "procurement.invoice.discrepancy.resolved",
           "supplier_invoice_discrepancy", row.id, row.resolution_note)
     return {"id": row.id, "status": row.status}
+
+
+
+
+@router.post("/invoice-discrepancies/{discrepancy_id}/auto-resolve")
+def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
+                                              membership=Depends(active_membership),
+                                              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Resolve only when a fresh source-to-AP reconciliation proves the recorded discrepancy is no longer present."""
+    require_permission(membership, "manage")
+    row = db.query(ProcurementInvoiceDiscrepancy).filter_by(
+        id=discrepancy_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Invoice discrepancy not found")
+    if row.status == "resolved":
+        return {"id": row.id, "status": "already_resolved"}
+    source = db.query(ProcurementSupplierInvoice).filter_by(
+        id=row.supplier_invoice_id, organization_id=membership.organization_id
+    ).first()
+    if not source or source.status not in {"matched", "accounted"}:
+        raise HTTPException(409, "Source supplier invoice is not in a matched/accounted state")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=source.purchase_order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Invoice discrepancy not found")
+    source_lines = db.query(ProcurementSupplierInvoiceLine).filter_by(
+        organization_id=membership.organization_id, invoice_id=source.id
+    ).all()
+    po_lines = {x.id: x for x in db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).all()}
+    valid = bool(source_lines)
+    for line in source_lines:
+        po_line = po_lines.get(line.purchase_order_line_id)
+        if not po_line or Decimal(line.unit_cost) != Decimal(po_line.unit_cost):
+            valid = False
+            break
+        if Decimal(line.quantity) <= 0:
+            valid = False
+            break
+    ap_link = db.query(AccountingProcurementLink).filter_by(
+        organization_id=membership.organization_id, procurement_invoice_id=source.id
+    ).first()
+    ap = db.query(AccountingInvoice).filter_by(
+        id=ap_link.accounting_invoice_id, organization_id=membership.organization_id
+    ).first() if ap_link else None
+    source_total = Decimal(source.subtotal) + Decimal(source.tax_total)
+    if source.status == "accounted" and (not ap or Decimal(ap.total) != source_total):
+        valid = False
+    if row.code == "tax" and Decimal(source.tax_total) < 0:
+        valid = False
+    if row.code == "duplicate":
+        duplicate_count = db.query(ProcurementSupplierInvoice).filter_by(
+            organization_id=membership.organization_id, supplier_id=source.supplier_id,
+            invoice_number=source.invoice_number,
+        ).count()
+        if duplicate_count != 1:
+            valid = False
+    if not valid:
+        return {"id": row.id, "status": "open", "auto_resolved": False,
+                "message": "Current PO, invoice and AP evidence still contains a discrepancy; manual correction and review are required"}
+    row.status = "resolved"
+    row.resolution_note = "Automatically resolved after source purchase-order and supplier invoice reconciliation passed"
+    row.resolved_by = user.id
+    row.resolved_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.invoice.discrepancy.auto_resolved",
+          "supplier_invoice_discrepancy", row.id, row.resolution_note)
+    return {"id": row.id, "status": "resolved", "auto_resolved": True,
+            "resolution_note": row.resolution_note}
 
 
 @router.get("/accounting-reconciliation")
