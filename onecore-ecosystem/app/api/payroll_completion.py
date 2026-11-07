@@ -171,7 +171,9 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
         except ValueError:
             certificate_valid = False
     disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid and resident else ZERO
-    taxable_benefits = money(extra.get("taxable_benefits", 0))
+    declared_noncash_benefits = money(extra.get("non_cash_benefits", 0))
+    taxable_benefits = money(extra.get("taxable_benefits", 0)) + max(
+        ZERO, money(declared_noncash_benefits - D(str(cfg["paye"].get("noncash_benefit_exemption_monthly", "5000")))))
     taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
@@ -221,7 +223,7 @@ KENYA_2026_RULES = {
     ],
     "parameters": {
         "paye": {
-            "meal_benefit_exemption_monthly": "5000", "disability_exemption_monthly": "150000",
+            "meal_benefit_exemption_monthly": "5000", "noncash_benefit_exemption_monthly": "5000", "disability_exemption_monthly": "150000",
             "bands": [
                 {"lower": "0", "upper": "24000", "rate": "0.10"},
                 {"lower": "24000", "upper": "32333", "rate": "0.25"},
@@ -367,6 +369,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         cash_allowances = money(extras.get("cash_allowances", 0))
         regular_allowances = money(extras.get("regular_cash_allowances", 0))
         taxable_benefits = money(extras.get("taxable_benefits", 0))
+        noncash_benefits = money(extras.get("non_cash_benefits", 0))
         meal_benefit = money(extras.get("meal_benefit", 0))
         gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + regular_allowances + meal_benefit)
         statutory_base = money(prorated_base + regular_allowances)
@@ -384,7 +387,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
-                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit), "regular_cash_allowances": str(regular_allowances)}, "statutory_contribution_bases": {"nssf": extras["nssf_pensionable_base"], "shif": extras["shif_contribution_base"], "housing_levy": extras["housing_levy_contribution_base"]}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "non_cash_benefits": str(noncash_benefits), "meal_benefit": str(meal_benefit), "regular_cash_allowances": str(regular_allowances)}, "statutory_contribution_bases": {"nssf": extras["nssf_pensionable_base"], "shif": extras["shif_contribution_base"], "housing_levy": extras["housing_levy_contribution_base"]}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
