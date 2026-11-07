@@ -304,14 +304,23 @@ def create_attribution(campaign_id:int,payload:dict,m=Depends(active_membership)
     if len(currency)!=3 or not currency.isalpha() or not currency.isupper():raise HTTPException(422,"Invalid currency")
     contact=db.query(CRMContact).filter_by(id=contact_id,organization_id=m.organization_id).first()
     if not contact or not can_access_branch(m,contact.branch_id):raise HTTPException(404,"Contact not found")
+    if campaign.branch_id and contact.branch_id and campaign.branch_id!=contact.branch_id:
+        raise HTTPException(422,"Campaign and contact must belong to the same branch")
     lead=None
     if lead_id:
         lead=db.query(CRMLead).filter_by(id=lead_id,organization_id=m.organization_id,contact_id=contact_id).first()
         if not lead or not can_access_branch(m,lead.branch_id):raise HTTPException(404,"Lead not found")
+        if lead.branch_id and contact.branch_id and lead.branch_id!=contact.branch_id:
+            raise HTTPException(422,"Lead and contact must belong to the same branch")
+        if lead.source_campaign_id and lead.source_campaign_id!=campaign.id:
+            raise HTTPException(409,"Lead is attributed to a different originating campaign")
     if order_id:
-        order=db.query(CRMSalesOrder).filter_by(id=order_id,organization_id=m.organization_id,contact_id=contact_id).first()
+        order=db.query(CRMSalesOrder).filter_by(id=order_id,organization_id=m.organization_id,contact_id=contact_id).with_for_update().first()
         if not order or (lead_id and order.lead_id!=lead_id) or not can_access_branch(m,order.branch_id):
             raise HTTPException(404,"Sales order not found")
+        if campaign.branch_id and order.branch_id and campaign.branch_id!=order.branch_id:
+            raise HTTPException(422,"Campaign and sales order must belong to the same branch")
+        if order.currency!=currency:raise HTTPException(422,"Attribution currency must match the sales order currency")
     elif event in {"sales_order_confirmed","order_won","invoice_paid"}:raise HTTPException(422,"Sales-order and invoice events require a sales order")
     existing=db.query(CRMCampaignAttribution).filter_by(organization_id=m.organization_id,idempotency_key=key).first()
     if existing:return {"id":existing.id,"duplicate":True}
