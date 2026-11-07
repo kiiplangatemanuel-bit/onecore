@@ -181,10 +181,10 @@ def test_hospital_workspace_and_migration_are_present():
     from pathlib import Path
     root=Path(__file__).resolve().parents[1]
     page=root/"app"/"web"/"healthcare_hospital.html"
-    migration=root/"migrations"/"versions"/"0033_healthcare_hospital_operations.py"
+    migration=root/"migrations"/"versions"/"0036_healthcare_hospital_operations.py"
     assert page.exists() and migration.exists()
     html=page.read_text(encoding="utf-8")
     assert "/admissions" in html and "/occupancy" in html
     assert "X-Organization-ID" in html
     migration_text=migration.read_text(encoding="utf-8")
-    assert 'down_revision = "0032_crm_forecast_attribution"' in migration_text
+    assert 'down_revision = "0035_pos_offline_loyalty_devices"' in migration_text
