@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.api.mpesa import normalize_phone, stk_password
 from app.core.models import MpesaPaymentIntent, MpesaRefundIntent
+from app.core.schemas import POSPaymentIn, POSRefundIn
 from app.main import app
 
 
@@ -46,3 +47,19 @@ def test_pos_workspace_exposes_m_pesa_collection_and_refund_controls():
     assert 'name="refund_phone"' in source
     assert "/stk-push" in source
     assert "/b2c" in source
+
+
+
+def test_pos_payment_and_refund_schemas_accept_mpesa_tender():
+    payment = POSPaymentIn(method="mpesa", amount="125.00")
+    refund = POSRefundIn(method="mpesa", amount="125.00")
+    assert payment.method == "mpesa"
+    assert refund.method == "mpesa"
+
+
+def test_pos_workspace_keeps_safe_retry_for_mpesa_payout():
+    from pathlib import Path
+    html = Path(__file__).resolve().parents[1] / "app" / "web" / "pos.html"
+    source = html.read_text(encoding="utf-8")
+    assert "Retry the same refund; do not create another return." in source
+    assert "Check / retry after Safaricom responds." in source
