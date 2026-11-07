@@ -133,3 +133,12 @@ def test_invoice_approval_and_credit_note_contracts_and_routes():
     assert "/api/v1/accounting/invoices/{invoice_id}/approval-decision" in paths
     assert "/api/v1/accounting/invoices/{invoice_id}/credit-notes" in paths
     assert "/api/v1/accounting/credit-notes" in paths
+
+
+def test_fiscal_period_close_check_endpoint_is_registered():
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/accounting/fiscal-periods/{period_id}/close-check" in paths
+    operation = app.openapi()["paths"][
+        "/api/v1/accounting/fiscal-periods/{period_id}/close-check"
+    ]["get"]
+    assert {item["name"] for item in operation["parameters"]} >= {"period_id"}

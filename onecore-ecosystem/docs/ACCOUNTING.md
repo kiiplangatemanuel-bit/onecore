@@ -221,3 +221,24 @@ This increment adds approval and credit-note persistence in migration
 0017_accounting_approvals_credit_notes. It does not yet include multi-level
 accounting approvals, PDF/email credit-note delivery, a dedicated approval
 dashboard, or refund/disbursement processing.
+
+
+## Fiscal period close controls
+
+The close-check endpoint provides a pre-close checklist for a configured period.
+It reports counts for draft invoices, pending invoice approvals, draft credit
+notes, draft journals, unreconciled bank statements overlapping the period, and
+posted journals whose debit and credit totals do not balance.
+
+- GET /api/v1/accounting/fiscal-periods/{id}/close-check
+- POST /api/v1/accounting/fiscal-periods/{id}/close
+
+The close action now refuses to lock a period while any checklist blocker remains
+and returns machine-readable blocker codes and counts. Resolve the reported work,
+re-run the checklist, and close only when ready_to_close is true. The endpoint is
+read-only and does not create or alter accounting entries.
+
+This is an operational close checklist, not a complete statutory close process:
+it does not yet perform retained-earnings transfer, tax filing validation,
+subledger-to-control-account reconciliation, depreciation completeness
+certification, management sign-off or a formal close pack.
