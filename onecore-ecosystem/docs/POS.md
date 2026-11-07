@@ -171,6 +171,17 @@ timeouts are ambiguous provider outcomes; reconcile the transaction with Safaric
 before any manual retry. Only a definitive provider rejection/failure is eligible
 for a new attempt.
 
+A callback may arrive before the initiation HTTP response is saved. The one-time
+callback token can bind that first callback to its provider checkout/conversation ID,
+and the later initiation response is checked against the callback-bound ID instead
+of overwriting a completed result. This preserves successful collections/refunds
+even when the provider response races the callback or the client connection drops.
+
+M-Pesa receipt references are unique within an organization for payment tenders and
+refund allocations. A receipt already allocated elsewhere is quarantined as an
+exception and cannot settle a second transaction. A B2C request whose provider
+correlation IDs are missing is retained as unknown and cannot be retried automatically.
+
 A successful STK callback must include the exact checkout request ID, payer phone,
 whole-KES amount and a receipt. A successful B2C callback must include the expected
 conversation ID, exact transaction amount and a receipt. Missing or mismatched
