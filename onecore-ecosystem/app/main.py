@@ -59,6 +59,11 @@ def crm_ui():
     page = Path(__file__).resolve().parent / "web" / "crm.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
+@app.get("/sacco/finance", response_class=HTMLResponse)
+def sacco_finance_ui():
+    page = Path(__file__).resolve().parent / "web" / "sacco_finance.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
+
 @app.get("/sacco", response_class=HTMLResponse)
 def sacco_ui():
     page = Path(__file__).resolve().parent / "web" / "sacco.html"
