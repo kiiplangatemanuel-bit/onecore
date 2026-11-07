@@ -76,7 +76,12 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
     from app.core.models import Membership
     member=db.query(Membership).filter_by(user_id=uid,organization_id=m.organization_id,is_active=True).first()
     if not member: raise HTTPException(422,"User is not an active member of this organization")
-    expires=None\n    if payload.get("expires_at"):\n        try:\n            expires=datetime.fromisoformat(str(payload["expires_at"]).replace("Z","+00:00"))\n            if expires.tzinfo is None or expires<=datetime.now(timezone.utc): raise ValueError()\n        except Exception: raise HTTPException(422,"expires_at must be a future timezone-aware timestamp")\n    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id,expires_at=expires)
+    expires=None
+    if payload.get("expires_at"):
+        try:
+            expires=datetime.fromisoformat(str(payload["expires_at"]).replace("Z","+00:00"))
+            if expires.tzinfo is None or expires<=datetime.now(timezone.utc): raise ValueError()
+        except Exception: raise HTTPException(422,"expires_at must be a future timezone-aware timestamp")\n    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id,expires_at=expires)
     db.add(g); audit(db,p,m,u,"access_granted",str(uid)); return {"grant_id":g.id}
 
 @router.post("/patients/{patient_id}/encounters")
