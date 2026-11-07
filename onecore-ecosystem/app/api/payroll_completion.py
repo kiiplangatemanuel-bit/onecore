@@ -244,6 +244,19 @@ def _assert_batch_branch_scope(db, membership, batch):
         raise HTTPException(403, "Payment batch contains employees outside your assigned branch scope")
 
 
+def _assert_run_branch_scope(db, membership, run_id):
+    allowed = branch_scope_ids(membership)
+    if allowed is None:
+        return
+    if not allowed:
+        raise HTTPException(403, "No branch access is assigned")
+    lines = db.query(HRPayrollLine).filter_by(
+        organization_id=membership.organization_id, run_id=run_id
+    ).all()
+    if not lines or any(line.branch_id not in allowed for line in lines):
+        raise HTTPException(403, "Payroll run contains employees outside your assigned branch scope")
+
+
 # Verified published parameters. Changes are new effective-dated records, never edits
 # to a rule set already used by a payroll snapshot.
 KENYA_2026_RULES = {
@@ -481,6 +494,7 @@ def approve_calculation(run_id: int, payload: dict=Body(default={}), membership=
     run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
     if not run or run.status != "calculated":
         raise HTTPException(409, "Only a calculated run can be approved")
+    _assert_run_branch_scope(db, membership, run.id)
     if run.created_by == user.id:
         raise HTTPException(403, "Maker cannot approve own payroll")
     snaps = [r for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
@@ -502,6 +516,7 @@ def create_payment_batch(run_id: int, payload: dict=Body(...), membership=Depend
     run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
     if not run or run.status != "approved":
         raise HTTPException(409, "Payroll must be approved before payment preparation")
+    _assert_run_branch_scope(db, membership, run.id)
     method = payload.get("method")
     if method not in ("bank", "mpesa"):
         raise HTTPException(422, "Payment method must be bank or mpesa")
@@ -824,6 +839,7 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
     run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
     if not run or run.status != "approved":
         raise HTTPException(409, "Only an approved payroll can be posted to accounting")
+    _assert_run_branch_scope(db, membership, run.id)
     if _record(db, membership.organization_id, "payroll_journal").filter(Record.data["run_id"].as_integer() == run_id).first():
         raise HTTPException(409, "Payroll journal already exists; use a reversal for corrections")
     snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
