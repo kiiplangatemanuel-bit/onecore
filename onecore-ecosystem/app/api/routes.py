@@ -1279,6 +1279,7 @@ def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_
     if not supplier or not order:raise HTTPException(404,"Supplier or purchase order not found")
     _procurement_branch_check(db,membership,order.branch_id)
     if order.status not in {"received","partially_received"}:raise HTTPException(409,"Only received purchase orders can be invoiced")
+    if payload.currency!=order.currency:raise HTTPException(409,"Invoice currency must match the purchase order currency")
     subtotal=Decimal("0")
     for line in payload.lines:
         po=db.query(ProcurementPurchaseOrderLine).filter_by(id=line.purchase_order_line_id,purchase_order_id=order.id,organization_id=membership.organization_id).first()
