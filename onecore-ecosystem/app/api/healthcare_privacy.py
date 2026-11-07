@@ -250,6 +250,19 @@ def grant_patient_access(patient_id:int,payload:HealthcarePatientGrantIn,members
         "permissions":row.permissions,"expires_at":row.expires_at.isoformat() if row.expires_at else None}
 
 
+@router.get("/patients/{patient_id}/access-grants")
+def list_patient_access_grants(patient_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    patient=_patient(db,membership,patient_id)
+    _authorize(db,membership,user,"access.manage",patient.branch_id)
+    rows=db.query(HealthcarePatientAccessGrant).filter_by(
+        organization_id=membership.organization_id,patient_id=patient.id).order_by(
+        HealthcarePatientAccessGrant.id.desc()).all()
+    return [{"id":x.id,"user_id":x.user_id,"permissions":x.permissions,"reason":x.reason,
+        "created_at":x.created_at.isoformat(),"expires_at":x.expires_at.isoformat() if x.expires_at else None,
+        "revoked_at":x.revoked_at.isoformat() if x.revoked_at else None} for x in rows]
+
+
 @router.post("/patients/{patient_id}/access-grants/{grant_id}/revoke")
 def revoke_patient_access(patient_id:int,grant_id:int,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
