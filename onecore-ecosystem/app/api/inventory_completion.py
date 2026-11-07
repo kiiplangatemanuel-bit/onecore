@@ -245,8 +245,14 @@ def receive_transfer(transfer_id:int,membership=Depends(active_membership),user:
 def list_transfers(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
     rows=db.query(InventoryTransfer).filter_by(organization_id=membership.organization_id).order_by(InventoryTransfer.id.desc()).limit(500).all()
-    return [{"id":x.id,"transfer_number":x.transfer_number,"status":x.status,"tracking_reference":x.tracking_reference,
-        "source_warehouse_id":x.source_warehouse_id,"destination_warehouse_id":x.destination_warehouse_id} for x in rows]
+    visible=[]
+    for x in rows:
+        source=db.query(InventoryWarehouse).filter_by(id=x.source_warehouse_id,organization_id=membership.organization_id).first()
+        destination=db.query(InventoryWarehouse).filter_by(id=x.destination_warehouse_id,organization_id=membership.organization_id).first()
+        if source and destination and can_access_branch(membership,source.branch_id) and can_access_branch(membership,destination.branch_id):
+            visible.append({"id":x.id,"transfer_number":x.transfer_number,"status":x.status,"tracking_reference":x.tracking_reference,
+                "source_warehouse_id":x.source_warehouse_id,"destination_warehouse_id":x.destination_warehouse_id})
+    return visible
 
 
 @router.post("/reservations",status_code=201)
@@ -296,7 +302,10 @@ def expire_reservations(membership=Depends(active_membership),user:User=Depends(
 @router.get("/reservations")
 def list_reservations(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    rows=db.query(InventoryReservation).filter_by(organization_id=membership.organization_id).order_by(InventoryReservation.id.desc()).limit(1000).all()
+    q=db.query(InventoryReservation).join(InventoryWarehouse,InventoryWarehouse.id==InventoryReservation.warehouse_id).filter(InventoryReservation.organization_id==membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: q=q.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else q.filter(False)
+    rows=q.order_by(InventoryReservation.id.desc()).limit(1000).all()
     return [{"id":x.id,"warehouse_id":x.warehouse_id,"product_id":x.product_id,"source_type":x.source_type,
         "source_reference":x.source_reference,"quantity":str(x.quantity),"status":x.status,"expires_at":x.expires_at.isoformat()} for x in rows]
 
@@ -388,10 +397,12 @@ def update_batch_status(batch_id:int,payload:BatchStatusIn,membership=Depends(ac
 @router.get("/batches")
 def list_batches(product_id:int|None=None,warehouse_id:int|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    q=db.query(InventoryBatch).filter_by(organization_id=membership.organization_id)
-    if product_id:q=q.filter_by(product_id=product_id)
+    q=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(InventoryBatch.organization_id==membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: q=q.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else q.filter(False)
+    if product_id:q=q.filter(InventoryBatch.product_id==product_id)
     if warehouse_id:
-        wh=get_warehouse(db,membership.organization_id,warehouse_id,membership);q=q.filter_by(warehouse_id=wh.id)
+        wh=get_warehouse(db,membership.organization_id,warehouse_id,membership);q=q.filter(InventoryBatch.warehouse_id==wh.id)
     rows=q.order_by(InventoryBatch.expiry_date.asc().nullslast(),InventoryBatch.id).limit(2000).all()
     return [{"id":x.id,"warehouse_id":x.warehouse_id,"product_id":x.product_id,"lot_number":x.lot_number,"serial_number":x.serial_number,
         "expiry_date":x.expiry_date.date().isoformat() if x.expiry_date else None,"quantity_on_hand":str(x.quantity_on_hand),
@@ -437,7 +448,10 @@ def approve_stocktake(stocktake_id:int,membership=Depends(active_membership),use
 @router.get("/stocktakes")
 def list_stocktakes(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    rows=db.query(InventoryStocktake).filter_by(organization_id=membership.organization_id).order_by(InventoryStocktake.id.desc()).limit(500).all()
+    q=db.query(InventoryStocktake).join(InventoryWarehouse,InventoryWarehouse.id==InventoryStocktake.warehouse_id).filter(InventoryStocktake.organization_id==membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: q=q.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else q.filter(False)
+    rows=q.order_by(InventoryStocktake.id.desc()).limit(500).all()
     return [{"id":x.id,"warehouse_id":x.warehouse_id,"status":x.status,"note":x.note,"created_at":x.created_at.isoformat()} for x in rows]
 
 
