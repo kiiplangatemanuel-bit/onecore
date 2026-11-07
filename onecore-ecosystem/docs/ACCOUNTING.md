@@ -167,3 +167,20 @@ bank-provider APIs, direct bank feeds, automatic fuzzy matching, CSV/XLSX upload
 statement file parsing, bank account verification or live bank connectivity.
 Unmatched bank charges/fees must first be entered into the ledger before the
 statement can reconcile. Manual match workflows require finance operator review.
+
+
+## Customer and supplier statements
+
+The counterparty statement endpoint builds a chronological statement from posted,
+partially paid and paid invoices plus their recorded settlements. It is scoped to
+the active organization and branch permissions. Draft invoices are excluded.
+Opening balance includes posted activity before the requested start date; the
+transaction list includes activity inside the requested date range.
+
+- GET /api/v1/accounting/statements/customer/{contact_id}?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+- GET /api/v1/accounting/statements/supplier/{supplier_id}?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+The response includes counterparty identity, currency, opening balance, dated
+invoice/payment transactions and closing balance. This is a ledger-subledger
+statement, not a PDF/email delivery or external customer portal. It currently
+uses the organization's base currency when there are no invoices in the period.
