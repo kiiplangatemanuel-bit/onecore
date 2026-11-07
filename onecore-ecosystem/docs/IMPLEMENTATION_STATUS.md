@@ -853,7 +853,7 @@ Verification is pending latest GitHub Actions results. Production M-Pesa B2C cre
 ## Hospital and Healthcare operations increment (November 2026)
 
 Implemented on `feature/healthcare-hospital-operations` with migration
-`0033_healthcare_hospital_operations`:
+`0036_healthcare_hospital_operations`:
 
 - Ward, room and bed inventory with branch ownership, bed status and occupancy dashboard.
 - Inpatient admission, discharge and bed transfer with patient/bed row locks,
