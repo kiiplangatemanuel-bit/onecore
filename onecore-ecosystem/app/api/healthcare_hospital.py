@@ -246,11 +246,10 @@ def occupancy(branch_id: str, m=Depends(active_membership), u: User=Depends(curr
 @router.post("/admissions", status_code=201)
 def admit_patient(payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     patient_id = int(payload.get("patient_id", 0))
-    patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.write", write=True)
+    patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=True)
     _need(db, m, u, "admissions.manage", patient.branch_id)
     patient = db.query(HealthcarePatient).filter_by(id=patient.id, organization_id=m.organization_id).with_for_update().first()
-    active = db.query(HealthcareResource.id).filter_by(
-        organization_id=m.organization_id, patient_id=patient.id, resource_type="admission", status="admitted").first()
+    if payload.get("idempotency_key"):\n        retry = db.query(HealthcareResource).filter_by(organization_id=m.organization_id, resource_type="admission", idempotency_key=payload["idempotency_key"]).first()\n        if retry:\n            if retry.patient_id != patient.id: raise HTTPException(409, "Idempotency key belongs to another patient")\n            return _view(retry)\n    active = db.query(HealthcareResource.id).filter_by(\n        organization_id=m.organization_id, patient_id=patient.id, resource_type="admission", status="admitted").first()
     if active:
         raise HTTPException(409, "Patient already has an active inpatient admission")
     bed = _resource(db, m, int(payload.get("bed_id", 0)), "bed", lock=True)
@@ -450,7 +449,7 @@ def create_treatment_plan(patient_id: int, payload: dict, m=Depends(active_membe
 
 @router.post("/patients/{patient_id}/invoices", status_code=201)
 def create_invoice(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.read", write=False)
+    patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=False)
     _need(db, m, u, "billing.manage", patient.branch_id)
     lines = payload.get("lines")
     if not isinstance(lines, list) or not lines or len(lines) > 100: raise HTTPException(422, "Invoice requires 1–100 lines")
@@ -476,7 +475,7 @@ def create_invoice(patient_id: int, payload: dict, m=Depends(active_membership),
 
 @router.post("/patients/{patient_id}/insurance/eligibility")
 def record_eligibility(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.read", write=False)
+    patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=False)
     _need(db, m, u, "insurance.manage", patient.branch_id)
     result = payload.get("result")
     if result not in {"eligible", "ineligible", "pending", "unknown"}: raise HTTPException(422, "Invalid eligibility result")
@@ -491,7 +490,7 @@ def record_eligibility(patient_id: int, payload: dict, m=Depends(active_membersh
 
 @router.post("/patients/{patient_id}/insurance/preauthorizations", status_code=201)
 def request_preauthorization(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.read", write=False)
+    patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=False)
     _need(db, m, u, "insurance.manage", patient.branch_id)
     amount = _money(payload.get("requested_amount"))
     row = _create(db, m, u, "preauthorization", {"payer": _required_text(payload, "payer"),
@@ -705,11 +704,9 @@ def privacy_monitor(branch_id: str, since_hours: int=Query(24,ge=1,le=720),
                     m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     _need(db,m,u,"privacy.monitor",branch_id)
     cutoff=NOW()-__import__("datetime").timedelta(hours=since_hours)
-    audits=db.query(HealthcareAccessAudit).filter_by(organization_id=m.organization_id).filter(
-        HealthcareAccessAudit.created_at>=cutoff).all()
-    audits=[x for x in audits if can_access_branch(m, _patient(db,x.patient_id,m).branch_id)]
+    audits=db.query(HealthcareAccessAudit).filter_by(organization_id=m.organization_id).filter(\n        HealthcareAccessAudit.created_at>=cutoff).all()\n    patient_branches={x.id:x.branch_id for x in db.query(HealthcarePatient).filter_by(organization_id=m.organization_id).all()}\n    audits=[x for x in audits if x.patient_id in patient_branches and can_access_branch(m, patient_branches[x.patient_id])]
     sessions=db.query(HealthcareBreakGlassSession).filter_by(organization_id=m.organization_id,ended_at=None).all()
-    active=[x for x in sessions if x.expires_at>NOW() and can_access_branch(m,_patient(db,x.patient_id,m).branch_id)]
+    active=[x for x in sessions if x.expires_at>NOW() and x.patient_id in patient_branches and can_access_branch(m,patient_branches[x.patient_id])]
     return {"window_hours":since_hours,"access_events":len(audits),
         "emergency_access_events":sum(1 for x in audits if x.emergency),
         "active_break_glass_sessions":[{"id":x.id,"patient_id":x.patient_id,"user_id":x.user_id,
@@ -721,7 +718,7 @@ def set_retention_policy(payload: dict, branch_id: str, m=Depends(active_members
     _need(db,m,u,"retention.manage",branch_id)
     years=payload.get("clinical_record_years")
     if not isinstance(years,int) or years<7 or years>100:raise HTTPException(422,"Clinical retention must be 7–100 years; verify local statutory policy")
-    row=_create(db,m,u,"retention_policy",{"clinical_record_years":years,"legal_hold":bool(payload.get("legal_hold",True)),
+    prior=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,branch_id=branch_id,resource_type="retention_policy",external_key=f"policy:{branch_id}").with_for_update().first()\n    policy={"clinical_record_years":years,"legal_hold":bool(payload.get("legal_hold",True)),
         "reviewed_by":u.id,"reviewed_at":NOW().isoformat(),"note":str(payload.get("note",""))[:1000]},
         branch_id,status="active",external_key=f"policy:{branch_id}")
     db.commit();return _view(row)
@@ -734,7 +731,7 @@ def record_recovery_drill(payload: dict, branch_id: str, m=Depends(active_member
     if not 0<=rpo<=10080 or not 0<=rto<=10080:raise HTTPException(422,"RPO/RTO must be between 0 and 10080 minutes")
     status=payload.get("status")
     if status not in {"passed","failed","partial"}:raise HTTPException(422,"Recovery drill status must be passed, failed or partial")
-    row=_create(db,m,u,"recovery_drill",{"drill_date":NOW().isoformat(),"status":status,
+    if status=="passed" and not payload.get("restore_verified",False):raise HTTPException(422,"A passed recovery drill requires a verified restore")\n    row=_create(db,m,u,"recovery_drill",{"drill_date":NOW().isoformat(),"status":status,
         "rpo_minutes":rpo,"rto_minutes":rto,"backup_reference":_required_text(payload,"backup_reference",180),
         "restore_verified":bool(payload.get("restore_verified",False)),
         "notes":str(payload.get("notes",""))[:2000],"performed_by":u.id},
