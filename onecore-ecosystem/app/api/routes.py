@@ -7,14 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
+from app.services.crm import validate_stage_transition
 from datetime import datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -452,3 +453,182 @@ def accounting_trial_balance(membership=Depends(active_membership), db: Session 
     total_credits = sum((Decimal(str(r.credit)) for r in rows), Decimal("0"))
     return {"accounts": accounts, "total_debits": str(total_debits),
             "total_credits": str(total_credits), "balanced": total_debits == total_credits}
+
+
+# CRM: tenant-scoped contacts, qualified pipeline and auditable activities.
+def _crm_branch_check(db, membership, branch_id):
+    if branch_id is None:
+        if branch_scope_ids(membership) == []:
+            raise HTTPException(403, "No branch access is assigned")
+        return
+    branch = db.query(Branch).filter_by(
+        id=branch_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not branch or not can_access_branch(membership, branch_id):
+        raise HTTPException(404, "Branch not found")
+
+
+@router.get("/crm/contacts")
+def list_crm_contacts(membership=Depends(active_membership), db: Session = Depends(get_db),
+                      limit: int = Query(default=100, ge=1, le=500)):
+    require_permission(membership, "read")
+    q = db.query(CRMContact).filter_by(organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        q = q.filter(CRMContact.branch_id.in_(allowed))
+    rows = q.order_by(CRMContact.id.desc()).limit(limit).all()
+    return [{"id": x.id, "full_name": x.full_name, "email": x.email, "phone": x.phone,
+             "company": x.company, "branch_id": x.branch_id} for x in rows]
+
+
+@router.post("/crm/contacts", status_code=201)
+def create_crm_contact(payload: CRMContactIn, membership=Depends(active_membership),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    _crm_branch_check(db, membership, payload.branch_id)
+    email = str(payload.email).lower() if payload.email else None
+    phone = payload.phone.strip() if payload.phone else None
+    if email and db.query(CRMContact).filter_by(
+        organization_id=membership.organization_id, email=email
+    ).first():
+        raise HTTPException(409, "A contact with this email already exists in this organization")
+    if phone and db.query(CRMContact).filter_by(
+        organization_id=membership.organization_id, phone=phone
+    ).first():
+        raise HTTPException(409, "A contact with this phone already exists in this organization")
+    row = CRMContact(organization_id=membership.organization_id, branch_id=payload.branch_id,
+                     full_name=payload.full_name.strip(), email=email, phone=phone,
+                     company=payload.company, notes=payload.notes, created_by=user.id)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "crm.contact.created", "crm_contact", row.id)
+    return {"id": row.id, "full_name": row.full_name, "email": row.email,
+            "phone": row.phone, "company": row.company, "branch_id": row.branch_id}
+
+
+@router.get("/crm/leads")
+def list_crm_leads(stage: str | None = None, membership=Depends(active_membership),
+                   db: Session = Depends(get_db), limit: int = Query(default=100, ge=1, le=500)):
+    require_permission(membership, "read")
+    q = db.query(CRMLead).filter_by(organization_id=membership.organization_id)
+    if stage:
+        if stage not in {"new", "qualified", "proposal", "negotiation", "won", "lost"}:
+            raise HTTPException(422, "Invalid lead stage")
+        q = q.filter(CRMLead.stage == stage)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        q = q.filter(CRMLead.branch_id.in_(allowed))
+    rows = q.order_by(CRMLead.id.desc()).limit(limit).all()
+    return [{"id": x.id, "title": x.title, "contact_id": x.contact_id, "stage": x.stage,
+             "source": x.source, "estimated_value": str(x.estimated_value),
+             "currency": x.currency, "assigned_to": x.assigned_to, "next_step": x.next_step,
+             "branch_id": x.branch_id} for x in rows]
+
+
+@router.post("/crm/leads", status_code=201)
+def create_crm_lead(payload: CRMLeadIn, membership=Depends(active_membership),
+                    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    _crm_branch_check(db, membership, payload.branch_id)
+    if payload.contact_id and not db.query(CRMContact).filter_by(
+        id=payload.contact_id, organization_id=membership.organization_id
+    ).first():
+        raise HTTPException(404, "Contact not found")
+    if payload.assigned_to and not db.query(Membership).filter_by(
+        user_id=payload.assigned_to, organization_id=membership.organization_id, is_active=True
+    ).first():
+        raise HTTPException(404, "Assigned user is not an active organization member")
+    row = CRMLead(organization_id=membership.organization_id, branch_id=payload.branch_id,
+                  contact_id=payload.contact_id, title=payload.title.strip(), source=payload.source,
+                  stage=payload.stage, estimated_value=payload.estimated_value,
+                  currency=payload.currency, assigned_to=payload.assigned_to,
+                  next_step=payload.next_step, created_by=user.id)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "crm.lead.created", "crm_lead", row.id)
+    return {"id": row.id, "title": row.title, "stage": row.stage,
+            "estimated_value": str(row.estimated_value), "currency": row.currency}
+
+
+@router.patch("/crm/leads/{lead_id}/stage")
+def update_crm_lead_stage(lead_id: int, payload: CRMLeadStageIn,
+                          membership=Depends(active_membership), user: User = Depends(current_user),
+                          db: Session = Depends(get_db)):
+    require_permission(membership, "update")
+    q = db.query(CRMLead).filter_by(id=lead_id, organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        q = q.filter(CRMLead.branch_id.in_(allowed)) if allowed else q.filter(CRMLead.id == -1)
+    row = q.first()
+    if not row:
+        raise HTTPException(404, "Lead not found")
+    previous = row.stage
+    validate_stage_transition(previous, payload.stage)
+    row.stage = payload.stage
+    row.next_step = payload.next_step
+    db.commit()
+    audit(db, user.id, membership.organization_id, "crm.lead.stage_changed",
+          "crm_lead", row.id, f"{previous}->{row.stage}")
+    return {"id": row.id, "stage": row.stage, "next_step": row.next_step}
+
+
+@router.get("/crm/activities")
+def list_crm_activities(membership=Depends(active_membership), db: Session = Depends(get_db),
+                        limit: int = Query(default=100, ge=1, le=500)):
+    require_permission(membership, "read")
+    q = db.query(CRMActivity).filter_by(organization_id=membership.organization_id)
+    rows = q.order_by(CRMActivity.id.desc()).limit(limit).all()
+    return [{"id": x.id, "contact_id": x.contact_id, "lead_id": x.lead_id,
+             "activity_type": x.activity_type, "subject": x.subject, "notes": x.notes,
+             "due_at": x.due_at.isoformat() if x.due_at else None,
+             "completed_at": x.completed_at.isoformat() if x.completed_at else None}
+            for x in rows]
+
+
+@router.post("/crm/activities", status_code=201)
+def create_crm_activity(payload: CRMActivityIn, membership=Depends(active_membership),
+                         user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    if bool(payload.contact_id) == bool(payload.lead_id):
+        raise HTTPException(422, "Specify exactly one contact or lead")
+    if payload.contact_id and not db.query(CRMContact).filter_by(
+        id=payload.contact_id, organization_id=membership.organization_id
+    ).first():
+        raise HTTPException(404, "Contact not found")
+    if payload.lead_id and not db.query(CRMLead).filter_by(
+        id=payload.lead_id, organization_id=membership.organization_id
+    ).first():
+        raise HTTPException(404, "Lead not found")
+    row = CRMActivity(organization_id=membership.organization_id,
+                      contact_id=payload.contact_id, lead_id=payload.lead_id,
+                      activity_type=payload.activity_type, subject=payload.subject.strip(),
+                      notes=payload.notes, due_at=payload.due_at, created_by=user.id)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "crm.activity.created",
+          "crm_activity", row.id)
+    return {"id": row.id, "activity_type": row.activity_type, "subject": row.subject}
+
+
+@router.post("/crm/activities/{activity_id}/complete")
+def complete_crm_activity(activity_id: int, membership=Depends(active_membership),
+                          user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "update")
+    row = db.query(CRMActivity).filter_by(
+        id=activity_id, organization_id=membership.organization_id
+    ).first()
+    if not row:
+        raise HTTPException(404, "Activity not found")
+    if row.completed_at is None:
+        row.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        audit(db, user.id, membership.organization_id, "crm.activity.completed",
+              "crm_activity", row.id)
+    return {"id": row.id, "completed_at": row.completed_at.isoformat()}
