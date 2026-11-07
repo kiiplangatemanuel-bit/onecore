@@ -1329,6 +1329,9 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"create")
     if payload.due_date<payload.issue_date: raise HTTPException(422,"Due date cannot precede issue date")
+    organization=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not organization or payload.currency!=organization.currency:
+        raise HTTPException(422,"Invoice currency must match the organization base currency")
     if payload.invoice_type=="receivable" and (not payload.contact_id or payload.supplier_id):
         raise HTTPException(422,"A receivable invoice requires a customer contact only")
     if payload.invoice_type=="payable" and (not payload.supplier_id or payload.contact_id):
@@ -1468,7 +1471,10 @@ def record_accounting_invoice_payment(invoice_id:int,payload:AccountingInvoicePa
     duplicate=db.query(AccountingInvoicePayment).filter_by(
         organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if duplicate:
-        if duplicate.invoice_id==invoice.id and duplicate.amount==payload.amount and duplicate.payment_account_id==payload.payment_account_id:
+        if (duplicate.invoice_id==invoice.id and duplicate.amount==payload.amount
+                and duplicate.payment_account_id==payload.payment_account_id
+                and duplicate.reference==payload.reference
+                and duplicate.payment_date.date()==payload.payment_date):
             return {"id":duplicate.id,"status":"already_applied","journal_id":duplicate.journal_id}
         raise HTTPException(409,"Payment idempotency key was already used")
     balance=Decimal(invoice.total)-Decimal(invoice.amount_paid)
