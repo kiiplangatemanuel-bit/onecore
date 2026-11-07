@@ -269,7 +269,9 @@ def reserve_stock(payload:ReservationIn,membership=Depends(active_membership),us
     if payload.expires_at<=datetime.now(timezone.utc): raise HTTPException(422,"Reservation expiry must be in the future")
     duplicate=db.query(InventoryReservation).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if duplicate:
-        if (duplicate.product_id,duplicate.warehouse_id,duplicate.quantity,duplicate.source_type,duplicate.source_reference)!=(payload.product_id,wh.id,payload.quantity,payload.source_type,payload.source_reference):
+        old_expiry=duplicate.expires_at if duplicate.expires_at.tzinfo else duplicate.expires_at.replace(tzinfo=timezone.utc)
+        new_expiry=payload.expires_at.astimezone(timezone.utc)
+        if (duplicate.product_id,duplicate.warehouse_id,duplicate.quantity,duplicate.source_type,duplicate.source_reference)!=(payload.product_id,wh.id,payload.quantity,payload.source_type,payload.source_reference) or old_expiry!=new_expiry:
             raise HTTPException(409,"Idempotency key reused with different reservation")
         return {"id":duplicate.id,"status":duplicate.status}
     product=db.query(InventoryProduct).filter_by(id=payload.product_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
@@ -366,7 +368,11 @@ def receive_batch(payload:BatchReceiptIn,membership=Depends(active_membership),u
     if payload.serial_number and db.query(InventoryBatch).filter_by(organization_id=membership.organization_id,serial_number=payload.serial_number).first():
         raise HTTPException(409,"Serial number already exists")
     existing=db.query(InventoryStockMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
-    if existing: raise HTTPException(409,"Receipt idempotency key already used")
+    if existing:
+        if existing.product_id!=payload.product_id or existing.warehouse_id!=wh.id or existing.quantity_delta!=payload.quantity.quantize(Q3) or existing.movement_type!="batch_receipt":
+            raise HTTPException(409,"Receipt idempotency key reused with different content")
+        batch_id=existing.reference.split(":",1)[1] if existing.reference.startswith("batch:") else None
+        return {"id":int(batch_id) if batch_id and batch_id.isdigit() else None,"status":"already_applied","movement_id":existing.id}
     row=InventoryBatch(organization_id=membership.organization_id,warehouse_id=wh.id,product_id=product.id,lot_number=payload.lot_number,
         serial_number=payload.serial_number or None,expiry_date=datetime.combine(payload.expiry_date,datetime.min.time(),tzinfo=timezone.utc) if payload.expiry_date else None,
         quantity_on_hand=payload.quantity.quantize(Q3),unit_cost=payload.unit_cost,status="available")
@@ -385,7 +391,10 @@ def issue_batches(payload:BatchIssueIn,membership=Depends(active_membership),use
     product=db.query(InventoryProduct).filter_by(id=payload.product_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
     if not product: raise HTTPException(404,"Product not found")
     dup=db.query(InventoryStockMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
-    if dup: return {"status":"already_applied","movement_id":dup.id}
+    if dup:
+        if dup.product_id!=payload.product_id or dup.warehouse_id!=wh.id or dup.quantity_delta!=-payload.quantity.quantize(Q3) or dup.movement_type!="batch_issue" or dup.reference!=f"{payload.method} issue":
+            raise HTTPException(409,"Issue idempotency key reused with different content")
+        return {"status":"already_applied","movement_id":dup.id}
     available=warehouse_qty(db,membership.organization_id,wh,payload.product_id)-active_reserved(db,membership.organization_id,wh.id,payload.product_id)
     if available<payload.quantity: raise HTTPException(409,"Insufficient unreserved stock")
     today=datetime.now(timezone.utc)
