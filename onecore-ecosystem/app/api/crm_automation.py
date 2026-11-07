@@ -179,7 +179,7 @@ def list_schedules(membership=Depends(active_membership),db:Session=Depends(get_
     if allowed is not None:q=q.filter(CRMCampaign.branch_id.in_(allowed))
     return [{"id":s.id,"campaign_id":c.id,"campaign_name":c.name,"status":s.status,
         "scheduled_at":s.scheduled_at.isoformat(),"next_run_at":s.next_run_at.isoformat() if s.next_run_at else None,
-        "recurrence":s.recurrence,"run_count":s.run_count,"last_run_campaign_id":s.last_run_campaign_id}
+        "recurrence":s.recurrence,"run_count":s.run_count,"last_run_campaign_id":s.last_run_campaign_id,"last_error":s.last_error}
         for s,c in q.order_by(CRMCampaignSchedule.next_run_at).all()]
 
 
@@ -208,7 +208,7 @@ def resume_schedule(schedule_id:int,membership=Depends(active_membership),
     if not campaign or not can_access_branch(membership,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.status not in {"paused","failed"}:raise HTTPException(409,"Schedule is not paused or failed")
     if row.recurrence=="once" and row.run_count>0:raise HTTPException(409,"One-time schedule has already run")
-    row.status="scheduled";row.next_run_at=max(row.scheduled_at,datetime.now(timezone.utc));row.lease_until=None;db.commit()
+    row.status="scheduled";row.next_run_at=max(row.scheduled_at,datetime.now(timezone.utc));row.lease_until=None;row.last_error=None;db.commit()
     db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
         action="crm.campaign.schedule_resumed",resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
     return {"id":row.id,"status":row.status,"next_run_at":row.next_run_at.isoformat()}
