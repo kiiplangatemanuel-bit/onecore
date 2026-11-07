@@ -15,6 +15,7 @@ def test_pos_accounting_models_and_routes_are_registered():
     assert "/api/v1/accounting/pos-mapping" in paths
     assert "/api/v1/accounting/pos-integrations" in paths
     assert "/api/v1/accounting/pos-integrations/post-pending" in paths
+    assert "/api/v1/accounting/pos-integrations/backfill" in paths
 
 
 def test_pos_accounting_mapping_requires_all_control_accounts():
