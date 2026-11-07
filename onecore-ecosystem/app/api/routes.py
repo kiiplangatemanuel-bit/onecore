@@ -3081,50 +3081,6 @@ def depreciate_accounting_fixed_asset(asset_id:int,payload:AccountingDepreciatio
         "net_book_value":str(Decimal(asset.cost)-Decimal(asset.accumulated_depreciation)),"journal_id":journal.id}
 
 
-@router.get("/accounting/financial-statements")
-def accounting_financial_statements(start_date:date,end_date:date,
-    membership=Depends(active_membership),db:Session=Depends(get_db)):
-    require_permission(membership,"read")
-    if end_date<start_date: raise HTTPException(422,"End date must not precede start date")
-    end=datetime.combine(end_date,time.max,tzinfo=timezone.utc)
-    start=datetime.combine(start_date,time.min,tzinfo=timezone.utc)
-    q=db.query(AccountingAccount,AccountingJournalLine,AccountingJournal).join(
-        AccountingJournalLine,AccountingJournalLine.account_id==AccountingAccount.id).join(
-        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
-        AccountingAccount.organization_id==membership.organization_id,
-        AccountingJournalLine.organization_id==membership.organization_id,
-        AccountingJournal.organization_id==membership.organization_id,
-        AccountingJournal.status=="posted",AccountingJournal.entry_date<=end)
-    allowed=branch_scope_ids(membership)
-    if allowed is not None:
-        if not allowed:q=q.filter(AccountingJournalLine.branch_id==None)
-        else:q=q.filter((AccountingJournalLine.branch_id==None)|(AccountingJournalLine.branch_id.in_(allowed)))
-    rows=q.all()
-    pnl=[];balance=[];revenues=Decimal("0");expenses=Decimal("0")
-    assets=Decimal("0");liabilities=Decimal("0");equity=Decimal("0");cumulative_profit=Decimal("0")
-    for account,line,journal in rows:
-        debit=Decimal(line.debit);credit=Decimal(line.credit)
-        if account.account_type=="asset": assets+=debit-credit
-        elif account.account_type=="liability": liabilities+=credit-debit
-        elif account.account_type=="equity": equity+=credit-debit
-        elif account.account_type=="revenue": cumulative_profit+=credit-debit
-        elif account.account_type=="expense": cumulative_profit-=debit-credit
-        if start<=journal.entry_date<=end and account.account_type in ("revenue","expense"):
-            period_value=credit-debit if account.account_type=="revenue" else debit-credit
-            if account.account_type=="revenue":revenues+=period_value
-            else:expenses+=period_value
-            pnl.append({"account_id":account.id,"code":account.code,"name":account.name,
-                "account_type":account.account_type,"amount":str(period_value)})
-    for account_type,amount in (("assets",assets),("liabilities",liabilities),("equity",equity),("retained_earnings",cumulative_profit)):
-        balance.append({"category":account_type,"amount":str(amount)})
-    net_income=revenues-expenses
-    return {"period":{"start":start_date.isoformat(),"end":end_date.isoformat()},
-        "profit_and_loss":{"revenue":str(revenues),"expenses":str(expenses),"net_income":str(net_income),"lines":pnl},
-        "balance_sheet":{"lines":balance,"total_assets":str(assets),
-            "total_liabilities_and_equity":str(liabilities+equity+cumulative_profit),
-            "balanced":assets==liabilities+equity+cumulative_profit}}
-
-
 @router.post("/accounting/bank-statements",status_code=201)
 def import_accounting_bank_statement(payload:AccountingBankStatementIn,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
