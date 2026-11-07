@@ -100,6 +100,8 @@ def test_pos_cash_reconciliation_contracts_and_routes():
     with pytest.raises(ValidationError):
         POSShiftCloseIn(closing_cash=Decimal("1264.00"),cash_count={"1000":1,"200":1,"50":1,"10":1,"5":1})
     with pytest.raises(ValidationError):
+        POSShiftCloseIn(closing_cash=Decimal("0.00"),cash_count={})
+    with pytest.raises(ValidationError):
         POSShiftCloseIn(closing_cash=Decimal("10.00"),cash_count={"2":5})
     assert POSCashMovementIn(movement_type="safe_drop",amount="500.00",reason="Move cash to safe",idempotency_key="safe-drop-001")
     with pytest.raises(ValidationError):
