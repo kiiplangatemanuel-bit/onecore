@@ -51,7 +51,9 @@ def _execute_schedule(db,schedule_id,now):
         organization_id=schedule.organization_id,user_id=schedule.created_by,is_active=True).first()
     user=db.query(User).filter_by(id=schedule.created_by,is_active=True).first()
     if not parent or not membership or not user:
-        schedule.status="failed";schedule.lease_until=None;db.commit();return
+        schedule.status="failed";schedule.lease_until=None
+        schedule.last_error="Campaign owner, active organization membership or campaign record is unavailable"
+        db.commit();return
     run_number=schedule.run_count+1
     child_number=(parent.campaign_number[:45]+f"-R{run_number}")[:60]
     child=db.query(CRMCampaign).filter_by(
