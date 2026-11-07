@@ -54,3 +54,56 @@ offline attendance, manager corrections, multiple sessions per day, approval,
 payroll integration or statutory time calculations. Worked minutes are elapsed
 clock minutes, not paid hours. Deployments in other time zones should not use the
 UTC date as a local payroll day until organization timezone handling is added.
+
+
+
+## Payroll profiles, controlled runs and payslip snapshots
+
+This increment adds a controlled payroll preparation and approval workflow. It
+calculates amounts entered from an effective-dated employee pay profile and
+itemized earnings/deductions. It is a payroll register, not a jurisdiction-certified
+tax engine or payment service.
+
+### Payroll profiles
+
+- `POST /api/v1/hr/payroll/profiles` creates an effective-dated base pay profile
+  for an active employee. The base amount is the employee's pay for one complete
+  payroll period, not an annual salary.
+- `GET /api/v1/hr/payroll/profiles` lists profiles visible to HR managers.
+- Profile date ranges cannot overlap for the same employee. A new rate is added
+  with a new effective date rather than overwriting a prior rate.
+
+### Payroll runs and adjustments
+
+- `POST /api/v1/hr/payroll/runs` creates a draft run for all active, eligible
+  employees visible to the manager. Every included employee must have exactly one
+  profile covering the complete run period; all profiles must use the same currency.
+- `GET /api/v1/hr/payroll/runs` and
+  `GET /api/v1/hr/payroll/runs/{run_id}` list runs and detailed line snapshots.
+- `POST /api/v1/hr/payroll/runs/{run_id}/items` adds a one-time earning or
+  deduction to an employee line while the run remains draft. Client item IDs are
+  tenant-unique and canonical request hashes make identical retries idempotent.
+- Gross pay equals base period pay plus earnings. Net pay equals gross pay minus
+  deductions. A deduction total greater than gross pay is rejected.
+- `POST /api/v1/hr/payroll/runs/{run_id}/approve` freezes a draft run. The creator
+  cannot approve their own run; another manager with access to every included
+  branch must approve it. Approved runs and their lines/items are immutable through
+  these APIs.
+- `GET /api/v1/hr/payroll/my-payslips` exposes approved payslip snapshots only to
+  the employee account linked to that employee record.
+
+### Controls and explicit boundaries
+
+Payroll records and amounts are tenant-scoped, branch-checked, audited and retained
+as snapshots. Runs cannot overlap another payroll period in the same organization.
+A run cannot mix currencies. Profiles must cover the whole period. No employee
+bank account or national identifier is collected by this increment.
+
+The system does **not** calculate PAYE, NSSF, SHIF, housing levy, pension, benefits
+tax, overtime premiums, statutory reliefs, leave pay, garnishments or employer
+contributions. Earning and deduction items are explicitly supplied by authorized
+payroll staff; they are not represented as statutory calculations. No payment
+instruction, bank file, M-Pesa payout, payslip PDF/email, payroll journal or
+accounting posting is generated. Validate applicable Kenyan and other local
+employment/tax rules with qualified professionals before using the figures for
+payment or statutory filing.
