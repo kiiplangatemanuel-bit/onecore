@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
@@ -3408,6 +3408,117 @@ def decide_hr_leave_request(request_id:int,payload:HRLeaveDecisionIn,
     audit(db,user.id,membership.organization_id,f"hr.leave.{payload.decision}",
           "hr_leave_request",row.id)
     return {"id":row.id,"status":row.status,"decided_at":row.decided_at.isoformat()}
+
+
+
+@router.post("/hr/attendance/clock-in", status_code=201)
+def hr_attendance_clock_in(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    employee=db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,status="active"
+    ).first()
+    if not employee or not can_access_branch(membership,employee.branch_id):
+        raise HTTPException(404,"An active employee profile linked to your account was not found")
+    today=datetime.now(timezone.utc).date()
+    existing=db.query(HRAttendance).filter_by(
+        organization_id=membership.organization_id,employee_id=employee.id,
+        attendance_date=today
+    ).with_for_update().first()
+    if existing:
+        raise HTTPException(409,"Attendance has already been started for today")
+    row=HRAttendance(organization_id=membership.organization_id,
+        employee_id=employee.id,branch_id=employee.branch_id,attendance_date=today,
+        clock_in_at=datetime.now(timezone.utc))
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Attendance was already started for today")
+    db.refresh(row)
+    audit(db,user.id,membership.organization_id,"hr.attendance.clocked_in",
+          "hr_attendance",row.id)
+    return {"id":row.id,"attendance_date":row.attendance_date.isoformat(),
+        "clock_in_at":row.clock_in_at.isoformat(),"status":"clocked_in"}
+
+
+@router.post("/hr/attendance/clock-out")
+def hr_attendance_clock_out(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    employee=db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,status="active"
+    ).first()
+    if not employee or not can_access_branch(membership,employee.branch_id):
+        raise HTTPException(404,"An active employee profile linked to your account was not found")
+    today=datetime.now(timezone.utc).date()
+    row=db.query(HRAttendance).filter_by(
+        organization_id=membership.organization_id,employee_id=employee.id,
+        attendance_date=today
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(409,"Clock in before clocking out")
+    if row.clock_out_at:
+        raise HTTPException(409,"Attendance has already been clocked out")
+    now_utc=datetime.now(timezone.utc)
+    started=row.clock_in_at
+    if started.tzinfo is None:
+        started=started.replace(tzinfo=timezone.utc)
+    elapsed=int((now_utc-started).total_seconds()//60)
+    if elapsed<0:
+        raise HTTPException(409,"Clock-in timestamp is invalid")
+    row.clock_out_at=now_utc
+    row.worked_minutes=elapsed
+    db.commit()
+    audit(db,user.id,membership.organization_id,"hr.attendance.clocked_out",
+          "hr_attendance",row.id,f"worked_minutes:{elapsed}")
+    return {"id":row.id,"attendance_date":row.attendance_date.isoformat(),
+        "clock_in_at":started.isoformat(),"clock_out_at":now_utc.isoformat(),
+        "worked_minutes":elapsed,"status":"completed"}
+
+
+@router.get("/hr/my-attendance")
+def hr_my_attendance(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=31,ge=1,le=180)):
+    require_permission(membership,"read")
+    employee=db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,status="active"
+    ).first()
+    if not employee:
+        return []
+    rows=db.query(HRAttendance).filter_by(
+        organization_id=membership.organization_id,employee_id=employee.id
+    ).order_by(HRAttendance.attendance_date.desc()).limit(limit).all()
+    return [{"id":x.id,"attendance_date":x.attendance_date.isoformat(),
+        "clock_in_at":x.clock_in_at.isoformat(),
+        "clock_out_at":x.clock_out_at.isoformat() if x.clock_out_at else None,
+        "worked_minutes":x.worked_minutes,"status":"completed" if x.clock_out_at else "clocked_in"}
+        for x in rows]
+
+
+@router.get("/hr/attendance")
+def hr_attendance_report(membership=Depends(active_membership),
+    db:Session=Depends(get_db),limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"manage")
+    q=db.query(HRAttendance,HREmployee).join(
+        HREmployee,HREmployee.id==HRAttendance.employee_id
+    ).filter(HRAttendance.organization_id==membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(HRAttendance.branch_id.in_(allowed))
+    rows=q.order_by(HRAttendance.attendance_date.desc(),HRAttendance.id.desc()).limit(limit).all()
+    return [{"id":x.id,"employee_id":employee.id,
+        "employee_number":employee.employee_number,
+        "employee_name":f"{employee.first_name} {employee.last_name}",
+        "branch_id":x.branch_id,"attendance_date":x.attendance_date.isoformat(),
+        "clock_in_at":x.clock_in_at.isoformat(),
+        "clock_out_at":x.clock_out_at.isoformat() if x.clock_out_at else None,
+        "worked_minutes":x.worked_minutes,
+        "status":"completed" if x.clock_out_at else "clocked_in"}
+        for x,employee in rows]
 
 
 @router.get("/crm/forecast")
