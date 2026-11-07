@@ -59,7 +59,7 @@ def _enabled():
     if not settings.integration_mpesa_enabled or not all(required):
         raise HTTPException(503, "M-Pesa integration is not enabled or its Daraja configuration is incomplete")
     provider = urlparse(settings.mpesa_base_url)
-    if provider.scheme != "https" or not provider.hostname or not provider.hostname.endswith("safaricom.co.ke"):
+    if provider.scheme != "https" or not provider.hostname or not (provider.hostname == "safaricom.co.ke" or provider.hostname.endswith(".safaricom.co.ke")):
         raise HTTPException(503, "Daraja base URL must use an HTTPS Safaricom host")
     if not settings.mpesa_callback_url.startswith("https://"):
         raise HTTPException(503, "M-Pesa callback base URL must use public HTTPS")
