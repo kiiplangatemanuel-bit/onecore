@@ -535,10 +535,12 @@ def create_crm_lead(payload: CRMLeadIn, membership=Depends(active_membership),
                     user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "create")
     _crm_branch_check(db, membership, payload.branch_id)
-    if payload.contact_id and not db.query(CRMContact).filter_by(
-        id=payload.contact_id, organization_id=membership.organization_id
-    ).first():
-        raise HTTPException(404, "Contact not found")
+    if payload.contact_id:
+        contact = db.query(CRMContact).filter_by(
+            id=payload.contact_id, organization_id=membership.organization_id
+        ).first()
+        if not contact or not can_access_branch(membership, contact.branch_id):
+            raise HTTPException(404, "Contact not found")
     if payload.assigned_to and not db.query(Membership).filter_by(
         user_id=payload.assigned_to, organization_id=membership.organization_id, is_active=True
     ).first():
@@ -640,6 +642,18 @@ def complete_crm_activity(activity_id: int, membership=Depends(active_membership
     ).first()
     if not row:
         raise HTTPException(404, "Activity not found")
+    if row.contact_id:
+        contact = db.query(CRMContact).filter_by(
+            id=row.contact_id, organization_id=membership.organization_id
+        ).first()
+        if not contact or not can_access_branch(membership, contact.branch_id):
+            raise HTTPException(404, "Activity not found")
+    if row.lead_id:
+        lead = db.query(CRMLead).filter_by(
+            id=row.lead_id, organization_id=membership.organization_id
+        ).first()
+        if not lead or not can_access_branch(membership, lead.branch_id):
+            raise HTTPException(404, "Activity not found")
     if row.completed_at is None:
         row.completed_at = datetime.now(timezone.utc)
         db.commit()
