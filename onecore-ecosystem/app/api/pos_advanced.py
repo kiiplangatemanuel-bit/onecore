@@ -425,11 +425,17 @@ def customer_history(customer_id:int,membership=Depends(active_membership),db:Se
     customer=db.query(POSCustomer).filter_by(id=customer_id,organization_id=membership.organization_id).first()
     if not customer: raise HTTPException(404,"Customer not found")
     entries=db.query(POSLoyaltyEntry).filter_by(organization_id=membership.organization_id,customer_id=customer.id).order_by(POSLoyaltyEntry.created_at.desc()).limit(500).all()
+    purchases=db.query(POSSale).filter_by(organization_id=membership.organization_id,customer_id=customer.id).order_by(POSSale.created_at.desc()).limit(500).all()
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        purchases=[sale for sale in purchases if sale.branch_id in allowed]
     return {"customer":{"id":customer.id,"full_name":customer.full_name,"membership_number":customer.membership_number,
         "tier":customer.tier,"points_balance":customer.points_balance},
         "loyalty_history":[{"id":x.id,"sale_id":x.sale_id,"entry_type":x.entry_type,
             "points_delta":x.points_delta,"note":x.note,"created_at":x.created_at.isoformat()} for x in entries],
-        "purchase_history":"Purchase history is only available for sales explicitly linked by a future customer-sale association; no phone-number inference is performed."}
+        "purchase_history":[{"sale_id":sale.id,"branch_id":sale.branch_id,"status":sale.status,
+            "total_amount":str(sale.total_amount),"currency":sale.currency,
+            "created_at":sale.created_at.isoformat()} for sale in purchases]}
 
 
 @router.get("/operations-report")
