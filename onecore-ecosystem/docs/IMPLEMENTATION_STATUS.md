@@ -615,3 +615,30 @@ import/export, team assignment and UAT.
   Python compilation and pytest.
 - Not yet included: retained earnings transfer, subledger reconciliation,
   statutory/tax close validation, depreciation certification and sign-off pack.
+
+
+## POS receipts and controlled returns increment (7 November 2026)
+
+Implemented on branch `feature/pos-returns-refunds`:
+
+- Tenant/branch-scoped sale receipt lookup with original sale lines, recorded tenders
+  and per-line remaining returnable quantity.
+- Manager-permission-gated partial/full return endpoint; returns are restricted to
+  lines from the original posted sale and cannot exceed remaining sold quantities.
+- Refund allocations must equal the return value and are capped by remaining recorded
+  original tender by method; unsettled credit tenders are excluded.
+- Returned stock is reintroduced through append-only inventory receipt movements in
+  the original branch.
+- Tenant-unique return idempotency keys, canonical request hashes, conflict handling
+  and audit events.
+- Models: `POSReturn`, `POSReturnLine`, `POSRefund`; migration
+  `0018_pos_returns`; service validation and contract/route tests.
+- APIs: `GET /api/v1/pos/sales/{sale_id}` and
+  `POST /api/v1/pos/sales/{sale_id}/returns`.
+
+Boundaries: refund records do not execute cash/card/bank/M-Pesa payouts; no provider
+refund adapter is enabled. Return value uses original stored sale prices; discount
+and tax allocation and accounting journal integration remain outstanding. The UI
+receipt/return workflow is being added in this increment and must be verified before
+the slice is called complete. CI must pass migration upgrade, downgrade/re-upgrade,
+compilation and pytest before merge.
