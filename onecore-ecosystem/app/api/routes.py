@@ -4584,9 +4584,10 @@ def get_laboratory_order(order_id: int, membership=Depends(active_membership),
     patient = db.query(HealthcarePatient).filter_by(
         id=order.patient_id, organization_id=membership.organization_id
     ).first()
-    sample = db.query(LaboratorySample).filter_by(
+    samples = db.query(LaboratorySample).filter_by(
         organization_id=membership.organization_id, order_id=order.id
-    ).first()
+    ).order_by(LaboratorySample.collected_at,LaboratorySample.id).all()
+    sample = samples[0] if samples else None
     lines = db.query(LaboratoryOrderLine).filter_by(
         organization_id=membership.organization_id, order_id=order.id
     ).order_by(LaboratoryOrderLine.id).all()
@@ -4597,6 +4598,10 @@ def get_laboratory_order(order_id: int, membership=Depends(active_membership),
         "sample": ({"accession_number": sample.accession_number,
                     "specimen_type": sample.specimen_type, "status": sample.status,
                     "collected_at": sample.collected_at.isoformat()} if sample else None),
+        "samples": [{"id":x.id,"accession_number":x.accession_number,
+                    "specimen_type":x.specimen_type,"status":x.status,
+                    "collected_at":x.collected_at.isoformat(),"collected_by":x.collected_by}
+                    for x in samples],
         "lines": [{
             "id": line.id, "test_id": line.test_id, "test_code": line.test_code,
             "test_name": line.test_name, "specimen_type": line.specimen_type,
