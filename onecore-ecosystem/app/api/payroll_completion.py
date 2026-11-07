@@ -432,7 +432,7 @@ def approve_calculation(run_id: int, payload: dict=Body(default={}), membership=
 def create_payment_batch(run_id: int, payload: dict=Body(...), membership=Depends(active_membership),
                          user=Depends(current_user), db: Session=Depends(get_db)):
     _require_manage(membership)
-    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).first()
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
     if not run or run.status != "approved":
         raise HTTPException(409, "Payroll must be approved before payment preparation")
     method = payload.get("method")
