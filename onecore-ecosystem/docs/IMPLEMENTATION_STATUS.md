@@ -892,3 +892,16 @@ Implemented on `feature/crm-pipeline-performance-analytics`:
 Boundaries: descriptive analytics only; no cohort attribution, historical stage
 duration, configurable probability calibration, rep-level targets, predictive
 modelling or campaign delivery analytics. CI and finance/sales UAT remain required.
+
+
+## Accounting extended controls
+
+Implemented on `feature/accounting-statutory-cashflow-refunds`:
+- Procurement three-way-matched supplier invoices can be converted to linked draft AP invoices with a one-to-one source link and approval gate.
+- VAT output/input summary by rate, net of posted credit notes.
+- Cash-flow statement based on explicit chart-of-account cash-equivalent and activity classifications, with unclassified movements disclosed.
+- Idempotent customer cash refunds against posted credit balances, with balanced ledger journals.
+- Period-close blocker for matched procurement invoices not posted to AP.
+- Accounting workspace controls, tests and documentation added.
+
+External eTIMS/KRA submission, tax certification and provider settlement are not represented as complete by these management reports.
