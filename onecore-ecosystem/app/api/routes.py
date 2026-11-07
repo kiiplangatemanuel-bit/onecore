@@ -764,24 +764,55 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
 def approve_purchase_order(order_id: int, membership=Depends(active_membership),
                            user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "manage")
-    q = db.query(ProcurementPurchaseOrder).filter_by(
-        id=order_id, organization_id=membership.organization_id
-    )
-    allowed = branch_scope_ids(membership)
-    if allowed is not None:
-        q = q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id == -1)
-    order = q.with_for_update().first()
-    if not order:
-        raise HTTPException(404, "Purchase order not found")
-    if order.status != "draft":
-        raise HTTPException(409, "Only draft purchase orders can be approved")
-    order.status = "approved"
-    order.approved_by = user.id
-    order.approved_at = datetime.now(timezone.utc)
+    q=db.query(ProcurementPurchaseOrder).filter_by(id=order_id,organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:q=q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id==-1)
+    order=q.with_for_update().first()
+    if not order:raise HTTPException(404,"Purchase order not found")
+    if order.status!="draft":raise HTTPException(409,"Only draft purchase orders can be approved")
+    if order.created_by==user.id:raise HTTPException(409,"Purchase order creator cannot approve their own order")
+    lines=db.query(ProcurementPurchaseOrderLine).filter_by(purchase_order_id=order.id,organization_id=membership.organization_id).all()
+    amount=sum((x.quantity_ordered*x.unit_cost for x in lines),Decimal("0"))
+    rules=db.query(ProcurementApprovalRule).filter_by(organization_id=membership.organization_id,is_active=True).order_by(ProcurementApprovalRule.approval_level).all()
+    required=[r for r in rules if amount>=r.minimum_amount and (r.maximum_amount is None or amount<r.maximum_amount)]
+    if required:
+        next_rule=None
+        for rule in required:
+            prior=db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
+                entity_type="purchase_order",entity_id=order.id,approval_level=rule.approval_level).first()
+            if not prior:next_rule=rule;break
+        if next_rule is None:raise HTTPException(409,"All configured approval levels have already acted")
+        action=ProcurementApprovalAction(organization_id=membership.organization_id,entity_type="purchase_order",
+            entity_id=order.id,approval_level=next_rule.approval_level,approver_user_id=user.id,
+            action="approved",note="")
+        db.add(action);db.flush()
+        completed=db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
+            entity_type="purchase_order",entity_id=order.id,action="approved").count()
+        if completed==len(required):
+            order.status="approved";order.approved_by=user.id;order.approved_at=datetime.now(timezone.utc)
+        audit(db,user.id,membership.organization_id,"procurement.order.approval_level_approved",
+            "purchase_order",order.id,f"level:{next_rule.approval_level};amount:{amount}")
+        db.commit()
+        return {"id":order.id,"status":order.status,"amount":str(amount),
+            "approval_level_completed":next_rule.approval_level,"approval_levels_required":len(required),
+            "remaining_approvals":len(required)-completed}
+    order.status="approved";order.approved_by=user.id;order.approved_at=datetime.now(timezone.utc)
+    audit(db,user.id,membership.organization_id,"procurement.order.approved","purchase_order",order.id,order.order_number)
     db.commit()
-    audit(db, user.id, membership.organization_id, "procurement.order.approved",
-          "purchase_order", order.id, order.order_number)
-    return {"id": order.id, "order_number": order.order_number, "status": order.status}
+    return {"id":order.id,"status":order.status,"amount":str(amount),"approval_levels_required":0}
+
+
+@router.get("/procurement/orders/{order_id}/approvals")
+def get_purchase_order_approvals(order_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    order=db.query(ProcurementPurchaseOrder).filter_by(id=order_id,organization_id=membership.organization_id).first()
+    if not order:raise HTTPException(404,"Purchase order not found")
+    allowed=branch_scope_ids(membership)
+    if allowed is not None and order.branch_id not in allowed:raise HTTPException(404,"Purchase order not found")
+    actions=db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
+        entity_type="purchase_order",entity_id=order.id).order_by(ProcurementApprovalAction.approval_level).all()
+    return [{"level":x.approval_level,"approver_user_id":x.approver_user_id,"action":x.action,
+        "note":x.note,"created_at":x.created_at.isoformat()} for x in actions]
 
 
 @router.post("/procurement/orders/{order_id}/receive", deprecated=True)
