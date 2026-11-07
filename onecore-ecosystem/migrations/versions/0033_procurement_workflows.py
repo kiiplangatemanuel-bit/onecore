@@ -41,6 +41,9 @@ def upgrade():
     op.create_index("ix_procurement_settlement_org_key", "procurement_settlements", ["organization_id", "idempotency_key"], unique=True)
     op.create_index("ix_procurement_settlements_organization_id", "procurement_settlements", ["organization_id"])
     op.create_index("ix_procurement_settlements_supplier_id", "procurement_settlements", ["supplier_id"])
+    op.create_index("uq_procurement_mpesa_receipt", "procurement_settlements", ["provider_reference"], unique=True,
+                    postgresql_where=sa.text("provider = 'mpesa' AND provider_reference <> ''"),
+                    sqlite_where=sa.text("provider = 'mpesa' AND provider_reference <> ''"))
     op.create_table(
         "procurement_settlement_allocations",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -143,6 +146,7 @@ def upgrade():
     op.create_index("ix_procurement_supplier_statement_lines_statement_id", "procurement_supplier_statement_lines", ["statement_id"])
 
 def downgrade():
+    op.drop_index("uq_procurement_mpesa_receipt", table_name="procurement_settlements")
     op.drop_table("procurement_supplier_statement_lines")
     op.drop_table("procurement_supplier_statements")
     op.drop_table("procurement_invoice_discrepancies")
