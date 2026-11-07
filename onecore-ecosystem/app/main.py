@@ -30,6 +30,11 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
 app.include_router(router)
 app.include_router(platform_router)
 
+@app.get("/school", response_class=HTMLResponse)
+def school_ui():
+    page = Path(__file__).resolve().parent / "web" / "school.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
 @app.get("/pos", response_class=HTMLResponse)
 def pos_ui():
     page = Path(__file__).resolve().parent / "web" / "pos.html"
