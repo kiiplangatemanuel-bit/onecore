@@ -35,7 +35,7 @@ def _template(db,template_id,org):
 
 def _segment(db,segment_id,org,membership):
     row=db.query(CRMAudienceSegment).filter_by(id=segment_id,organization_id=org,is_active=True).first()
-    if not row or not can_access_branch(membership,row.branch_id):
+    if not row or (row.branch_id is not None and not can_access_branch(membership,row.branch_id)):
         raise HTTPException(404,"Active audience segment not found")
     return row
 
@@ -148,7 +148,7 @@ def schedule_campaign(campaign_id:int,payload:CRMCampaignScheduleIn,
     template=_template(db,payload.template_id,membership.organization_id) if payload.template_id else None
     if template and (template.channel!=campaign.channel or template.purpose!=campaign.purpose):
         raise HTTPException(422,"Template channel and purpose must match the campaign")
-    if template and not can_access_branch(membership,template.branch_id):raise HTTPException(404,"Template not found")
+    if template and template.branch_id is not None and not can_access_branch(membership,template.branch_id):raise HTTPException(404,"Template not found")
     if template and campaign.branch_id and template.branch_id and campaign.branch_id!=template.branch_id:
         raise HTTPException(422,"Campaign and template branches do not match")
     segment=_segment(db,payload.segment_id,membership.organization_id,membership) if payload.segment_id else None
