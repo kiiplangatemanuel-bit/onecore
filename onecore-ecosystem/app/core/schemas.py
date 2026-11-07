@@ -49,11 +49,11 @@ class InventoryProductIn(BaseModel):
     description: str = Field(default="", max_length=4000)
     unit: str = Field(default="unit", min_length=1, max_length=24)
     sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
-    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, multiple_of=Decimal("0.0001"))
 
 
 class InventoryProductTaxRateIn(BaseModel):
-    tax_rate: Decimal = Field(ge=0, le=100)
+    tax_rate: Decimal = Field(ge=0, le=100, multiple_of=Decimal("0.0001"))
 
 
 class InventoryMovementIn(BaseModel):
@@ -179,7 +179,7 @@ class POSShiftCloseIn(BaseModel):
 class POSSaleLineIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
-    discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100, multiple_of=Decimal("0.0001"))
 
 
 class POSPaymentIn(BaseModel):
