@@ -307,6 +307,20 @@ class AccountingInvoicePaymentIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
+class AccountingInvoiceRefundIn(BaseModel):
+    payment_account_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    refund_date: date
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class AccountingProcurementInvoicePostIn(BaseModel):
+    control_account_id: int = Field(gt=0)
+    expense_account_id: int = Field(gt=0)
+    tax_account_id: int | None = Field(default=None, gt=0)
+
+
 class AccountingInvoiceApprovalDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected)$")
     note: str = Field(default="", max_length=500)
