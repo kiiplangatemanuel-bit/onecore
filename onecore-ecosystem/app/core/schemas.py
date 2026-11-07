@@ -944,6 +944,14 @@ class SaccoMemberIn(BaseModel):
     email: EmailStr | None = None
     branch_id: str | None = Field(default=None, max_length=36)
 
+    @field_validator("member_number")
+    @classmethod
+    def member_number_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2 or not re.fullmatch(r"[A-Za-z0-9._/-]+", value):
+            raise ValueError("Member number must contain valid identifier characters")
+        return value
+
     @field_validator("full_name")
     @classmethod
     def member_name_not_blank(cls, value):
@@ -956,6 +964,14 @@ class SaccoMemberIn(BaseModel):
 class SaccoKYCDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(verified|rejected)$")
     note: str = Field(min_length=3, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def kyc_note_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A meaningful KYC review note is required")
+        return value
 
 
 class SaccoAccountIn(BaseModel):
