@@ -663,3 +663,19 @@ class CRMQuoteLine(Base):
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SchoolAttendance(Base):
+    """One daily attendance decision per learner and tenant."""
+    __tablename__ = "school_attendance"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("school_classes.id"), index=True)
+    learner_id: Mapped[int] = mapped_column(ForeignKey("school_learners.id"), index=True)
+    attendance_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str] = mapped_column(String(500), default="")
+    recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_attendance_org_date_learner", "organization_id", "attendance_date", "learner_id", unique=True),)
