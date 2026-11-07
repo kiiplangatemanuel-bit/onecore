@@ -33,7 +33,7 @@ NOW = lambda: datetime.now(timezone.utc)
 RESOURCE_TYPES = {
     "ward", "room", "bed", "admission", "vital_observation", "nursing_task", "care_plan",
     "doctor_order", "treatment_plan", "invoice", "invoice_payment", "insurance_policy", "insurance_claim",
-    "preauthorization", "settlement", "pharmacy_job", "laboratory_job", "emergency_visit",
+    "preauthorization", "settlement", "pharmacy_job", "laboratory_job", "pharmacy_medicine", "pharmacy_batch", "pharmacy_prescription", "pharmacy_dispense", "pharmacy_allergy", "pharmacy_safety_rule", "pharmacy_controlled_event", "pharmacy_invoice", "pharmacy_return", "pharmacy_replenishment", "pharmacy_recall", "pharmacy_stock_adjustment", "lab_test", "lab_panel", "lab_order", "lab_sample", "lab_instrument", "lab_qc", "lab_calibration", "lab_critical_alert", "lab_delivery", "lab_claim", "lab_chain_event", "emergency_visit",
     "theatre", "procedure", "clinical_document", "retention_policy", "recovery_drill",
     "integration_job",
 }
