@@ -214,9 +214,17 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         db.commit()
         raise HTTPException(502, intent.result_description)
     intent.merchant_request_id = str(response.get("MerchantRequestID") or "")[:100]
-    intent.checkout_request_id = str(response["CheckoutRequestID"])[:100]
-    intent.status = "pending"
-    payment.status = "unsettled"
+    response_checkout_id = str(response["CheckoutRequestID"])
+    if intent.checkout_request_id and intent.checkout_request_id != response_checkout_id:
+        intent.status = "exception"
+        intent.result_description = "Daraja initiation response does not match the callback-bound checkout request"
+        db.commit()
+        raise HTTPException(502, intent.result_description)
+    intent.checkout_request_id = response_checkout_id[:100]
+    if intent.status == "initiating":
+        intent.status = "pending"
+    if intent.status != "success":
+        payment.status = "unsettled"
     _audit(db, membership.organization_id, user.id, "mpesa.stk.initiated",
            "pos_payment", payment.id, f"intent:{intent.id};amount:{amount};phone:{phone[-4:]}")
     db.commit()
@@ -232,7 +240,14 @@ def _stk_callback(db: Session, token: str, body: dict):
         return False
     callback = (body.get("Body") or {}).get("stkCallback") or {}
     checkout_id = str(callback.get("CheckoutRequestID") or "")
-    if checkout_id != str(intent.checkout_request_id or ""):
+    if not checkout_id:
+        return False
+    if not intent.checkout_request_id and intent.status in {"initiating", "unknown"}:
+        # The callback URL token securely binds the first callback if the STK
+        # initiation response was lost after Safaricom accepted the request.
+        intent.checkout_request_id = checkout_id[:100]
+        intent.merchant_request_id = str(callback.get("MerchantRequestID") or "")[:100]
+    elif checkout_id != str(intent.checkout_request_id or ""):
         return False
     if intent.status == "success":
         return True
@@ -252,7 +267,11 @@ def _stk_callback(db: Session, token: str, body: dict):
             db.commit()
             return True
         callback_phone = metadata.get("PhoneNumber")
-        if callback_phone is None or str(callback_phone) != intent.phone_number:
+        try:
+            phone_matches = callback_phone is not None and normalize_phone(str(callback_phone)) == intent.phone_number
+        except ValueError:
+            phone_matches = False
+        if not phone_matches:
             intent.status = "exception"
             intent.result_description = "Callback phone number is missing or does not match the requested payer"
             db.commit()
@@ -282,6 +301,17 @@ def _stk_callback(db: Session, token: str, body: dict):
         ).with_for_update().first()
         if not payment:
             return False
+        duplicate_payment_receipt = db.query(POSPayment).filter(
+            POSPayment.organization_id == intent.organization_id,
+            POSPayment.method == "mpesa",
+            POSPayment.provider_reference == receipt,
+            POSPayment.id != payment.id,
+        ).first()
+        if duplicate_payment_receipt:
+            intent.status = "exception"
+            intent.result_description = "M-Pesa receipt is already allocated to another POS payment"
+            db.commit()
+            return True
         payment.status = "recorded"
         payment.provider_reference = receipt[:120]
         intent.mpesa_receipt_number = receipt[:40]
@@ -410,10 +440,26 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
         db.commit()
         raise HTTPException(502, intent.result_description)
-    intent.conversation_id = str(response.get("ConversationID") or "")[:100]
-    intent.originator_conversation_id = str(response.get("OriginatorConversationID") or "")[:100]
-    intent.status = "pending"
-    refund.status = "pending"
+    response_conversation = str(response.get("ConversationID") or "")
+    response_originator = str(response.get("OriginatorConversationID") or "")
+    if not response_conversation or not response_originator:
+        intent.status = "unknown"
+        intent.result_description = "Daraja accepted B2C request without correlation IDs; reconcile before retrying"
+        db.commit()
+        raise HTTPException(502, intent.result_description)
+    if intent.conversation_id and intent.conversation_id != response_conversation:
+        intent.status = "exception"
+        intent.result_description = "Daraja initiation response does not match the callback-bound conversation"
+        db.commit()
+        raise HTTPException(502, intent.result_description)
+    if not intent.conversation_id:
+        intent.conversation_id = response_conversation[:100]
+    if not intent.originator_conversation_id:
+        intent.originator_conversation_id = response_originator[:100]
+    if intent.status == "initiating":
+        intent.status = "pending"
+    if intent.status != "success":
+        refund.status = "pending"
     _audit(db, membership.organization_id, user.id, "mpesa.b2c.initiated",
            "pos_refund", refund.id, f"intent:{intent.id};amount:{amount};phone:{phone[-4:]}")
     db.commit()
@@ -431,9 +477,13 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         return True
     result = body.get("Result") or body
     callback_conversation = str(result.get("ConversationID") or "")
-    if intent.conversation_id and callback_conversation and callback_conversation != intent.conversation_id:
+    if not callback_conversation:
         return False
-    if not timeout and intent.conversation_id and not callback_conversation:
+    if not intent.conversation_id and intent.status in {"initiating", "unknown"}:
+        # Bind a callback racing the initiation response through the one-time token.
+        intent.conversation_id = callback_conversation[:100]
+        intent.originator_conversation_id = str(result.get("OriginatorConversationID") or "")[:100]
+    elif callback_conversation != intent.conversation_id:
         return False
     code = result.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
@@ -470,6 +520,17 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         if duplicate_receipt:
             intent.status = "exception"
             intent.result_description = "M-Pesa receipt number has already been applied to another refund"
+            db.commit()
+            return True
+        duplicate_refund_receipt = db.query(POSRefund).filter(
+            POSRefund.organization_id == intent.organization_id,
+            POSRefund.method == "mpesa",
+            POSRefund.provider_reference == receipt,
+            POSRefund.id != refund.id,
+        ).first()
+        if duplicate_refund_receipt:
+            intent.status = "exception"
+            intent.result_description = "M-Pesa receipt is already allocated to another POS refund"
             db.commit()
             return True
         refund.status = "recorded"
