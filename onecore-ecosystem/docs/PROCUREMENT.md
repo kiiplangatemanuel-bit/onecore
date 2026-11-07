@@ -40,6 +40,6 @@ and advances the order to partially_received or received.
 - GRN document/inspection, rejected/returned goods, supplier invoices and three-way
   matching.
 - Tax/freight/discount allocations, landed cost and accounts-payable integration.
-- Procurement UI, reporting, audit views, CSV import/export and notifications.
+- Advanced procurement reporting, audit views, CSV import/export and notifications.
 - PostgreSQL concurrent receipt tests, end-to-end branch isolation, security review,
   accessibility and UAT.
