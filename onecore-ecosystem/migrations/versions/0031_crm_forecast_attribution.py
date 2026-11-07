@@ -7,7 +7,9 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
-    op.add_column("crm_leads", sa.Column("source_campaign_id", sa.Integer(), sa.ForeignKey("crm_campaigns.id"), nullable=True))
+    with op.batch_alter_table("crm_leads") as batch_op:
+        batch_op.add_column(sa.Column("source_campaign_id", sa.Integer(), nullable=True))
+        batch_op.create_foreign_key("fk_crm_lead_source_campaign", "crm_campaigns", ["source_campaign_id"], ["id"])
     op.create_index("ix_crm_lead_source_campaign", "crm_leads", ["organization_id", "source_campaign_id"])
     op.add_column("crm_leads", sa.Column("expected_close_date", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_leads", sa.Column("probability_override", sa.Numeric(5, 2), nullable=True))
@@ -99,4 +101,6 @@ def downgrade():
     op.drop_column("crm_leads", "probability_override")
     op.drop_column("crm_leads", "expected_close_date")
     op.drop_index("ix_crm_lead_source_campaign", table_name="crm_leads")
-    op.drop_column("crm_leads", "source_campaign_id")
+    with op.batch_alter_table("crm_leads") as batch_op:
+        batch_op.drop_constraint("fk_crm_lead_source_campaign", type_="foreignkey")
+        batch_op.drop_column("source_campaign_id")
