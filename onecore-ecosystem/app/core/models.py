@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -320,6 +320,7 @@ class POSShift(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
     cashier_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("pos_devices.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), default="open")
     opening_cash: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     closing_cash: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
@@ -334,6 +335,9 @@ class POSShift(Base):
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_note: Mapped[str] = mapped_column(String(500), default="")
+    __table_args__ = (Index("uq_pos_shift_open_device", "organization_id", "device_id", unique=True,
+        postgresql_where=text("status = 'open' AND device_id IS NOT NULL"),
+        sqlite_where=text("status = 'open' AND device_id IS NOT NULL")),)
 
 
 class POSCashMovement(Base):

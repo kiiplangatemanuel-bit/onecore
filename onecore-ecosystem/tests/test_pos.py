@@ -113,3 +113,12 @@ def test_pos_cash_reconciliation_contracts_and_routes():
     assert "/api/v1/pos/shifts/{shift_id}/cash-movements" in paths
     assert "/api/v1/pos/shifts/{shift_id}/reconciliation" in paths
     assert "/api/v1/pos/shifts/{shift_id}/review" in paths
+
+
+def test_offline_sale_hash_includes_customer_membership():
+    base = sample_payload()
+    linked = POSSaleSyncIn(
+        client_transaction_id=base.client_transaction_id, shift_id=base.shift_id,
+        branch_id=base.branch_id, customer_id=77, lines=base.lines, payments=base.payments,
+    )
+    assert canonical_request_hash(base) != canonical_request_hash(linked)

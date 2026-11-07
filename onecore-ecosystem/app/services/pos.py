@@ -41,6 +41,8 @@ def canonical_request_hash(payload) -> str:
             for p in payload.payments
         ], key=lambda x: (x["method"], x["amount"], x["provider_reference"])),
     }
+    if getattr(payload,"customer_id",None) is not None:
+        body["customer_id"] = payload.customer_id
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

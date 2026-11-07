@@ -1,9 +1,9 @@
-import json, re, uuid, hashlib
+import json, re, uuid, hashlib, secrets
 from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -1574,11 +1574,41 @@ def review_pos_shift(shift_id:int,payload:POSShiftReviewIn,membership=Depends(ac
     return {"id":shift.id,"reconciliation_status":shift.reconciliation_status,"reviewed_by":user.id}
 
 
+def _record_pos_sync_conflict(db, membership, user, payload, shift, conflict_type, server_snapshot):
+    """Persist a device-bound sync conflict before returning the corresponding 409."""
+    if not shift or not getattr(shift,"device_id",None):
+        return None
+    from app.core.pos_completion_models import POSOfflineConflict
+    existing=db.query(POSOfflineConflict).filter_by(
+        organization_id=membership.organization_id,device_id=shift.device_id,
+        client_transaction_id=payload.client_transaction_id).first()
+    if existing:
+        return existing.id
+    row=POSOfflineConflict(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        device_id=shift.device_id,shift_id=shift.id,client_transaction_id=payload.client_transaction_id,
+        conflict_type=conflict_type,server_snapshot=server_snapshot or {},
+        client_snapshot=payload.model_dump(mode="json"),status="pending")
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="pos.offline_conflict.detected",resource_type="pos_offline_conflict",
+        resource_id="pending",detail=conflict_type+":"+payload.client_transaction_id))
+    db.commit()
+    return row.id
+
 @router.post("/pos/sync", status_code=201)
 def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
-                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+                  user: User = Depends(current_user), db: Session = Depends(get_db), x_pos_device_token: str | None = Header(default=None)):
     require_permission(membership, "create")
     _crm_branch_check(db, membership, payload.branch_id)
+    device_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+    if device_shift and device_shift.device_id:
+        from app.core.pos_completion_models import POSOfflineConflict
+        prior_conflict=db.query(POSOfflineConflict).filter_by(organization_id=membership.organization_id,
+            device_id=device_shift.device_id,client_transaction_id=payload.client_transaction_id).first()
+        if prior_conflict and prior_conflict.status=="pending":
+            raise HTTPException(409,"Offline transaction is awaiting supervisor conflict resolution")
+        if prior_conflict and prior_conflict.status=="resolved":
+            raise HTTPException(409,"Offline conflict was resolved; discard local queue item and do not replay")
     request_hash = canonical_request_hash(payload)
     existing = db.query(POSSale).filter_by(
         organization_id=membership.organization_id,
@@ -1586,6 +1616,9 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).first()
     if existing:
         if existing.request_hash != request_hash:
+            prior_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+            _record_pos_sync_conflict(db,membership,user,payload,prior_shift,"duplicate_transaction",
+                {"existing_sale_id":existing.id,"existing_request_hash":existing.request_hash})
             raise HTTPException(409, "Client transaction ID was already used for different sale data")
         existing_payments = db.query(POSPayment).filter_by(
             organization_id=membership.organization_id, sale_id=existing.id
@@ -1599,7 +1632,30 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         branch_id=payload.branch_id, cashier_user_id=user.id, status="open"
     ).with_for_update().first()
     if not shift:
+        prior_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+        _record_pos_sync_conflict(db,membership,user,payload,prior_shift,"shift_closed",
+            {"shift_status":prior_shift.status if prior_shift else "missing","shift_id":payload.shift_id})
         raise HTTPException(409, "An open cashier shift for this branch is required to sync sales")
+    if shift.device_id:
+        from app.core.pos_completion_models import POSDevice
+        device=db.query(POSDevice).filter_by(id=shift.device_id,organization_id=membership.organization_id,branch_id=shift.branch_id).first()
+        if not device or device.status!="active" or not x_pos_device_token or not secrets.compare_digest(
+            device.credential_hash,hashlib.sha256(x_pos_device_token.encode()).hexdigest()):
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"device_revoked",
+                {"device_status":device.status if device else "missing"})
+            raise HTTPException(401,"Trusted POS device authentication failed")
+        device_expiry=device.offline_until
+        if device_expiry and device_expiry.tzinfo is None: device_expiry=device_expiry.replace(tzinfo=timezone.utc)
+        if device_expiry and device_expiry < datetime.now(timezone.utc):
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"offline_expired",
+                {"offline_until":device_expiry.isoformat()})
+            raise HTTPException(409,"Trusted device offline authorization expired; supervisor review is required")
+    customer=None
+    if payload.customer_id is not None:
+        from app.core.pos_completion_models import POSCustomer
+        customer=db.query(POSCustomer).filter_by(id=payload.customer_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
+        if not customer or (customer.branch_id and customer.branch_id!=payload.branch_id):
+            raise HTTPException(404,"Active customer not found for this organization and branch")
     product_ids = {line.product_id for line in payload.lines}
     products = db.query(InventoryProduct).filter(
         InventoryProduct.organization_id == membership.organization_id,
@@ -1607,6 +1663,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).with_for_update().all()
     product_map = {p.id: p for p in products}
     if set(product_map) != product_ids:
+        _record_pos_sync_conflict(db,membership,user,payload,shift,"unknown_product",
+            {"available_product_ids":sorted(product_map.keys()),"requested_product_ids":sorted(product_ids)})
         raise HTTPException(404, "One or more POS products were not found")
     if any(Decimal(str(line.discount_percent)) > 0 for line in payload.lines):
         require_permission(membership, "manage")
@@ -1675,6 +1733,9 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             take=min(available,remaining)
             if take>0: allocations.append([None,take]);remaining-=take
         if remaining>0:
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"stale_stock",
+                {"product_id":product_id,"sku":product_map[product_id].sku,"requested_quantity":str(quantity),
+                 "available_quantity":str(quantity-remaining),"unavailable_quantity":str(remaining)})
             raise HTTPException(409, f"Insufficient unreserved stock for product {product_map[product_id].sku}")
         warehouse_allocations[product_id]=allocations
     sale = POSSale(
@@ -1688,6 +1749,16 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     )
     db.add(sale)
     db.flush()
+    if customer:
+        from app.core.pos_completion_models import POSCustomerSale, POSLoyaltyEntry
+        db.add(POSCustomerSale(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id))
+        customer.lifetime_spend=Decimal(customer.lifetime_spend or 0)+total
+        points_earned=int(total//Decimal("100"))
+        if points_earned:
+            db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id,
+                entry_type="earn",points_delta=points_earned,idempotency_key=f"sale:{sale.id}:earn",
+                note="1 point per 100 currency units spent",created_by=user.id))
+            customer.points_balance+=points_earned
     movement_index=0
     for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
@@ -1913,6 +1984,26 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
             status="pending" if item.method == "mpesa" else "recorded"))
+    from app.core.pos_completion_models import POSCustomerSale, POSCustomer, POSLoyaltyEntry
+    customer_sale=db.query(POSCustomerSale).filter_by(organization_id=membership.organization_id,sale_id=sale.id).first()
+    if customer_sale:
+        earned=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="earn").scalar() or 0
+        already_reversed=-(db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="reversal").scalar() or 0)
+        cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
+            organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
+        target_reversal=min(int(earned),int(Decimal(str(cumulative_refunds))//Decimal("100")))
+        points_to_reverse=max(0,target_reversal-int(already_reversed))
+        if points_to_reverse:
+            loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
+            if loyalty_customer:
+                loyalty_customer.points_balance-=points_to_reverse
+                loyalty_customer.lifetime_spend=max(Decimal("0"),Decimal(loyalty_customer.lifetime_spend or 0)-total)
+                db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
+                    sale_id=sale.id,entry_type="reversal",points_delta=-points_to_reverse,
+                    idempotency_key=f"return:{result.id}:loyalty-reversal",
+                    note="Loyalty points reversed against cumulative POS refunds",created_by=user.id))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
