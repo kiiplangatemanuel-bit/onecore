@@ -584,7 +584,7 @@ import/export, team assignment and UAT.
   statement PDF/export/email delivery or an accounting workspace UI.
 
 
-## Accounting approvals and credit notes increment (CI pending)
+## Accounting approvals and credit notes increment (CI passed)
 
 - Added invoice approval submission, decision history and submitter self-approval
   prevention. Posting is blocked for invoices with pending or rejected approvals.
@@ -597,5 +597,5 @@ import/export, team assignment and UAT.
 - Explicitly not included: customer refunds, supplier credit balances, multi-level
   Accounting approvals, credit note PDF/email delivery and approval dashboard UI.
 - Branch: feature/accounting-credit-notes-approvals.
-- GitHub Actions verification pending; do not mark this increment complete until
-  migration upgrade/downgrade/re-upgrade, compilation and pytest all pass.
+- GitHub Actions run `42373824056` passed migration upgrade, downgrade/re-upgrade,
+  Python compilation and pytest at commit `3f3083b25fc7a9d8d16e60a967921e493060d474`.
