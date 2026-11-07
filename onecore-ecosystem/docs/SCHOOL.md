@@ -102,7 +102,7 @@ class/branch transfer:
 - `GET /api/v1/school/learners/{learner_id}/placements` returns chronological
   history with source/target class and year details, subject to access to both
   branches represented in the history.
-- Placement history is retained rather than overwriting the previous class link.
+- Placement history is retained rather than overwriting the previous class link. The `/school` workspace includes a placement form and chronological history viewer.
   Existing attendance rows remain associated with the class in which they were
   originally recorded.
 
