@@ -91,14 +91,17 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     employer_nssf = nssf
     employer_ahl = money(gross * D(str(cfg["housing_levy"]["employer_rate"])))
 
-    pension = min(money(extra.get("employee_pension", 0)), D(str(cfg["paye"]["pension_monthly_limit"])))
+    pension_limit = D(str(cfg["paye"]["pension_monthly_limit"]))
+    pension = min(money(extra.get("employee_pension", 0)), max(ZERO, pension_limit - nssf))
     mortgage = min(money(extra.get("mortgage_interest", 0)), D(str(cfg["paye"]["mortgage_monthly_limit"])))
     prmf = min(money(extra.get("post_retirement_medical_fund", 0)), D(str(cfg["paye"]["prmf_monthly_limit"])))
     insurance_premium = money(extra.get("insurance_premium", 0))
     insurance_relief = min(money(insurance_premium * D(str(cfg["paye"]["insurance_relief_rate"]))),
                             D(str(cfg["paye"]["insurance_relief_monthly_limit"])))
     deductible = money(ahl + shif + pension + mortgage + prmf + nssf)
-    taxable = max(ZERO, money(gross - deductible))
+    meal_exemption = min(money(extra.get("meal_benefit", 0)), D(str(cfg["paye"].get("meal_benefit_exemption_monthly", "5000"))))
+    disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if extra.get("valid_disability_exemption_certificate") else ZERO
+    taxable = max(ZERO, money(gross - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
     paye = max(ZERO, money(gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
@@ -142,10 +145,11 @@ KENYA_2026_RULES = {
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2157-amendments-to-paye-computation-pursuant-to-the-tax-laws-amendment-act%2C-2024", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
         {"authority": "NSSF", "url": "https://www.nssf.or.ke/notice-to-employers-year-4-2026-nssf-contribution-rates", "verified_on": "2026-11-08"},
-        {"authority": "SHA", "url": "https://new.sha.go.ke/wp-content/uploads/2025/07/PUBLIC_NOTICE_ON_EMPLOYER_REMITTENCES.pdf", "verified_on": "2026-11-08"}
+        {"authority": "Kenya Law / SHA", "url": "https://new.kenyalaw.org/akn/ke/act/ln/2024/49/eng%402024-03-08/source.pdf", "verified_on": "2026-11-08"}
     ],
     "parameters": {
         "paye": {
+            "meal_benefit_exemption_monthly": "5000", "disability_exemption_monthly": "150000",
             "bands": [
                 {"lower": "0", "upper": "24000", "rate": "0.10"},
                 {"lower": "24000", "upper": "32333", "rate": "0.25"},
@@ -268,7 +272,8 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         shift_allowance = money(extras.get("shift_allowance", 0))
         cash_allowances = money(extras.get("cash_allowances", 0))
         taxable_benefits = money(extras.get("taxable_benefits", 0))
-        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + taxable_benefits)
+        meal_benefit = money(extras.get("meal_benefit", 0))
+        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + taxable_benefits + meal_benefit)
         result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
         snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
                     "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
@@ -276,7 +281,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
-                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits)}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit)}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
