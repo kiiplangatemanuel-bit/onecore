@@ -405,7 +405,7 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
     _require_manage(membership)
     batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
-    if not batch or batch.data["method"] != "mpesa" or batch.data["status"] != "authorized":
+    if not batch or batch.data["method"] != "mpesa" or batch.data["status"] not in ("authorized", "processing"):
         raise HTTPException(409, "An authorized M-Pesa batch is required")
     from app.core.config import settings
     import httpx
@@ -428,6 +428,9 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
         phone = phone[1:]
     if not phone.startswith("254") or len(phone) != 12:
         raise HTTPException(422, "Employee phone must be a valid Kenyan MSISDN")
+    amount_decimal = D(row["amount"])
+    if amount_decimal != amount_decimal.to_integral_value():
+        raise HTTPException(422, "Daraja B2C requires whole KES amounts; configure an approved rounding policy before submission")
     base = settings.mpesa_base_url.rstrip("/")
     try:
         with httpx.Client(timeout=25.0) as client:
@@ -438,7 +441,7 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
             body = {"InitiatorName": os.getenv("MPESA_INITIATOR_NAME"),
                 "SecurityCredential": os.getenv("MPESA_SECURITY_CREDENTIAL"),
                 "CommandID": os.getenv("MPESA_B2C_COMMAND_ID", "BusinessPayment"),
-                "Amount": int(D(row["amount"]).quantize(D("1"), rounding=ROUND_HALF_UP)),
+                "Amount": int(amount_decimal),
                 "PartyA": settings.mpesa_shortcode, "PartyB": phone,
                 "Remarks": f"Salary {batch.data['run_id']}"[:100],
                 "QueueTimeOutURL": os.getenv("MPESA_B2C_TIMEOUT_URL"),
@@ -482,7 +485,7 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     if not batch:
         raise HTTPException(404, "Payment batch not found")
     d = dict(batch.data)
-    if d.get("status") not in ("authorized", "partial", "failed"):
+    if d.get("status") not in ("authorized", "processing", "partial", "failed"):
         raise HTTPException(409, "Payment batch must be authorized before provider callbacks")
     item_id = int(payload.get("employee_id", 0))
     row = next((x for x in d["rows"] if x["employee_id"] == item_id), None)
