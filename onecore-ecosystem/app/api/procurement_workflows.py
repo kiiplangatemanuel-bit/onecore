@@ -158,10 +158,18 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
     if existing:
+        prior_allocations = db.query(ProcurementSettlementAllocation).filter_by(
+            organization_id=membership.organization_id, settlement_id=existing.id
+        ).all()
+        prior_map = {x.invoice_id: Decimal(x.amount) for x in prior_allocations}
+        requested_map = {x.invoice_id: Decimal(x.amount) for x in payload.allocations}
         same = (existing.supplier_id == payload.supplier_id
                 and existing.payment_account_id == payload.payment_account_id
                 and existing.reference == payload.reference.strip()
-                and existing.amount == sum((x.amount for x in payload.allocations), Decimal("0.00")))
+                and existing.provider == payload.provider
+                and existing.payment_date.date() == payload.payment_date
+                and existing.provider_phone_number == (payload.provider_phone_number or "")
+                and prior_map == requested_map)
         if not same:
             raise HTTPException(409, "Settlement idempotency key was used for different payment data")
         return {**_settlement_response(existing), "status": "already_exists"}
@@ -474,7 +482,15 @@ def list_supplier_settlements(supplier_id: int | None = Query(default=None, gt=0
     if supplier_id:
         q = q.filter(ProcurementSettlement.supplier_id == supplier_id)
     rows = q.order_by(ProcurementSettlement.id.desc()).limit(500).all()
-    return [_settlement_response(x) for x in rows]
+    visible = []
+    for row in rows:
+        allocated = db.query(AccountingInvoice.branch_id).join(
+            ProcurementSettlementAllocation,
+            ProcurementSettlementAllocation.invoice_id == AccountingInvoice.id
+        ).filter(ProcurementSettlementAllocation.settlement_id == row.id).all()
+        if all(not branch_id or can_access_branch(membership, branch_id) for (branch_id,) in allocated):
+            visible.append(_settlement_response(row))
+    return visible
 
 
 @router.get("/supplier-settlements/{settlement_id}/remittance")
@@ -485,6 +501,12 @@ def supplier_remittance_advice(settlement_id: int, membership=Depends(active_mem
         id=settlement_id, organization_id=membership.organization_id, status="settled"
     ).first()
     if not row:
+        raise HTTPException(404, "Verified supplier settlement not found")
+    allocations_scope = db.query(ProcurementSettlementAllocation, AccountingInvoice).join(
+        AccountingInvoice, AccountingInvoice.id == ProcurementSettlementAllocation.invoice_id
+    ).filter(ProcurementSettlementAllocation.settlement_id == row.id).all()
+    if any(invoice.branch_id and not can_access_branch(membership, invoice.branch_id)
+           for _, invoice in allocations_scope):
         raise HTTPException(404, "Verified supplier settlement not found")
     supplier = db.query(ProcurementSupplier).filter_by(
         id=row.supplier_id, organization_id=membership.organization_id
@@ -517,12 +539,19 @@ def create_approval_delegation(payload: DelegationIn, membership=Depends(active_
         raise HTTPException(422, "Delegation users and validity window are invalid")
     if payload.branch_id and not can_access_branch(membership, payload.branch_id):
         raise HTTPException(404, "Branch not found")
+    if payload.branch_id is None and branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Branch-scoped administrators must specify the delegated branch")
     members = db.query(Membership).filter(
         Membership.organization_id == membership.organization_id, Membership.is_active == True,
         Membership.user_id.in_([payload.principal_user_id, payload.delegate_user_id])
     ).all()
     if {x.user_id for x in members} != {payload.principal_user_id, payload.delegate_user_id}:
         raise HTTPException(422, "Principal and delegate must be active organization members")
+    if payload.branch_id and any(
+        member.branch_scope != "*" and payload.branch_id not in {v.strip() for v in member.branch_scope.split(",")}
+        for member in members
+    ):
+        raise HTTPException(403, "Principal and delegate must both have access to the delegated branch")
     overlap = db.query(ProcurementApprovalDelegation).filter(
         ProcurementApprovalDelegation.organization_id == membership.organization_id,
         ProcurementApprovalDelegation.principal_user_id == payload.principal_user_id,
@@ -771,6 +800,8 @@ def revoke_supplier_portal_token(token_id: int, membership=Depends(active_member
 def create_supplier_portal_token(payload: PortalTokenIn, membership=Depends(active_membership),
                                  user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "manage")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier portal access tokens require organization-wide branch access")
     supplier = db.query(ProcurementSupplier).filter_by(
         id=payload.supplier_id, organization_id=membership.organization_id, is_active=True
     ).first()
@@ -864,6 +895,8 @@ def supplier_portal_delivery_update(payload: dict,
 def import_supplier_statement(payload: SupplierStatementIn, membership=Depends(active_membership),
                               user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "manage")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier statement reconciliation requires organization-wide branch access")
     supplier = db.query(ProcurementSupplier).filter_by(
         id=payload.supplier_id, organization_id=membership.organization_id
     ).first()
@@ -1169,6 +1202,11 @@ def record_supplier_invoice_discrepancy(supplier_invoice_id: int, payload: Discr
     ).first()
     if not invoice:
         raise HTTPException(404, "Supplier invoice not found")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=invoice.purchase_order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Supplier invoice not found")
     if invoice.status not in {"matched", "accounted"}:
         raise HTTPException(409, "Discrepancies can only be raised against a matched or accounted invoice")
     row = ProcurementInvoiceDiscrepancy(
@@ -1199,6 +1237,11 @@ def resolve_supplier_invoice_discrepancy(discrepancy_id: int, payload: Discrepan
     ).first()
     if not invoice or invoice.status not in {"matched", "accounted"}:
         raise HTTPException(409, "Source invoice is not in a reconciled state")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=invoice.purchase_order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Invoice discrepancy not found")
     row.status = "resolved"
     row.resolution_note = payload.resolution_note.strip()
     row.resolved_by = user.id
@@ -1213,6 +1256,8 @@ def resolve_supplier_invoice_discrepancy(discrepancy_id: int, payload: Discrepan
 def procurement_accounting_reconciliation(start_date: date | None = None, end_date: date | None = None,
                                            membership=Depends(active_membership), db: Session = Depends(get_db)):
     require_permission(membership, "read")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Consolidated procurement reconciliation requires organization-wide branch access")
     q = db.query(ProcurementSupplierInvoice).filter_by(organization_id=membership.organization_id)
     if start_date:
         q = q.filter(ProcurementSupplierInvoice.invoice_date >= datetime.combine(start_date, time.min, tzinfo=timezone.utc))
