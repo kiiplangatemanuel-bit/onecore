@@ -693,3 +693,24 @@ Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order 
 Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
 unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
 unimplemented. A dispatch worker must re-check current consent immediately before send.
+
+
+
+## HR employee directory and leave workflow increment (7 November 2026)
+
+Implemented on branch `feature/hr-employees-leave` (based on CRM campaign branch):
+
+- Tenant/branch-scoped employee directory with organization-unique employee numbers,
+  optional linked organization users, contact details, department, role and employment type.
+- Employee self-service leave request when employee profile is linked to the signed-in user;
+  HR managers can also submit on behalf of staff.
+- Leave types: annual, sick, compassionate, unpaid, parental and other.
+- Working days calculated inclusively excluding weekends; overlapping pending or
+  approved requests are rejected.
+- HR managers can review and approve/reject pending requests; employees cannot decide
+  their own leave. Sensitive changes create audit events.
+- Migration `0022_hr_employee_leave`, HR APIs, starter workspace and tests.
+
+Boundaries: no leave entitlements/accrual ledger, holiday calendar, balance deduction,
+payroll, payslips, statutory deductions, attendance integration or employee document
+management. Public holidays are not excluded from the current working-day calculation.
