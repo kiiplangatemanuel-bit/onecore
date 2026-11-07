@@ -566,5 +566,5 @@ import/export, team assignment and UAT.
 - Supplier returns are restricted to accepted GRN quantities, cannot exceed available stock, write negative inventory ledger movements and retain credit-note references.
 - Supplier performance endpoint reports PO/GRN counts, delivered/accepted quantity and acceptance percentage.
 - Added migration 0016_procurement_completion, frontend forms, API schemas/routes, docs/PROCUREMENT.md and automated validation/OpenAPI/UI tests.
-- GitHub Actions run 42372479131 passed: dependency installation, migration upgrade, migration downgrade/re-upgrade, Python compilation and 67 passed pytest checks (5 warnings).
+- GitHub Actions run 42372561387 passed: dependency installation, migration upgrade, migration downgrade/re-upgrade, Python compilation and 68 passed pytest checks (5 warnings).
 - Explicit remaining integration work: matched supplier invoices are recorded but not posted to AP journals or paid; credit-note references are captured but not posted to AP; no external supplier portal/email delivery, approval delegation/escalation, supplier statement reconciliation, or end-to-end production UAT yet.
