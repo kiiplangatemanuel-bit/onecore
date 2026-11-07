@@ -273,3 +273,9 @@ inspection and returns, supplier invoice matching, landed-cost allocation, AP
 integration, procurement UI/reporting, PostgreSQL concurrent receipt tests,
 security/accessibility and UAT.
 
+
+- Basic accessible procurement UI served at `/procurement` for supplier creation,
+  purchase-order creation, approval and goods receipt; PO detail API supports the UI.
+- Additional UI/detail commits: `2721c7c` (authorized PO detail), `9fce237`
+  (procurement UI), `fa0aff4` (UI route), `8704248` (route test),
+  `e7e7633` (tracker).
