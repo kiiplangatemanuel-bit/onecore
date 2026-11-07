@@ -166,6 +166,16 @@ class PriceListIn(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.starts_at and self.starts_at.tzinfo is None:
+            raise ValueError("starts_at must include a timezone")
+        if self.ends_at and self.ends_at.tzinfo is None:
+            raise ValueError("ends_at must include a timezone")
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must follow starts_at")
+        return self
+
 
 class PriceIn(BaseModel):
     product_id: int = Field(gt=0)
@@ -642,7 +652,10 @@ def set_price(price_list_id:int,payload:PriceIn,membership=Depends(active_member
 @router.get("/price-lists")
 def list_price_lists(branch_id:str|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    q=db.query(InventoryPriceList).filter_by(organization_id=membership.organization_id,is_active=True)
+    now=datetime.now(timezone.utc)
+    q=db.query(InventoryPriceList).filter_by(organization_id=membership.organization_id,is_active=True).filter(
+        (InventoryPriceList.starts_at==None)|(InventoryPriceList.starts_at<=now),
+        (InventoryPriceList.ends_at==None)|(InventoryPriceList.ends_at>now))
     allowed=branch_scope_ids(membership)
     if branch_id:
         if not can_access_branch(membership,branch_id):raise HTTPException(404,"Price list not found")
@@ -672,7 +685,10 @@ def warehouse_stock(warehouse_id:int,membership=Depends(active_membership),db:Se
 def get_price_list_prices(price_list_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
     pl=db.query(InventoryPriceList).filter_by(id=price_list_id,organization_id=membership.organization_id,is_active=True).first()
+    now=datetime.now(timezone.utc)
     if not pl or (pl.branch_id and not can_access_branch(membership,pl.branch_id)): raise HTTPException(404,"Price list not found")
+    if (pl.starts_at and (pl.starts_at if pl.starts_at.tzinfo else pl.starts_at.replace(tzinfo=timezone.utc))>now) or (pl.ends_at and (pl.ends_at if pl.ends_at.tzinfo else pl.ends_at.replace(tzinfo=timezone.utc))<=now):
+        raise HTTPException(404,"Price list is not currently effective")
     rows=db.query(InventoryPrice,InventoryProduct).join(InventoryProduct,InventoryProduct.id==InventoryPrice.product_id).filter(
         InventoryPrice.organization_id==membership.organization_id,InventoryPrice.price_list_id==pl.id).all()
     return [{"product_id":p.id,"sku":p.sku,"name":p.name,"unit_price":str(price.unit_price),
