@@ -843,10 +843,12 @@ def create_goods_receipt(order_id: int, payload: GoodsReceiptIn,
     except Exception:
         db.rollback()
         raise
+    saved=db.query(ProcurementGoodsReceiptLine).filter_by(
+        goods_receipt_id=receipt.id,organization_id=membership.organization_id).all()
     return {"id":receipt.id,"receipt_number":receipt.receipt_number,
         "status":receipt.status,"purchase_order_id":order.id,
         "lines":[{"id":x.id,"purchase_order_line_id":x.purchase_order_line_id,
-        "quantity_received":str(x.quantity_received)} for x in receipt.lines]}
+        "quantity_received":str(x.quantity_received)} for x in saved]}
 
 
 @router.get("/procurement/goods-receipts")
