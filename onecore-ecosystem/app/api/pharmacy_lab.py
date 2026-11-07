@@ -542,10 +542,12 @@ def create_pharmacy_prescription(payload:dict,m=Depends(active_membership),u:Use
 def list_pharmacy_prescriptions(patient_id:int|None=None,status:str|None=None,branch_id:str|None=None,
     m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db),
     limit:int=Query(100,ge=1,le=500)):
-    _need(db,m,u,"pharmacy.manage",None)
     if patient_id:
-        _patient_read(db,m,u,patient_id)
-    rows=_resource_list(db,m,"pharmacy_prescription",patient_id=patient_id,status=status,limit=limit)
+        patient,_,_=_patient_read(db,m,u,patient_id)
+        branch_id=branch_id or patient.branch_id
+    _need(db,m,u,"pharmacy.manage",branch_id)
+    rows=_resource_list(db,m,"pharmacy_prescription",branch_id=branch_id,
+        patient_id=patient_id,status=status,limit=limit)
     return [{"id":x.id,"patient_id":x.patient_id,"status":x.status,
         "prescription_number":_payload(x).get("prescription_number"),
         "valid_until":_payload(x).get("valid_until")} for x in rows]
