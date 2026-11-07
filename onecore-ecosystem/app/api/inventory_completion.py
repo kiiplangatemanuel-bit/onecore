@@ -8,10 +8,10 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Branch, InventoryProduct, InventoryStockMovement, AuditEvent
+from app.core.models import User, Branch, InventoryProduct, InventoryStockMovement, AuditEvent, ProcurementRequisition, ProcurementRequisitionLine
 from app.core.inventory_models import (InventoryWarehouse, InventoryTransfer, InventoryTransferLine,
     InventoryReservation, InventoryBatch, InventoryStocktake, InventoryStocktakeLine,
-    InventoryReorderRule, InventoryPriceList, InventoryPrice)
+    InventoryReorderRule, InventoryPriceList, InventoryPrice, InventoryReplenishmentRun)
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -134,6 +134,10 @@ class StocktakeIn(BaseModel):
     warehouse_id: int = Field(gt=0)
     note: str = Field(default="", max_length=500)
     lines: list[StocktakeLineIn] = Field(min_length=1, max_length=1000)
+
+
+class ReplenishmentDraftIn(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=100)
 
 
 class ReorderRuleIn(BaseModel):
@@ -555,6 +559,40 @@ def replenishment(membership=Depends(active_membership),db:Session=Depends(get_d
                 "name":product.name if product else "","on_hand":str(on_hand),"reserved":str(reserved),
                 "available":str(available),"suggested_order_quantity":str(suggested),"lead_time_days":rule.lead_time_days})
     return result
+
+
+@router.post("/replenishment/draft-requisitions",status_code=201)
+def create_replenishment_requisitions(payload:ReplenishmentDraftIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    existing=db.query(InventoryReplenishmentRun).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).all()
+    if existing:
+        return {"status":"already_created","requisitions":[{"branch_id":x.branch_id,"requisition_id":x.requisition_id} for x in existing]}
+    suggestions=replenishment(membership,db)
+    grouped={}
+    for item in suggestions:
+        wh=get_warehouse(db,membership.organization_id,item["warehouse_id"],membership)
+        branch_lines=grouped.setdefault(wh.branch_id,{})
+        branch_lines[item["product_id"]]=branch_lines.get(item["product_id"],Decimal("0"))+dec(item["suggested_order_quantity"])
+    if not grouped:
+        return {"status":"no_replenishment_required","requisitions":[]}
+    created=[]
+    for branch_id,lines in grouped.items():
+        requisition=ProcurementRequisition(organization_id=membership.organization_id,branch_id=branch_id,
+            requisition_number=f"IR-{uuid4().hex[:12].upper()}",status="draft",
+            justification="Automatically generated from inventory reorder rules; review quantities before submission.",
+            requested_by=user.id)
+        db.add(requisition);db.flush()
+        for product_id,quantity in lines.items():
+            if quantity>0:
+                db.add(ProcurementRequisitionLine(organization_id=membership.organization_id,requisition_id=requisition.id,
+                    product_id=product_id,quantity_requested=quantity.quantize(Q3)))
+        db.add(InventoryReplenishmentRun(organization_id=membership.organization_id,branch_id=branch_id,
+            idempotency_key=payload.idempotency_key,requisition_id=requisition.id))
+        created.append({"branch_id":branch_id,"requisition_id":requisition.id,"status":"draft"})
+        audit(db,user,membership.organization_id,"inventory.replenishment.requisition_created","procurement_requisition",requisition.id)
+    db.commit()
+    return {"status":"draft_requisitions_created","requisitions":created}
 
 
 @router.get("/forecast")
