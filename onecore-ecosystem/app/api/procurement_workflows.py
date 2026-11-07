@@ -1509,6 +1509,7 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
         organization_id=membership.organization_id, purchase_order_id=order.id
     ).all()}
     valid = bool(source_lines)
+    computed_subtotal = Decimal("0.00")
     for line in source_lines:
         po_line = po_lines.get(line.purchase_order_line_id)
         if not po_line or Decimal(line.unit_cost) != Decimal(po_line.unit_cost):
@@ -1517,6 +1518,9 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
         if Decimal(line.quantity) <= 0:
             valid = False
             break
+        computed_subtotal += (Decimal(line.quantity) * Decimal(line.unit_cost)).quantize(CENT)
+    if computed_subtotal != Decimal(source.subtotal) or source.currency != order.currency:
+        valid = False
     ap_link = db.query(AccountingProcurementLink).filter_by(
         organization_id=membership.organization_id, procurement_invoice_id=source.id
     ).first()
@@ -1528,8 +1532,11 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
         valid = False
     if row.code == "currency" and source.currency != order.currency:
         valid = False
-    if row.code == "tax" and Decimal(source.tax_total) < 0:
-        valid = False
+    if row.code == "tax":
+        if Decimal(source.tax_total) < 0:
+            valid = False
+        if ap and Decimal(ap.tax_total) != Decimal(source.tax_total):
+            valid = False
     if row.code in {"quantity", "receipt"}:
         billed_by_po_line = {}
         for line in source_lines:
