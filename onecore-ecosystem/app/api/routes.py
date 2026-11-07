@@ -117,7 +117,7 @@ def deactivate_branch(branch_id:str,membership=Depends(active_membership),user:U
 def list_records(module_key: str, membership=Depends(active_membership), db: Session = Depends(get_db),
                  limit: int = Query(default=100, ge=1, le=500)):
     validate_module_key(module_key)
-    require_permission(membership, "read")
+    require_permission(membership, "manage" if module_key == "hr-payroll" else "read")
     query = db.query(Record).filter_by(organization_id=membership.organization_id, module_key=module_key)
     allowed_branches = branch_scope_ids(membership)
     if allowed_branches is not None:
@@ -133,6 +133,8 @@ def list_records(module_key: str, membership=Depends(active_membership), db: Ses
 def create_record(module_key: str, payload: RecordIn, membership=Depends(active_membership),
                   user: User = Depends(current_user), db: Session = Depends(get_db)):
     validate_module_key(module_key)
+    if module_key == "hr-payroll":
+        raise HTTPException(403, "Payroll records must be created through controlled payroll workflow endpoints")
     require_permission(membership, "create")
     if not can_access_branch(membership, payload.branch_id):
         raise HTTPException(403, "Your membership is not authorized for this branch")
@@ -150,6 +152,8 @@ def update_record(module_key: str, record_id: int, payload: RecordIn,
                   membership=Depends(active_membership), user: User = Depends(current_user),
                   db: Session = Depends(get_db)):
     validate_module_key(module_key)
+    if module_key == "hr-payroll":
+        raise HTTPException(403, "Payroll calculation snapshots and payment records are immutable through generic record updates")
     require_permission(membership, "update")
     row = db.query(Record).filter_by(id=record_id, organization_id=membership.organization_id,
                                      module_key=module_key).first()
@@ -171,6 +175,8 @@ def update_record(module_key: str, record_id: int, payload: RecordIn,
 def delete_record(module_key: str, record_id: int, membership=Depends(active_membership),
                   user: User = Depends(current_user), db: Session = Depends(get_db)):
     validate_module_key(module_key)
+    if module_key == "hr-payroll":
+        raise HTTPException(403, "Payroll audit, calculation and payment records cannot be deleted through generic record endpoints")
     require_permission(membership, "delete")
     row = db.query(Record).filter_by(id=record_id, organization_id=membership.organization_id,
                                      module_key=module_key).first()
