@@ -1239,7 +1239,7 @@ class CRMCampaignDelivery(Base):
     recipient_id: Mapped[int] = mapped_column(ForeignKey("crm_campaign_recipients.id"), index=True)
     attempt_number: Mapped[int] = mapped_column()
     status: Mapped[str] = mapped_column(String(16))
-    provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True, unique=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     unsubscribe_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
