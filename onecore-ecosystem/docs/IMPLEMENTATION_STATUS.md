@@ -693,3 +693,20 @@ Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order 
 Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
 unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
 unimplemented. A dispatch worker must re-check current consent immediately before send.
+
+
+## Accounting completion increment (implementation branch)
+
+Branch: `feature/accounting-complete-controls`.
+
+Implemented in this increment:
+- Ledger-derived cash-flow report with selected cash/bank asset accounts, opening/closing balances and operating/investing/financing/unclassified movements.
+- Explicit tax ledger workpaper for selected input-tax asset and output-tax liability accounts; no tax determination or KRA/eTIMS filing claim.
+- Procurement-to-AP bridge for three-way-matched supplier invoices, explicit line-to-ledger mappings, unique source link, idempotent retries and automatic pending maker-checker approval.
+- Customer refund and supplier refund receipt against posted credit notes, with amount caps, cash/bank asset validation, balanced journal, refund ledger record, idempotency and audit event.
+- Credit notes may now be raised against the remaining uncredited invoice value even when the original invoice has been paid; refund processing is separately limited to cash previously settled.
+- Fiscal-period close checklist blocks on matched procurement supplier invoices that have not been integrated into AP.
+- Accounting workspace forms for cash-flow, tax workpaper, procurement AP integration and refunds.
+- Migration `0022_accounting_completion` adds refund and procurement-link tables.
+
+Validation status: GitHub Actions on the new PR head is required to establish migration upgrade/downgrade/re-upgrade, Python compilation and the complete pytest suite. Do not mark this increment verified until those checks pass. The tax summary is a workpaper, not a statutory return; the cash-flow report is a ledger classification report, not a forecast; refund journals do not execute external payment rails.
