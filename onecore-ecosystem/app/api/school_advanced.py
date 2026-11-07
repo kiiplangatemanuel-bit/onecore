@@ -53,7 +53,8 @@ def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_
             id=int(row.data["class_id"]), organization_id=m.organization_id
         ).first()
         branch_id = cls.branch_id if cls else None
-    if not row or not can_access_branch(m, branch_id):
+    global_record = row and branch_id is None and not (row.data or {}).get("learner_id") and not (row.data or {}).get("class_id")
+    if not row or (not global_record and not can_access_branch(m, branch_id)):
         raise HTTPException(404, f"{kind.replace('_', ' ').title()} not found")
     return row
 
