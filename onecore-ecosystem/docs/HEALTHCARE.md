@@ -30,7 +30,7 @@ records compliance obligations.
 - Provider branch scope is checked against the selected appointment branch.
 
 A visit cannot be marked completed until its clinical encounter has been signed.
-Cancellation and no-show transitions require a reason.
+Cancellation and no-show transitions require a reason, which is retained on the appointment record.
 
 ## Clinical encounters
 
