@@ -1546,3 +1546,263 @@ def accounting_aging(invoice_type:str=Query(pattern=r"^(receivable|payable)$"),
             "days_overdue":max(days,0),"balance":str(balance),"bucket":key})
     return {"invoice_type":invoice_type,"as_of":cutoff.isoformat(),
         "buckets":{k:str(v) for k,v in buckets.items()},"invoices":output}
+
+
+@router.get("/accounting/fiscal-periods")
+def list_accounting_periods(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(AccountingFiscalPeriod).filter_by(organization_id=membership.organization_id).order_by(AccountingFiscalPeriod.start_date).all()
+    return [{"id":x.id,"code":x.code,"start_date":x.start_date.date().isoformat(),
+        "end_date":x.end_date.date().isoformat(),"status":x.status} for x in rows]
+
+
+@router.post("/accounting/fiscal-periods",status_code=201)
+def create_accounting_period(payload:AccountingFiscalPeriodIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if payload.end_date<payload.start_date: raise HTTPException(422,"Period end must not precede its start")
+    start=datetime.combine(payload.start_date,time.min,tzinfo=timezone.utc)
+    end=datetime.combine(payload.end_date,time.max,tzinfo=timezone.utc)
+    overlap=db.query(AccountingFiscalPeriod).filter(
+        AccountingFiscalPeriod.organization_id==membership.organization_id,
+        AccountingFiscalPeriod.start_date<=end,AccountingFiscalPeriod.end_date>=start).first()
+    if overlap: raise HTTPException(409,"Fiscal periods cannot overlap")
+    row=AccountingFiscalPeriod(organization_id=membership.organization_id,code=payload.code.strip().upper(),
+        start_date=start,end_date=end,status="open",created_by=user.id)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Fiscal period code already exists")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"accounting.period.created","accounting_period",row.id)
+    return {"id":row.id,"code":row.code,"status":row.status}
+
+
+@router.post("/accounting/fiscal-periods/{period_id}/close")
+def close_accounting_period(period_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row: raise HTTPException(404,"Fiscal period not found")
+    if row.status=="closed": raise HTTPException(409,"Fiscal period is already closed")
+    drafts=db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id==membership.organization_id,
+        AccountingInvoice.status=="draft",
+        AccountingInvoice.issue_date>=row.start_date,
+        AccountingInvoice.issue_date<=row.end_date).count()
+    if drafts: raise HTTPException(409,"Post or cancel all draft invoices dated in this period before closing")
+    row.status="closed";row.closed_by=user.id;row.closed_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"accounting.period.closed","accounting_period",row.id)
+    return {"id":row.id,"code":row.code,"status":row.status,"closed_at":row.closed_at.isoformat()}
+
+
+@router.post("/accounting/budgets",status_code=201)
+def create_accounting_budget(payload:AccountingBudgetIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    period=db.query(AccountingFiscalPeriod).filter_by(
+        id=payload.fiscal_period_id,organization_id=membership.organization_id,status="open").first()
+    if not period: raise HTTPException(404,"Open fiscal period not found")
+    account_ids={x.account_id for x in payload.lines}
+    accounts=_accounting_get_accounts(db,membership.organization_id,account_ids)
+    if any(x.account_type not in ("expense","revenue") for x in accounts.values()):
+        raise HTTPException(422,"Budgets can only target revenue or expense accounts")
+    for item in payload.lines:
+        if item.branch_id: _crm_branch_check(db,membership,item.branch_id)
+    row=AccountingBudget(organization_id=membership.organization_id,fiscal_period_id=period.id,
+        name=payload.name.strip(),status="draft",created_by=user.id)
+    db.add(row);db.flush()
+    for item in payload.lines:
+        db.add(AccountingBudgetLine(organization_id=membership.organization_id,budget_id=row.id,
+            account_id=item.account_id,branch_id=item.branch_id,amount=item.amount))
+    db.commit();db.refresh(row)
+    audit(db,user.id,membership.organization_id,"accounting.budget.created","accounting_budget",row.id)
+    return {"id":row.id,"name":row.name,"status":row.status}
+
+
+@router.post("/accounting/budgets/{budget_id}/approve")
+def approve_accounting_budget(budget_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(AccountingBudget).filter_by(
+        id=budget_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row: raise HTTPException(404,"Budget not found")
+    if row.status!="draft": raise HTTPException(409,"Only draft budgets can be approved")
+    row.status="approved";row.approved_by=user.id;row.approved_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"accounting.budget.approved","accounting_budget",row.id)
+    return {"id":row.id,"status":row.status}
+
+
+@router.get("/accounting/budgets/{budget_id}/performance")
+def accounting_budget_performance(budget_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    budget=db.query(AccountingBudget).filter_by(
+        id=budget_id,organization_id=membership.organization_id,status="approved").first()
+    if not budget: raise HTTPException(404,"Approved budget not found")
+    period=db.query(AccountingFiscalPeriod).filter_by(
+        id=budget.fiscal_period_id,organization_id=membership.organization_id).first()
+    if not period: raise HTTPException(404,"Budget period not found")
+    lines=db.query(AccountingBudgetLine,AccountingAccount).join(
+        AccountingAccount,AccountingAccount.id==AccountingBudgetLine.account_id).filter(
+        AccountingBudgetLine.organization_id==membership.organization_id,
+        AccountingBudgetLine.budget_id==budget.id).all()
+    output=[]
+    for item,account in lines:
+        q=db.query(func.coalesce(func.sum(AccountingJournalLine.debit-AccountingJournalLine.credit),0)).join(
+            AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+            AccountingJournalLine.organization_id==membership.organization_id,
+            AccountingJournalLine.account_id==item.account_id,
+            AccountingJournalLine.branch_id==item.branch_id,
+            AccountingJournal.entry_date>=period.start_date,AccountingJournal.entry_date<=period.end_date)
+        allowed=branch_scope_ids(membership)
+        if allowed is not None:
+            if item.branch_id is not None and item.branch_id not in allowed: continue
+            if item.branch_id is None: q=q.filter((AccountingJournalLine.branch_id==None)|(AccountingJournalLine.branch_id.in_(allowed)))
+        actual=Decimal(str(q.scalar() or 0))
+        if account.account_type=="revenue": actual=-actual
+        output.append({"account_id":account.id,"code":account.code,"name":account.name,
+            "branch_id":item.branch_id,"budget":str(item.amount),"actual":str(actual),
+            "variance":str(Decimal(item.amount)-actual)})
+    return {"budget_id":budget.id,"period":period.code,"status":budget.status,"lines":output}
+
+
+@router.post("/accounting/fixed-assets",status_code=201)
+def create_accounting_fixed_asset(payload:AccountingFixedAssetIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if payload.salvage_value>=payload.cost: raise HTTPException(422,"Salvage value must be less than asset cost")
+    if payload.branch_id: _crm_branch_check(db,membership,payload.branch_id)
+    accounts=_accounting_get_accounts(db,membership.organization_id,
+        {payload.asset_account_id,payload.accumulated_depreciation_account_id,
+         payload.depreciation_expense_account_id,payload.payment_account_id})
+    if accounts[payload.asset_account_id].account_type!="asset": raise HTTPException(422,"Asset account must be an asset")
+    if accounts[payload.accumulated_depreciation_account_id].account_type!="asset": raise HTTPException(422,"Accumulated depreciation account must be an asset")
+    if accounts[payload.depreciation_expense_account_id].account_type!="expense": raise HTTPException(422,"Depreciation expense account must be an expense")
+    if accounts[payload.payment_account_id].account_type!="asset": raise HTTPException(422,"Acquisition payment account must be an asset")
+    row=AccountingFixedAsset(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        asset_code=payload.asset_code.strip().upper(),name=payload.name.strip(),
+        acquisition_date=datetime.combine(payload.acquisition_date,time.min,tzinfo=timezone.utc),
+        cost=payload.cost,salvage_value=payload.salvage_value,useful_life_months=payload.useful_life_months,
+        accumulated_depreciation=Decimal("0"),asset_account_id=payload.asset_account_id,
+        accumulated_depreciation_account_id=payload.accumulated_depreciation_account_id,
+        depreciation_expense_account_id=payload.depreciation_expense_account_id,
+        status="active",created_by=user.id)
+    db.add(row)
+    journal=_accounting_make_journal(db,membership,user,payload.acquisition_date,
+        payload.asset_code,"Fixed asset acquisition "+payload.name,[
+            {"account_id":payload.asset_account_id,"description":"Acquire "+payload.name,"debit":payload.cost,"credit":Decimal("0")},
+            {"account_id":payload.payment_account_id,"description":"Asset payment "+payload.name,"debit":Decimal("0"),"credit":payload.cost}],payload.branch_id)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Asset code already exists or acquisition conflicts")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"accounting.fixed_asset.created","fixed_asset",row.id)
+    return {"id":row.id,"asset_code":row.asset_code,"status":row.status,"acquisition_journal_id":journal.id}
+
+
+@router.get("/accounting/fixed-assets")
+def list_accounting_fixed_assets(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(AccountingFixedAsset).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter((AccountingFixedAsset.branch_id==None)|(AccountingFixedAsset.branch_id.in_(allowed)))
+    return [{"id":x.id,"asset_code":x.asset_code,"name":x.name,"cost":str(x.cost),
+        "salvage_value":str(x.salvage_value),"useful_life_months":x.useful_life_months,
+        "accumulated_depreciation":str(x.accumulated_depreciation),
+        "net_book_value":str(x.cost-x.accumulated_depreciation),"status":x.status,
+        "branch_id":x.branch_id} for x in q.order_by(AccountingFixedAsset.asset_code).all()]
+
+
+@router.post("/accounting/fixed-assets/{asset_id}/depreciation")
+def depreciate_accounting_fixed_asset(asset_id:int,payload:AccountingDepreciationIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    period_date=payload.period_date.replace(day=1)
+    _accounting_assert_period_open(db,membership.organization_id,period_date)
+    duplicate=db.query(AccountingDepreciationEntry).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if duplicate:
+        if duplicate.asset_id==asset_id and duplicate.period_date.date()==period_date:
+            return {"id":duplicate.id,"status":"already_applied","journal_id":duplicate.journal_id}
+        raise HTTPException(409,"Depreciation idempotency key already used")
+    asset=db.query(AccountingFixedAsset).filter_by(
+        id=asset_id,organization_id=membership.organization_id,status="active").with_for_update().first()
+    if not asset or (asset.branch_id and not can_access_branch(membership,asset.branch_id)):
+        raise HTTPException(404,"Fixed asset not found")
+    if period_date<asset.acquisition_date.date(): raise HTTPException(422,"Depreciation cannot precede acquisition")
+    start=datetime.combine(period_date,time.min,tzinfo=timezone.utc)
+    next_month=date(period_date.year+1,1,1) if period_date.month==12 else date(period_date.year,period_date.month+1,1)
+    end=datetime.combine(next_month,time.min,tzinfo=timezone.utc)
+    existing=db.query(AccountingDepreciationEntry).filter(
+        AccountingDepreciationEntry.organization_id==membership.organization_id,
+        AccountingDepreciationEntry.asset_id==asset.id,
+        AccountingDepreciationEntry.period_date>=start,
+        AccountingDepreciationEntry.period_date<end).first()
+    if existing: raise HTTPException(409,"Depreciation has already been posted for this asset and month")
+    depreciable=Decimal(asset.cost)-Decimal(asset.salvage_value)
+    remaining=depreciable-Decimal(asset.accumulated_depreciation)
+    if remaining<=0: raise HTTPException(409,"Asset is fully depreciated")
+    monthly=(depreciable/Decimal(asset.useful_life_months)).quantize(Decimal("0.01"))
+    amount=min(monthly,remaining)
+    journal=_accounting_make_journal(db,membership,user,period_date,
+        asset.asset_code+"-"+period_date.strftime("%Y%m"),
+        "Monthly straight-line depreciation "+asset.name,[
+            {"account_id":asset.depreciation_expense_account_id,"description":"Depreciation "+asset.name,
+             "debit":amount,"credit":Decimal("0"),"branch_id":asset.branch_id},
+            {"account_id":asset.accumulated_depreciation_account_id,"description":"Accumulated depreciation "+asset.name,
+             "debit":Decimal("0"),"credit":amount,"branch_id":asset.branch_id}],asset.branch_id)
+    asset.accumulated_depreciation=Decimal(asset.accumulated_depreciation)+amount
+    entry=AccountingDepreciationEntry(organization_id=membership.organization_id,asset_id=asset.id,
+        period_date=start,amount=amount,journal_id=journal.id,idempotency_key=payload.idempotency_key,created_by=user.id)
+    db.add(entry)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Depreciation conflicts with a concurrent posting")
+    audit(db,user.id,membership.organization_id,"accounting.asset.depreciated","fixed_asset",asset.id,str(amount))
+    return {"id":entry.id,"amount":str(amount),"accumulated_depreciation":str(asset.accumulated_depreciation),
+        "net_book_value":str(Decimal(asset.cost)-Decimal(asset.accumulated_depreciation)),"journal_id":journal.id}
+
+
+@router.get("/accounting/financial-statements")
+def accounting_financial_statements(start_date:date,end_date:date,
+    membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    if end_date<start_date: raise HTTPException(422,"End date must not precede start date")
+    end=datetime.combine(end_date,time.max,tzinfo=timezone.utc)
+    start=datetime.combine(start_date,time.min,tzinfo=timezone.utc)
+    q=db.query(AccountingAccount,AccountingJournalLine,AccountingJournal).join(
+        AccountingJournalLine,AccountingJournalLine.account_id==AccountingAccount.id).join(
+        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+        AccountingAccount.organization_id==membership.organization_id,
+        AccountingJournalLine.organization_id==membership.organization_id,
+        AccountingJournal.organization_id==membership.organization_id,
+        AccountingJournal.status=="posted",AccountingJournal.entry_date<=end)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:q=q.filter(AccountingJournalLine.branch_id==None)
+        else:q=q.filter((AccountingJournalLine.branch_id==None)|(AccountingJournalLine.branch_id.in_(allowed)))
+    rows=q.all()
+    pnl=[];balance=[];revenues=Decimal("0");expenses=Decimal("0")
+    assets=Decimal("0");liabilities=Decimal("0");equity=Decimal("0");cumulative_profit=Decimal("0")
+    for account,line,journal in rows:
+        debit=Decimal(line.debit);credit=Decimal(line.credit)
+        if account.account_type=="asset": assets+=debit-credit
+        elif account.account_type=="liability": liabilities+=credit-debit
+        elif account.account_type=="equity": equity+=credit-debit
+        elif account.account_type=="revenue": cumulative_profit+=credit-debit
+        elif account.account_type=="expense": cumulative_profit-=debit-credit
+        if start<=journal.entry_date<=end and account.account_type in ("revenue","expense"):
+            period_value=credit-debit if account.account_type=="revenue" else debit-credit
+            if account.account_type=="revenue":revenues+=period_value
+            else:expenses+=period_value
+            pnl.append({"account_id":account.id,"code":account.code,"name":account.name,
+                "account_type":account.account_type,"amount":str(period_value)})
+    for account_type,amount in (("assets",assets),("liabilities",liabilities),("equity",equity),("retained_earnings",cumulative_profit)):
+        balance.append({"category":account_type,"amount":str(amount)})
+    net_income=revenues-expenses
+    return {"period":{"start":start_date.isoformat(),"end":end_date.isoformat()},
+        "profit_and_loss":{"revenue":str(revenues),"expenses":str(expenses),"net_income":str(net_income),"lines":pnl},
+        "balance_sheet":{"lines":balance,"total_assets":str(assets),
+            "total_liabilities_and_equity":str(liabilities+equity+cumulative_profit),
+            "balanced":assets==liabilities+equity+cumulative_profit}}
