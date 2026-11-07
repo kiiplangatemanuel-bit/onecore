@@ -211,3 +211,10 @@ clearing account; configure that account as the M-Pesa clearing control account.
 Safaricom sandbox credentials and registered callback URLs are required for live
 end-to-end verification. Production activation also requires a Safaricom-approved
 shortcode and B2C permissions; these cannot be provisioned by repository code.
+
+
+## POS shift reconciliation and cash management
+
+Opening float is recorded when a cashier opens a shift. Cash-in, cash-out and safe-drop operations are append-only, tenant-idempotent records. Cash-out and safe drops require manager permission. The cash ledger is available at GET /api/v1/pos/shifts/{shift_id}/reconciliation and movements are created at POST /api/v1/pos/shifts/{shift_id}/cash-movements.
+
+Expected till cash = opening float + recorded cash sales - recorded cash refunds + cash-in - cash-out - safe drops. Unsettled tenders and unconfirmed refunds are excluded. Shift close supports KES denomination counts (1, 5, 10, 20, 40, 50, 100, 200, 500 and 1,000) and validates their sum against the declared count. Non-zero variances are sent to manager review with approve/reject and mandatory notes; zero-variance shifts auto-reconcile. All actions are tenant/branch scoped and audit logged.
