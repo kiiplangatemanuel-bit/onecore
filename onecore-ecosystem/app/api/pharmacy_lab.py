@@ -366,11 +366,15 @@ def recall_pharmacy_batch(batch_id:int,payload:dict,m=Depends(active_membership)
 def expire_pharmacy_batches(m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db),as_of:date|None=None):
     cutoff=as_of or date.today()
-    _need(db,m,u,"pharmacy.manage",None)
     rows=_resource_list(db,m,"pharmacy_batch",limit=1000)
     count=0;total=Decimal("0")
     for row in rows:
-        data=_payload(row)
+        try:
+            _need(db,m,u,"pharmacy.manage",row.branch_id)
+        except HTTPException as exc:
+            if exc.status_code==403:continue
+            raise
+        row,data=_batch(db,m,row.id,lock=True)
         if row.status=="active" and _date(data["expiry_date"],"expiry_date")<cutoff:
             qty=_remove_batch_stock(db,m,u,row,data,"Expired batch removed from saleable inventory","expired")
             count+=1;total+=qty
@@ -442,7 +446,7 @@ def list_pharmacy_allergies(patient_id:int,m=Depends(active_membership),u:User=D
 @router.post("/pharmacy/safety-rules",status_code=201)
 def create_pharmacy_safety_rule(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db)):
-    _need(db,m,u,"pharmacy.manage",None)
+    _need_any(db,m,u,"pharmacy.manage")
     a_id=int(payload.get("medicine_a_id",0));b_id=int(payload["medicine_b_id"]) if payload.get("medicine_b_id") else None
     _medicine(db,m,a_id)
     if b_id:_medicine(db,m,b_id)
@@ -505,7 +509,7 @@ def create_pharmacy_prescription(payload:dict,m=Depends(active_membership),u:Use
 
 
 @router.get("/pharmacy/prescriptions")
-def list_pharmacy_prescriptions(patient_id:int|None=None,status:str|None=None,
+def list_pharmacy_prescriptions(patient_id:int|None=None,status:str|None=None,branch_id:str|None=None,
     m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db),
     limit:int=Query(100,ge=1,le=500)):
     _need(db,m,u,"pharmacy.manage",None)
@@ -894,7 +898,7 @@ def list_laboratory_tests(m=Depends(active_membership),u:User=Depends(current_us
 @router.post("/lab/panels",status_code=201)
 def create_laboratory_panel(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db)):
-    _need(db,m,u,"lab.manage",None)
+    _need_any(db,m,u,"lab.manage")
     ids=payload.get("test_ids")
     if not isinstance(ids,list) or not ids or len(ids)>100 or len(ids)!=len(set(ids)):
         raise HTTPException(422,"Panel requires unique test IDs")
@@ -922,7 +926,7 @@ def _get_test(db,m,test_id):
 
 @router.get("/lab/panels")
 def list_laboratory_panels(m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
-    _need(db,m,u,"lab.manage",None)
+    _need_any(db,m,u,"lab.manage")
     rows=_resource_list(db,m,"lab_panel",status="active",limit=500)
     return [{"id":x.id,**_payload(x)} for x in rows]
 
@@ -962,12 +966,12 @@ def create_laboratory_order(payload:dict,m=Depends(active_membership),u:User=Dep
 
 
 @router.get("/lab/orders")
-def list_laboratory_orders(status:str|None=None,patient_id:int|None=None,
+def list_laboratory_orders(status:str|None=None,patient_id:int|None=None,branch_id:str|None=None,
     m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db),
     limit:int=Query(200,ge=1,le=500)):
-    _need(db,m,u,"lab.manage",None)
+    _need(db,m,u,"lab.manage",branch_id)
     if patient_id:_patient_read(db,m,u,patient_id)
-    rows=_resource_list(db,m,"lab_order",patient_id=patient_id,status=status,limit=limit)
+    rows=_resource_list(db,m,"lab_order",branch_id=branch_id,patient_id=patient_id,status=status,limit=limit)
     return [{"id":x.id,"patient_id":x.patient_id,"branch_id":x.branch_id,"status":x.status,
         "encounter_id":_payload(x).get("encounter_id"),"created_at":x.created_at.isoformat()} for x in rows]
 
@@ -1126,7 +1130,7 @@ def validate_laboratory_order(order_id:int,payload:dict,m=Depends(active_members
 @router.post("/lab/instruments",status_code=201)
 def register_laboratory_instrument(payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
-    branch_id=payload.get("branch_id")
+    branch_id=_required_text(payload,"branch_id",36)
     _need(db,m,u,"lab.manage",branch_id)
     name=_required_text(payload,"name",180)
     secret=secrets.token_urlsafe(40)
@@ -1260,10 +1264,10 @@ def receive_analyzer_result(instrument_id:int,payload:dict,
 
 
 @router.get("/lab/critical-alerts")
-def list_laboratory_critical_alerts(status:str|None=None,m=Depends(active_membership),
+def list_laboratory_critical_alerts(status:str|None=None,branch_id:str|None=None,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
-    _need(db,m,u,"lab.manage",None)
-    rows=_resource_list(db,m,"lab_critical_alert",status=status,limit=500)
+    _need(db,m,u,"lab.manage",branch_id)
+    rows=_resource_list(db,m,"lab_critical_alert",branch_id=branch_id,status=status,limit=500)
     return [_view(x) for x in rows]
 
 
@@ -1313,11 +1317,10 @@ def queue_laboratory_result_delivery(order_id:int,payload:dict,m=Depends(active_
 def get_laboratory_delivery(delivery_id:int,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     row=_get(db,m,delivery_id,"lab_delivery")
-    _need(db,m,u,"lab.manage",row.branch_id)
     data=_payload(row)
     if data["recipient_type"]!="clinician" or data["recipient_id"]!=u.id:
         raise HTTPException(403,"Delivery is not addressed to this clinician")
-    patient=_patient(db,row.patient_id,m)
+    patient,_,_=_patient_read(db,m,u,row.patient_id)
     _patient_event(db,m,u,patient,"lab.result.delivery_accessed",{"delivery_id":row.id},row.id)
     db.commit()
     return {"id":row.id,"results":data["results"],"status":row.status}
