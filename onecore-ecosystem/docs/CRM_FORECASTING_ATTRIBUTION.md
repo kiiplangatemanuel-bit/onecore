@@ -10,6 +10,7 @@ Targets are upserted by period, representative/team, branch and currency. Foreca
 
 ## APIs
 
+- POST /api/v1/crm/leads/{id}/campaign/{campaign_id} to link a lead to its originating campaign
 - PATCH /api/v1/crm/leads/{id}/forecast-details
 - POST /api/v1/crm/forecast/settings
 - GET /api/v1/crm/forecast/advanced?period_type=month|quarter|year&start_date=YYYY-MM-DD&rep_id=
@@ -25,7 +26,7 @@ All endpoints use active organization membership and existing read/update/manage
 
 ## Campaign ROI
 
-A manager records explicit conversion events against a campaign/contact and may link a CRM lead and sales order. Order-won and invoice-paid events require a sales-order reference. Revenue is grouped by currency. Set campaign budget before using ROI; zero budget produces a null ROI. This is transparent explicit attribution, not proof of causation or full multi-touch attribution. Automatic accounting invoice/payment event linkage remains a follow-up integration.
+A manager links a lead to its originating campaign. Accepted quotes and confirmed sales orders on that lead automatically append idempotent attribution events, linking campaign → lead → quote → sales order. Managers may also record explicit conversion events against a campaign/contact and link a CRM lead and sales order. Order-won and invoice-paid events require a sales-order reference. Revenue is grouped by currency. Set campaign budget before using ROI; zero budget produces a null ROI. This is transparent explicit attribution, not proof of causation or full multi-touch attribution. Automatic accounting invoice/payment event linkage remains a follow-up integration. Confirmed orders and accepted quotes are linked automatically, but the invoice/payment posting events are not yet emitted from Accounting.
 
 ## Scheduler worker
 
