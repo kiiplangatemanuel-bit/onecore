@@ -760,3 +760,29 @@ Boundaries: tax is an organization-configured percentage, not an eTIMS/KRA tax c
 - Added pending integration diagnostics and manager retry endpoint for missing mappings or closed-period blockers.
 - Added branch-scoped integration listing, audit events, migration 0024, and bridge contract tests.
 - External payment execution/settlement and jurisdiction-specific tax validation remain outside this increment.
+
+
+## CRM automation and healthcare privacy slice (7 November 2026)
+
+Implemented on the feature branch:
+- Organization-scoped reusable communication templates with channel/purpose validation,
+  activation controls, supported variables and per-recipient rendering.
+- Saved audience segments with a strict field/operator allowlist, tenant-scoped preview,
+  bounded sample output and optional segment filtering during consent-gated preparation.
+- Timezone-aware campaign scheduling, cancellation and bounded due-campaign worker API.
+  Deployment must run the scheduler endpoint periodically using a dedicated service identity.
+- Healthcare patient and encounter records with Fernet-encrypted PHI fields; operations fail
+  closed unless a valid HEALTHCARE_PHI_ENCRYPTION_KEY is configured.
+- Healthcare administrator, clinician and auditor role gates; branch/tenant scoping;
+  patient-specific expiring/revocable access grants; append-only consent decisions; patient
+  access audit events; no-store HTTP headers for healthcare API responses.
+- Basic CRM automation and healthcare web workspaces; docs and tests added.
+
+Limitations and release gates:
+- CI and migration upgrade/downgrade must pass before merge.
+- Scheduling is worker-driven, not a self-starting daemon; configure a monitored scheduler.
+- Healthcare key custody/rotation, encrypted backups, TLS, MFA, retention/deletion workflows,
+  incident response, legal review and penetration testing remain deployment obligations.
+- This is not a claim of HIPAA/ISO certification or Kenyan ODPC/health-sector compliance.
+- No clinical decision support, break-glass workflow, consent identity verification or
+  medical interoperability certification is included.

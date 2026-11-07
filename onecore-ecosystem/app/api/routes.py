@@ -3381,7 +3381,7 @@ def get_crm_campaign(campaign_id: int,membership=Depends(active_membership),
 
 
 @router.post("/crm/campaigns/{campaign_id}/prepare")
-def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
+def prepare_crm_campaign(campaign_id: int,segment_id: int | None = Query(default=None,ge=1),membership=Depends(active_membership),
     user: User=Depends(current_user),db: Session=Depends(get_db)):
     require_permission(membership,"manage")
     campaign=db.query(CRMCampaign).filter_by(
@@ -3412,6 +3412,15 @@ def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
         or_(CRMContactConsent.expires_at.is_(None),
             CRMContactConsent.expires_at>datetime.now(timezone.utc)),
     )
+    if segment_id is not None:
+        from app.core.models import CRMAudienceSegment
+        from app.api.crm_automation import compile_rules
+        segment=db.query(CRMAudienceSegment).filter_by(id=segment_id,organization_id=membership.organization_id,is_active=True).first()
+        if not segment: raise HTTPException(404,"Audience segment not found")
+        rules=segment.rules or {}
+        for condition in compile_rules({"all":rules.get("all",[])}): q=q.filter(condition)
+        any_conditions=compile_rules({"any":rules.get("any",[])})
+        if any_conditions: q=q.filter(or_(*any_conditions))
     if campaign.branch_id:
         q=q.filter(CRMContact.branch_id==campaign.branch_id)
     else:
