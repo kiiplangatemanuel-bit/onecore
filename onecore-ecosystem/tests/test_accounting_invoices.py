@@ -77,3 +77,27 @@ def test_period_budget_fixed_asset_models_and_routes_are_registered():
     assert "/api/v1/accounting/fixed-assets" in paths
     assert "/api/v1/accounting/fixed-assets/{asset_id}/depreciation" in paths
     assert "/api/v1/accounting/financial-statements" in paths
+
+
+def test_bank_statement_reconciliation_contract_and_routes():
+    from app.core.models import AccountingBankStatement, AccountingBankStatementLine
+    from app.core.schemas import AccountingBankStatementIn, AccountingBankMatchIn
+    assert AccountingBankStatement.__tablename__ == "accounting_bank_statements"
+    assert AccountingBankStatementLine.__tablename__ == "accounting_bank_statement_lines"
+    statement = AccountingBankStatementIn(
+        bank_account_id=1, statement_reference="BANK-2026-11",
+        start_date="2026-11-01", end_date="2026-11-30",
+        opening_balance="1000.00", closing_balance="1125.00",
+        lines=[{"transaction_date":"2026-11-05","description":"Customer deposit","amount":"125.00"}])
+    assert statement.lines[0].amount == Decimal("125.00")
+    with pytest.raises(ValidationError):
+        AccountingBankStatementIn(bank_account_id=1,statement_reference="BANK-02",
+            start_date="2026-11-01",end_date="2026-11-30",
+            opening_balance="100.00",closing_balance="100.00",
+            lines=[{"transaction_date":"2026-11-05","description":"Zero line","amount":"0.00"}])
+    assert AccountingBankMatchIn(statement_line_id=1,journal_line_id=2).journal_line_id == 2
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/accounting/bank-statements" in paths
+    assert "/api/v1/accounting/bank-statements/{statement_id}" in paths
+    assert "/api/v1/accounting/bank-statements/{statement_id}/match" in paths
+    assert "/api/v1/accounting/bank-statements/{statement_id}/reconcile" in paths
