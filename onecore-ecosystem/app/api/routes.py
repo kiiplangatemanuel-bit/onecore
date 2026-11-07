@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolFeeStructureIn, SchoolFeePaymentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -3546,6 +3546,183 @@ def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depen
             "weighted_value":str(v["weighted"])} for stage,v in sorted(data["stages"].items())]}
         for currency,data in sorted(currencies.items())],
         "method":"Fixed stage probability assumptions; not a statistical prediction"}
+
+
+
+@router.post("/school/fee-structures", status_code=201)
+def create_school_fee_structure(payload: SchoolFeeStructureIn,
+    membership=Depends(active_membership), user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    cls=db.query(SchoolClass).filter_by(
+        id=payload.class_id,organization_id=membership.organization_id,is_active=True
+    ).first()
+    if not cls or not can_access_branch(membership,cls.branch_id):
+        raise HTTPException(404,"Active class not found")
+    if cls.academic_year != payload.academic_year:
+        raise HTTPException(422,"Fee schedule academic year must match the class")
+    row=SchoolFeeStructure(organization_id=membership.organization_id,
+        branch_id=cls.branch_id,class_id=cls.id,code=payload.code.strip().upper(),
+        description=payload.description.strip(),academic_year=payload.academic_year,
+        term=payload.term.strip(),amount=payload.amount,currency=payload.currency,
+        due_date=payload.due_date,is_active=True,created_by=user.id)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Fee code already exists for this class, year and term")
+    db.refresh(row)
+    audit(db,user.id,membership.organization_id,"school.fee_structure.created",
+          "school_fee_structure",row.id)
+    return {"id":row.id,"class_id":row.class_id,"code":row.code,
+        "description":row.description,"academic_year":row.academic_year,
+        "term":row.term,"amount":str(row.amount),"currency":row.currency,
+        "due_date":row.due_date.isoformat(),"is_active":row.is_active}
+
+
+@router.get("/school/fee-structures")
+def list_school_fee_structures(membership=Depends(active_membership),
+    db:Session=Depends(get_db),limit:int=Query(default=200,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(SchoolFeeStructure).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(SchoolFeeStructure.branch_id.in_(allowed))
+    rows=q.order_by(SchoolFeeStructure.academic_year.desc(),
+        SchoolFeeStructure.term,SchoolFeeStructure.id.desc()).limit(limit).all()
+    return [{"id":x.id,"class_id":x.class_id,"code":x.code,
+        "description":x.description,"academic_year":x.academic_year,"term":x.term,
+        "amount":str(x.amount),"currency":x.currency,"due_date":x.due_date.isoformat(),
+        "is_active":x.is_active} for x in rows]
+
+
+@router.post("/school/fee-structures/{structure_id}/bill")
+def bill_school_fee_structure(structure_id:int,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    structure=db.query(SchoolFeeStructure).filter_by(
+        id=structure_id,organization_id=membership.organization_id,is_active=True
+    ).with_for_update().first()
+    if not structure or not can_access_branch(membership,structure.branch_id):
+        raise HTTPException(404,"Active fee structure not found")
+    learners=db.query(SchoolLearner).filter_by(
+        organization_id=membership.organization_id,class_id=structure.class_id,
+        branch_id=structure.branch_id,status="active"
+    ).order_by(SchoolLearner.id).all()
+    created=0
+    for learner in learners:
+        existing=db.query(SchoolFeeCharge).filter_by(
+            organization_id=membership.organization_id,learner_id=learner.id,
+            fee_structure_id=structure.id).first()
+        if existing:continue
+        db.add(SchoolFeeCharge(organization_id=membership.organization_id,
+            branch_id=structure.branch_id,learner_id=learner.id,
+            fee_structure_id=structure.id,academic_year=structure.academic_year,
+            term=structure.term,description=structure.description,amount=structure.amount,
+            amount_paid=Decimal("0.00"),currency=structure.currency,
+            due_date=structure.due_date,status="unpaid"))
+        created+=1
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Fee billing collided with another billing request; reload and retry")
+    audit(db,user.id,membership.organization_id,"school.fee_structure.billed",
+          "school_fee_structure",structure.id,f"new_charges:{created};learners:{len(learners)}")
+    return {"fee_structure_id":structure.id,"learners_found":len(learners),
+        "charges_created":created,"already_billed":len(learners)-created}
+
+
+@router.get("/school/learners/{learner_id}/fee-account")
+def school_learner_fee_account(learner_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    learner=db.query(SchoolLearner).filter_by(
+        id=learner_id,organization_id=membership.organization_id).first()
+    if not learner or not can_access_branch(membership,learner.branch_id):
+        raise HTTPException(404,"Learner not found")
+    linked=db.query(HREmployee).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,status="active"
+    ).first()
+    if not linked:
+        # Guardian access is not implemented; learner fee accounts are manager-only.
+        require_permission(membership,"manage")
+    charges=db.query(SchoolFeeCharge).filter_by(
+        organization_id=membership.organization_id,learner_id=learner.id
+    ).order_by(SchoolFeeCharge.due_date,SchoolFeeCharge.id).all()
+    total=sum((Decimal(x.amount) for x in charges),Decimal("0.00"))
+    paid=sum((Decimal(x.amount_paid) for x in charges),Decimal("0.00"))
+    payments=db.query(SchoolFeePayment).filter_by(
+        organization_id=membership.organization_id,learner_id=learner.id
+    ).order_by(SchoolFeePayment.payment_date.desc(),SchoolFeePayment.id.desc()).all()
+    return {"learner_id":learner.id,"admission_number":learner.admission_number,
+        "learner_name":f"{learner.first_name} {learner.last_name}",
+        "total_charged":str(total),"total_paid":str(paid),"balance":str(total-paid),
+        "charges":[{"id":x.id,"description":x.description,"academic_year":x.academic_year,
+            "term":x.term,"amount":str(x.amount),"amount_paid":str(x.amount_paid),
+            "balance":str(Decimal(x.amount)-Decimal(x.amount_paid)),
+            "currency":x.currency,"due_date":x.due_date.isoformat(),"status":x.status}
+            for x in charges],
+        "payments":[{"id":p.id,"receipt_number":p.receipt_number,"method":p.method,
+            "amount":str(p.amount),"currency":p.currency,"payment_date":p.payment_date.isoformat()}
+            for p in payments]}
+
+
+@router.post("/school/learners/{learner_id}/fee-payments",status_code=201)
+def record_school_fee_payment(learner_id:int,payload:SchoolFeePaymentIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    learner=db.query(SchoolLearner).filter_by(
+        id=learner_id,organization_id=membership.organization_id).first()
+    if not learner or not can_access_branch(membership,learner.branch_id):
+        raise HTTPException(404,"Learner not found")
+    if db.query(SchoolFeePayment).filter_by(
+        organization_id=membership.organization_id,
+        receipt_number=payload.receipt_number.strip().upper()).first():
+        raise HTTPException(409,"Receipt number already exists in this organization")
+    charge_ids=[x.charge_id for x in payload.allocations]
+    charges=db.query(SchoolFeeCharge).filter(
+        SchoolFeeCharge.organization_id==membership.organization_id,
+        SchoolFeeCharge.learner_id==learner.id,
+        SchoolFeeCharge.id.in_(charge_ids)
+    ).with_for_update().all()
+    charge_map={x.id:x for x in charges}
+    if set(charge_map)!=set(charge_ids):
+        raise HTTPException(404,"One or more fee charges do not belong to this learner")
+    for allocation in payload.allocations:
+        charge=charge_map[allocation.charge_id]
+        if charge.currency!=payload.currency:
+            raise HTTPException(422,"Payment currency must match every allocated fee charge")
+        outstanding=Decimal(charge.amount)-Decimal(charge.amount_paid)
+        if allocation.amount>outstanding:
+            raise HTTPException(422,f"Allocation exceeds outstanding balance for charge {charge.id}")
+    payment=SchoolFeePayment(organization_id=membership.organization_id,
+        branch_id=learner.branch_id,learner_id=learner.id,
+        receipt_number=payload.receipt_number.strip().upper(),method=payload.method,
+        currency=payload.currency,amount=payload.amount,payment_date=payload.payment_date,
+        recorded_by=user.id)
+    db.add(payment);db.flush()
+    for allocation in payload.allocations:
+        charge=charge_map[allocation.charge_id]
+        charge.amount_paid=Decimal(charge.amount_paid)+allocation.amount
+        charge.status="paid" if charge.amount_paid==charge.amount else "partial"
+        db.add(SchoolFeePaymentAllocation(organization_id=membership.organization_id,
+            payment_id=payment.id,charge_id=charge.id,amount=allocation.amount))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Receipt number or allocation conflicts with an existing payment")
+    db.refresh(payment)
+    audit(db,user.id,membership.organization_id,"school.fee.payment.recorded",
+          "school_fee_payment",payment.id,f"learner:{learner.id};amount:{payload.amount}")
+    return {"id":payment.id,"receipt_number":payment.receipt_number,
+        "learner_id":learner.id,"amount":str(payment.amount),"currency":payment.currency,
+        "status":"recorded","provider_verified":False}
 
 
 @router.post("/school/attendance", status_code=200)
