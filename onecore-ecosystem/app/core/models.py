@@ -851,6 +851,40 @@ class CRMContactConsent(Base):
     )
 
 
+
+class CRMCampaignTemplate(Base):
+    """Reusable, tenant-owned channel-specific campaign message template."""
+    __tablename__ = "crm_campaign_templates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    channel: Mapped[str] = mapped_column(String(16))
+    purpose: Mapped[str] = mapped_column(String(24), default="marketing")
+    subject: Mapped[str] = mapped_column(String(240), default="")
+    body: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_crm_template_org_name", "organization_id", "name", unique=True),)
+
+
+class CRMContactSegment(Base):
+    """Saved, validated audience rule set; criteria are evaluated server-side."""
+    __tablename__ = "crm_contact_segments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    definition: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_crm_segment_org_name", "organization_id", "name", unique=True),)
+
+
 class CRMCampaign(Base):
     __tablename__ = "crm_campaigns"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -861,6 +895,9 @@ class CRMCampaign(Base):
     channel: Mapped[str] = mapped_column(String(16))
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     message: Mapped[str] = mapped_column(Text)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaign_templates.id"), nullable=True)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contact_segments.id"), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="draft")
     prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -885,6 +922,82 @@ class CRMCampaignRecipient(Base):
     __table_args__ = (
         Index("ix_crm_campaign_recipient_unique", "campaign_id", "contact_id", unique=True),
     )
+
+
+
+class HealthcarePatient(Base):
+    """Minimal patient identity; direct identifiers are encrypted at application level."""
+    __tablename__ = "healthcare_patients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_number_hash: Mapped[str] = mapped_column(String(64))
+    full_name_encrypted: Mapped[str] = mapped_column(Text)
+    date_of_birth_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_health_patient_org_number", "organization_id", "patient_number_hash", unique=True),)
+
+
+class HealthcareAccessGrant(Base):
+    """Explicit, time-bounded user-to-patient authorization."""
+    __tablename__ = "healthcare_access_grants"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    access_level: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(500))
+    granted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_health_access_grant_active", "organization_id", "patient_id", "user_id", "revoked_at"),)
+
+
+class HealthcareConsent(Base):
+    """Append-only patient consent and restriction evidence."""
+    __tablename__ = "healthcare_consents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(32))
+    decision: Mapped[str] = mapped_column(String(12))
+    scope: Mapped[str] = mapped_column(String(500), default="")
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class HealthcareBreakGlass(Base):
+    """Emergency access grant with mandatory reason and independent review."""
+    __tablename__ = "healthcare_break_glass"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reason: Mapped[str] = mapped_column(String(1000))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(1000), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class HealthcareAccessAudit(Base):
+    """Append-only evidence of patient record reads, writes and emergency access."""
+    __tablename__ = "healthcare_access_audits"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str] = mapped_column(String(32))
+    access_mode: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(1000), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class SchoolEnrollmentHistory(Base):
