@@ -3917,7 +3917,7 @@ def _healthcare_appointment_out(row, patient=None):
         "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
         "branch_id": row.branch_id, "provider_user_id": row.provider_user_id,
         "starts_at": _healthcare_datetime_out(row.starts_at), "ends_at": _healthcare_datetime_out(row.ends_at),
-        "reason": row.reason, "status": row.status,
+        "reason": row.reason, "status": row.status, "status_note": row.status_note,
     }
 
 
@@ -4113,9 +4113,10 @@ def update_healthcare_appointment_status(appointment_id: int,
             raise HTTPException(409, "A signed clinical encounter is required before completing the visit")
     previous = row.status
     row.status = payload.status
+    row.status_note = payload.note.strip()
     db.commit()
     audit(db, user.id, membership.organization_id, "healthcare.appointment.status_changed",
-          "healthcare_appointment", row.id, f"{previous}->{row.status};{payload.note.strip()}")
+          "healthcare_appointment", row.id, f"{previous}->{row.status};reason_recorded:{bool(payload.note.strip())}")
     return {"id": row.id, "status": row.status}
 
 
@@ -4198,7 +4199,7 @@ def sign_healthcare_encounter(encounter_id: int, payload: HealthcareEncounterSig
     row.signed_at = datetime.now(timezone.utc)
     db.commit()
     audit(db, user.id, membership.organization_id, "healthcare.encounter.signed",
-          "healthcare_encounter", row.id, payload.note.strip())
+          "healthcare_encounter", row.id, "signed")
     return {"id": row.id, "status": row.status, "signed_at": row.signed_at.isoformat()}
 
 
