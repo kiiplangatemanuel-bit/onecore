@@ -334,3 +334,19 @@ def confirm_refund_execution(refund_id:int,payload:SettlementIn,membership=Depen
     _audit(db,user,membership.organization_id,"pos.refund.execution_confirmed","pos_refund",refund.id,payload.evidence_note.strip())
     db.commit()
     return {"refund_id":refund.id,"status":refund.status,"note":"Supervisor-confirmed physical/provider evidence recorded; no payment gateway is called by this endpoint."}
+
+@router.post("/devices/{device_id}/bind-shift")
+def bind_device_shift(device_id:int,shift_id:int=Query(gt=0),x_pos_device_token:str=Header(default=""),
+                     membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
+    device=_device(db,membership,device_id,x_pos_device_token)
+    shift=db.query(POSShift).filter_by(id=shift_id,organization_id=membership.organization_id,branch_id=device.branch_id).with_for_update().first()
+    if not shift:raise HTTPException(404,"Cashier shift not found for device branch")
+    if shift.status!="open":raise HTTPException(409,"Only an open cashier shift can be bound to a device")
+    if shift.cashier_user_id!=user.id:raise HTTPException(403,"Only the authenticated cashier who owns this shift can bind the device")
+    if shift.device_id and shift.device_id!=device.id:raise HTTPException(409,"Shift is already bound to another device")
+    other=db.query(POSShift).filter_by(organization_id=membership.organization_id,device_id=device.id,status="open").filter(POSShift.id!=shift.id).first()
+    if other:raise HTTPException(409,"Trusted device already has another open shift")
+    shift.device_id=device.id
+    _audit(db,user,membership.organization_id,"pos.device.shift_bound","pos_shift",shift.id,f"device:{device.id}")
+    db.commit()
+    return {"device_id":device.id,"shift_id":shift.id,"cashier_user_id":shift.cashier_user_id,"status":"bound"}
