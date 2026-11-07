@@ -362,7 +362,12 @@ def create_appointment(patient_id:int,payload:dict,m=Depends(active_membership),
     if not member:raise HTTPException(404,"Active provider membership not found")
     if p.branch_id and (member.branch_scope or "*")!="*" and p.branch_id not in (member.branch_scope or "").split(","):
         raise HTTPException(403,"Provider is outside the patient branch")
-    provider_roles=_roles(db,m,db.query(User).filter_by(id=provider_id).first(),p.branch_id)
+    provider_user=db.query(User).filter_by(id=provider_id,is_active=True).first()
+    if not provider_user:raise HTTPException(404,"Active provider user not found")
+    provider_roles=_roles(db,member,provider_user,p.branch_id)
+    if p.branch_id is None:
+        provider_roles={x.role for x in db.query(HealthcareRoleAssignment).filter_by(
+            organization_id=m.organization_id,user_id=provider_id,is_active=True,branch_id=None).all()}
     if not provider_roles.intersection({"healthcare_admin","clinician","nurse"}):
         raise HTTPException(422,"Appointment provider must have an active clinical role")
     conflict=db.query(HealthcareAppointment.id).filter(
