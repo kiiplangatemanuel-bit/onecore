@@ -87,12 +87,12 @@ The extended inventory API adds:
 
 - `GET/POST /api/v1/inventory/warehouses`
 - `POST /api/v1/inventory/transfers`, `POST /api/v1/inventory/transfers/{id}/dispatch`, `POST /api/v1/inventory/transfers/{id}/receive`
-- `POST /api/v1/inventory/reservations`, `POST /api/v1/inventory/reservations/{id}/release`, `POST /api/v1/inventory/reservations/expire`
+- `POST /api/v1/inventory/reservations`, `POST /api/v1/inventory/reservations/{id}/release`, `POST /api/v1/inventory/reservations/{id}/consume`, `POST /api/v1/inventory/reservations/expire`
 - `POST /api/v1/inventory/batches/receive`, `POST /api/v1/inventory/batches/issue`, `PATCH /api/v1/inventory/batches/{id}/status`
 - `POST /api/v1/inventory/stocktakes`, `POST /api/v1/inventory/stocktakes/{id}/approve`
 - `PUT /api/v1/inventory/reorder-rules`, `GET /api/v1/inventory/replenishment`, `GET /api/v1/inventory/forecast`
-- `GET /api/v1/inventory/valuation`, `GET /api/v1/inventory/dashboard`, `GET /api/v1/inventory/alerts`
-- `POST /api/v1/inventory/price-lists`, `PUT /api/v1/inventory/price-lists/{id}/prices`
+- `GET /api/v1/inventory/warehouses/{id}/stock`, `GET /api/v1/inventory/valuation`, `GET /api/v1/inventory/dashboard`, `GET /api/v1/inventory/alerts`
+- `POST /api/v1/inventory/price-lists`, `PUT /api/v1/inventory/price-lists/{id}/prices`, `GET /api/v1/inventory/price-lists/{id}/prices`
 
 ### Operational constraints still requiring deployment/UAT
 
