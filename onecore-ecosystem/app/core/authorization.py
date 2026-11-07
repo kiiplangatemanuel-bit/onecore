@@ -12,6 +12,10 @@ ROLE_PERMISSIONS = {
     "accountant": {"read", "create", "update"},
     "staff": {"read", "create"},
     "viewer": {"read"},
+    # School role grants are narrow; portal reads also require explicit learner links.
+    "teacher": {"read", "create", "update"},
+    "guardian": {"read"},
+    "school_admin": {"read", "create", "update", "delete", "manage"},
 }
 
 def require_permission(membership, action: str) -> None:
