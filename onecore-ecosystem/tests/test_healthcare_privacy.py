@@ -49,8 +49,9 @@ def test_healthcare_identity_and_clinical_data_are_authenticated_encryption(monk
 def test_healthcare_encryption_refuses_unsafe_default_key(monkeypatch):
     monkeypatch.setattr(settings,"healthcare_encryption_key","")
     monkeypatch.setattr(settings,"secret_key","unsafe-development-key-change-me")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HTTPException) as exc:
         encrypt_health_data({"clinical_notes":"private"})
+    assert exc.value.status_code==503
 
 
 def test_healthcare_role_matrix_is_least_privilege():
@@ -82,5 +83,6 @@ def test_production_requires_separately_managed_healthcare_key(monkeypatch):
     monkeypatch.setattr(settings,"healthcare_encryption_key","")
     monkeypatch.setattr(settings,"app_env","production")
     monkeypatch.setattr(settings,"secret_key","a-strong-enough-development-secret-key")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HTTPException) as exc:
         encrypt_health_data({"patient":"private"})
+    assert exc.value.status_code==503
