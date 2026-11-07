@@ -18,6 +18,7 @@ from app.api.accounting_pos import router as accounting_pos_router
 from app.api.mpesa import router as mpesa_router
 from app.api.crm_campaigns import router as crm_campaigns_router
 from app.api.crm_automation import router as crm_automation_router
+from app.api.crm_analytics import router as crm_analytics_router
 from app.api.healthcare_privacy import router as healthcare_privacy_router
 
 @asynccontextmanager
@@ -56,6 +57,7 @@ app.include_router(accounting_pos_router)
 app.include_router(mpesa_router)
 app.include_router(crm_campaigns_router)
 app.include_router(crm_automation_router)
+app.include_router(crm_analytics_router)
 app.include_router(healthcare_privacy_router)
 
 @app.get("/school", response_class=HTMLResponse)
@@ -96,6 +98,11 @@ def inventory_ui():
 @app.get("/crm/automation", response_class=HTMLResponse)
 def crm_automation_ui():
     page = Path(__file__).resolve().parent / "web" / "crm_automation.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
+
+@app.get("/crm/forecast", response_class=HTMLResponse)
+def crm_forecast_ui():
+    page = Path(__file__).resolve().parent / "web" / "crm_forecast.html"
     return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
 
 @app.get("/healthcare", response_class=HTMLResponse)
