@@ -133,3 +133,13 @@ class InventoryPrice(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     promotion_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
     __table_args__ = (Index("uq_inventory_price_product", "organization_id", "price_list_id", "product_id", unique=True),)
+
+class InventoryReplenishmentRun(Base):
+    __tablename__ = "inventory_replenishment_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    requisition_id: Mapped[int] = mapped_column(ForeignKey("procurement_requisitions.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    __table_args__ = (Index("uq_inventory_replenishment_org_key_branch", "organization_id", "idempotency_key", "branch_id", unique=True),)
