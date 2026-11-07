@@ -363,3 +363,22 @@ class CRMQuoteIn(BaseModel):
     issue_date: date
     valid_until: date
     lines: list[CRMQuoteLineIn] = Field(min_length=1, max_length=200)
+
+
+class SchoolAttendanceItemIn(BaseModel):
+    learner_id: int = Field(gt=0)
+    status: str = Field(pattern=r"^(present|absent|late|excused)$")
+    note: str = Field(default="", max_length=500)
+
+
+class SchoolAttendanceIn(BaseModel):
+    class_id: int = Field(gt=0)
+    attendance_date: date
+    entries: list[SchoolAttendanceItemIn] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def unique_learners(self):
+        ids = [entry.learner_id for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each learner may appear only once per attendance register")
+        return self
