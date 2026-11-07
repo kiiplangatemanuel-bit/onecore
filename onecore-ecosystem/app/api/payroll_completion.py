@@ -695,6 +695,8 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
         raise HTTPException(409, "A settled salary payment cannot be downgraded or assigned a different reference")
     if status == "paid" and not payload.get("provider_reference"):
         raise HTTPException(422, "Verified provider reference is required")
+    if status == "paid" and money(payload.get("amount")) != money(row["amount"]):
+        raise HTTPException(422, "Provider callback amount does not match the authorized salary instruction")
     if status == "paid" and any(x is not row and x.get("provider_reference") == payload.get("provider_reference") for x in d["rows"]):
         raise HTTPException(409, "Provider transaction reference is already assigned to another employee")
     row.update({"status": status, "provider_reference": payload.get("provider_reference"),
