@@ -54,3 +54,41 @@ def test_pos_models_and_routes_are_registered():
     assert "/api/v1/pos/shifts/{shift_id}/close" in paths
     assert "/api/v1/pos/sync" in paths
     assert "/pos" in paths
+
+
+def test_pos_return_contracts_idempotency_and_routes():
+    from app.core.models import POSReturn, POSReturnLine, POSRefund
+    from app.core.schemas import POSReturnIn
+    from app.services.pos import canonical_return_hash, validate_return_refund_total
+
+    payload = POSReturnIn(
+        client_return_id="return-device-0001",
+        reason="Customer returned damaged goods",
+        lines=[{"sale_line_id": 12, "quantity": "1.000"}],
+        refunds=[{"method": "cash", "amount": "25.00"}],
+    )
+    assert payload.lines[0].quantity == Decimal("1.000")
+    assert canonical_return_hash(payload) == canonical_return_hash(payload)
+    validate_return_refund_total(Decimal("25.00"), payload.refunds)
+    with pytest.raises(HTTPException) as exc:
+        validate_return_refund_total(Decimal("26.00"), payload.refunds)
+    assert exc.value.status_code == 422
+    with pytest.raises(ValidationError):
+        POSReturnIn(
+            client_return_id="return-device-0002", reason="Duplicate line test",
+            lines=[{"sale_line_id": 12, "quantity": "1"},
+                   {"sale_line_id": 12, "quantity": "2"}],
+            refunds=[{"method": "cash", "amount": "75.00"}],
+        )
+    with pytest.raises(ValidationError):
+        POSReturnIn(
+            client_return_id="return-device-0003", reason="Invalid refund method",
+            lines=[{"sale_line_id": 12, "quantity": "1"}],
+            refunds=[{"method": "mpesa", "amount": "75.00"}],
+        )
+    assert POSReturn.__tablename__ == "pos_returns"
+    assert POSReturnLine.__tablename__ == "pos_return_lines"
+    assert POSRefund.__tablename__ == "pos_refunds"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/pos/sales/{sale_id}" in paths
+    assert "/api/v1/pos/sales/{sale_id}/returns" in paths

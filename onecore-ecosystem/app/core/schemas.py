@@ -192,6 +192,38 @@ class POSSaleSyncIn(BaseModel):
     payments: list[POSPaymentIn] = Field(min_length=1, max_length=20)
 
 
+class POSReturnLineIn(BaseModel):
+    sale_line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999"))
+
+
+class POSRefundIn(BaseModel):
+    method: str = Field(pattern=r"^(cash|card|bank)$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    provider_reference: str = Field(default="", max_length=120)
+
+
+class POSReturnIn(BaseModel):
+    client_return_id: str = Field(min_length=8, max_length=100)
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def nonblank_reason(cls, value):
+        if len(value.strip()) < 5:
+            raise ValueError("Return reason must contain at least five non-space characters")
+        return value.strip()
+    lines: list[POSReturnLineIn] = Field(min_length=1, max_length=100)
+    refunds: list[POSRefundIn] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_sale_lines(self):
+        ids = [line.sale_line_id for line in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each original sale line may appear only once per return")
+        return self
+
+
 class SchoolClassIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     stream: str = Field(default="", max_length=40)

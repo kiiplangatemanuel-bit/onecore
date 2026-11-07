@@ -31,3 +31,28 @@ def canonical_request_hash(payload) -> str:
         ], key=lambda x: (x["method"], x["amount"], x["provider_reference"])),
     }
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+
+def canonical_return_hash(payload) -> str:
+    body = {
+        "reason": payload.reason.strip(),
+        "lines": sorted(
+            [{"sale_line_id": line.sale_line_id, "quantity": str(line.quantity)}
+             for line in payload.lines],
+            key=lambda item: item["sale_line_id"],
+        ),
+        "refunds": sorted(
+            [{"method": item.method, "amount": str(money(item.amount)),
+              "provider_reference": item.provider_reference}
+             for item in payload.refunds],
+            key=lambda item: (item["method"], item["amount"], item["provider_reference"]),
+        ),
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def validate_return_refund_total(total: Decimal, refunds) -> None:
+    refunded = sum((money(Decimal(str(item.amount))) for item in refunds), Decimal("0.00"))
+    if money(total) != refunded:
+        raise HTTPException(422, "Refund allocations must equal the return value")
