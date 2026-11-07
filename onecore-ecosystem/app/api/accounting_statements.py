@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import (
-    AccountingInvoice, AccountingInvoicePayment, CRMContact, ProcurementSupplier,
+    AccountingInvoice, AccountingInvoicePayment, AccountingCreditNote, CRMContact, ProcurementSupplier,
 )
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -74,6 +74,14 @@ def counterparty_statement(
             AccountingInvoicePayment.invoice_id.in_(invoice_ids),
         ).order_by(AccountingInvoicePayment.payment_date, AccountingInvoicePayment.id).all()
 
+    credits = []
+    if invoice_ids:
+        credits = db.query(AccountingCreditNote).filter(
+            AccountingCreditNote.organization_id == membership.organization_id,
+            AccountingCreditNote.invoice_id.in_(invoice_ids),
+            AccountingCreditNote.status == "posted",
+        ).order_by(AccountingCreditNote.issue_date, AccountingCreditNote.id).all()
+
     events = []
     for invoice in invoices:
         events.append({
@@ -83,7 +91,7 @@ def counterparty_statement(
             "description": "Invoice",
             "debit": Decimal("0.00"),
             "credit": Decimal("0.00"),
-            "amount": Decimal(invoice.total),
+            "amount": Decimal(invoice.total) + sum((Decimal(note.total) for note in credits if note.invoice_id == invoice.id), Decimal("0.00")),
             "invoice_id": invoice.id,
             "due_date": invoice.due_date.date().isoformat(),
         })
@@ -100,6 +108,19 @@ def counterparty_statement(
             "credit": Decimal("0.00"),
             "amount": -Decimal(payment.amount),
             "invoice_id": invoice.id,
+            "due_date": None,
+        })
+
+    for note in credits:
+        events.append({
+            "date": note.issue_date.date(),
+            "kind": "credit_note",
+            "reference": note.credit_note_number,
+            "description": "Credit note",
+            "debit": Decimal("0.00"),
+            "credit": Decimal("0.00"),
+            "amount": -Decimal(note.total),
+            "invoice_id": note.invoice_id,
             "due_date": None,
         })
 
@@ -133,4 +154,5 @@ def counterparty_statement(
         "closing_balance": str(closing),
         "invoice_count": sum(1 for item in rows if item["type"] == "invoice"),
         "payment_count": sum(1 for item in rows if item["type"] == "payment"),
+        "credit_note_count": sum(1 for item in rows if item["type"] == "credit_note"),
     }
