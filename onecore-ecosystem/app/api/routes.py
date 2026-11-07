@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SaccoLoanGuarantor, SaccoLoanCollateral, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingYearEndCloseIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn, SaccoLoanGuarantorIn, SaccoLoanCollateralIn, SaccoLoanGuarantorDecisionIn, SaccoLoanCollateralDecisionIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, AccountingInvoiceRefund, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SaccoLoanGuarantor, SaccoLoanCollateral, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingInvoiceRefundIn, AccountingProcurementInvoicePostIn, AccountingFiscalPeriodIn, AccountingYearEndCloseIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn, SaccoLoanGuarantorIn, SaccoLoanCollateralIn, SaccoLoanGuarantorDecisionIn, SaccoLoanCollateralDecisionIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -2674,7 +2674,16 @@ def _accounting_period_close_check(db, organization_id, period):
         func.coalesce(func.sum(AccountingJournalLine.debit), 0)
         != func.coalesce(func.sum(AccountingJournalLine.credit), 0)
     ).count()
+    matched_procurement_not_posted = db.query(ProcurementSupplierInvoice).filter(
+        ProcurementSupplierInvoice.organization_id == organization_id,
+        ProcurementSupplierInvoice.status == "matched",
+        ProcurementSupplierInvoice.accounting_invoice_id.is_(None),
+    ).join(ProcurementPurchaseOrder, ProcurementPurchaseOrder.id == ProcurementSupplierInvoice.purchase_order_id).filter(
+        ProcurementSupplierInvoice.invoice_date >= start,
+        ProcurementSupplierInvoice.invoice_date <= end,
+    ).count()
     counts = {
+        "matched_procurement_invoices_not_in_ap": matched_procurement_not_posted,
         "draft_invoices": draft_invoices,
         "pending_invoice_approvals": pending_approvals,
         "draft_credit_notes": draft_credit_notes,
@@ -6268,3 +6277,223 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
         "publication_basis": "Published assessments only",
         **report, "attendance": attendance,
     }
+
+
+# Statutory management reporting, procurement-to-AP integration, cash-flow reporting
+# and controlled customer refunds. These endpoints use posted ledger data only.
+@router.post("/procurement/supplier-invoices/{supplier_invoice_id}/post-to-accounting", status_code=201)
+def post_procurement_invoice_to_accounting(supplier_invoice_id:int, payload:AccountingProcurementInvoicePostIn,
+    membership=Depends(active_membership), user:User=Depends(current_user), db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    source=db.query(ProcurementSupplierInvoice).filter_by(
+        id=supplier_invoice_id,organization_id=membership.organization_id).with_for_update().first()
+    if not source or source.status!="matched":
+        raise HTTPException(404,"Three-way-matched supplier invoice not found")
+    if source.accounting_invoice_id:
+        linked=db.query(AccountingInvoice).filter_by(
+            id=source.accounting_invoice_id,organization_id=membership.organization_id).first()
+        if linked:
+            return {"id":linked.id,"status":linked.status,"source_supplier_invoice_id":source.id,"already_linked":True}
+        raise HTTPException(409,"Supplier invoice link is inconsistent; finance support is required")
+    organization=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not organization or source.currency!=organization.currency:
+        raise HTTPException(422,"Supplier invoice currency must match the organization base currency")
+    supplier=db.query(ProcurementSupplier).filter_by(
+        id=source.supplier_id,organization_id=membership.organization_id,is_active=True).first()
+    order=db.query(ProcurementPurchaseOrder).filter_by(
+        id=source.purchase_order_id,organization_id=membership.organization_id,supplier_id=source.supplier_id).first()
+    if not supplier or not order: raise HTTPException(409,"Matched procurement supplier or purchase order is unavailable")
+    _procurement_branch_check(db,membership,order.branch_id)
+    control=_accounting_get_accounts(db,membership.organization_id,[payload.control_account_id])[payload.control_account_id]
+    expense=_accounting_get_accounts(db,membership.organization_id,[payload.expense_account_id])[payload.expense_account_id]
+    if control.account_type!="liability" or expense.account_type not in ("expense","asset"):
+        raise HTTPException(422,"AP control must be a liability and expense mapping must be expense or asset")
+    subtotal=Decimal(source.subtotal).quantize(Decimal("0.01"))
+    tax=Decimal(source.tax_total).quantize(Decimal("0.01"))
+    if subtotal<=0 or tax<0: raise HTTPException(422,"Matched supplier invoice totals are invalid")
+    if tax and not payload.tax_account_id: raise HTTPException(422,"Input tax account is required for a taxable supplier invoice")
+    tax_account=None
+    if tax:
+        tax_account=_accounting_get_accounts(db,membership.organization_id,[payload.tax_account_id])[payload.tax_account_id]
+        if tax_account.account_type!="asset": raise HTTPException(422,"Input tax account must be an asset")
+    issue_date=source.invoice_date.date() if hasattr(source.invoice_date,"date") else source.invoice_date
+    _accounting_assert_period_open(db,membership.organization_id,issue_date)
+    total=subtotal+tax
+    ap=AccountingInvoice(organization_id=membership.organization_id,branch_id=order.branch_id,
+        invoice_type="payable",supplier_id=supplier.id,invoice_number=("PROC-"+str(source.id)+"-"+source.invoice_number)[:60],
+        issue_date=datetime.combine(issue_date,time.min,tzinfo=timezone.utc),
+        due_date=datetime.combine(issue_date,time.min,tzinfo=timezone.utc),currency=source.currency,
+        control_account_id=control.id,subtotal=subtotal,tax_total=tax,total=total,amount_paid=Decimal("0"),
+        status="draft",created_by=user.id)
+    db.add(ap);db.flush()
+    db.add(AccountingInvoiceLine(organization_id=membership.organization_id,invoice_id=ap.id,
+        account_id=expense.id,tax_account_id=tax_account.id if tax_account else None,
+        description="Three-way-matched procurement invoice "+source.invoice_number,
+        quantity=Decimal("1.000"),unit_price=subtotal,subtotal=subtotal,
+        tax_rate=(tax/subtotal*Decimal("100")).quantize(Decimal("0.0001")) if tax else Decimal("0"),
+        tax_amount=tax,total=total))
+    source.accounting_invoice_id=ap.id
+    audit(db,user.id,membership.organization_id,"accounting.procurement_invoice.linked",
+        "accounting_invoice",ap.id,"procurement_supplier_invoice:"+str(source.id))
+    db.commit()
+    return {"id":ap.id,"status":ap.status,"supplier_id":supplier.id,
+        "source_supplier_invoice_id":source.id,"subtotal":str(subtotal),"tax_total":str(tax),"total":str(total)}
+
+
+@router.get("/accounting/statutory-tax-summary")
+def accounting_statutory_tax_summary(start_date:date,end_date:date,
+    membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    if end_date<start_date: raise HTTPException(422,"end_date must not precede start_date")
+    allowed=branch_scope_ids(membership)
+    invoices_q=db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id==membership.organization_id,
+        AccountingInvoice.status.in_(("posted","partially_paid","paid")),
+        AccountingInvoice.issue_date>=datetime.combine(start_date,time.min,tzinfo=timezone.utc),
+        AccountingInvoice.issue_date<=datetime.combine(end_date,time.max,tzinfo=timezone.utc))
+    if allowed is not None:
+        if not allowed:return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),"currency_totals":[],"by_rate":[]}
+        invoices_q=invoices_q.filter(or_(AccountingInvoice.branch_id.is_(None),AccountingInvoice.branch_id.in_(allowed)))
+    invoices=invoices_q.all()
+    ids=[x.id for x in invoices]
+    if not ids:return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),"currency_totals":[],"by_rate":[]}
+    invoice_lines=db.query(AccountingInvoiceLine).filter(
+        AccountingInvoiceLine.organization_id==membership.organization_id,AccountingInvoiceLine.invoice_id.in_(ids)).all()
+    invoice_by_id={x.id:x for x in invoices}
+    totals={}
+    for line in invoice_lines:
+        inv=invoice_by_id[line.invoice_id]
+        key=(inv.currency,inv.invoice_type,str(Decimal(line.tax_rate).quantize(Decimal("0.0001"))))
+        item=totals.setdefault(key,{"taxable_base":Decimal("0.00"),"tax":Decimal("0.00")})
+        sign=Decimal("1") if inv.invoice_type=="receivable" else Decimal("-1")
+        item["taxable_base"]+=sign*Decimal(line.subtotal)
+        item["tax"]+=sign*Decimal(line.tax_amount)
+    credits=db.query(AccountingCreditNote,AccountingInvoice).join(
+        AccountingInvoice,AccountingInvoice.id==AccountingCreditNote.invoice_id).filter(
+        AccountingCreditNote.organization_id==membership.organization_id,AccountingCreditNote.status=="posted",
+        AccountingCreditNote.issue_date>=datetime.combine(start_date,time.min,tzinfo=timezone.utc),
+        AccountingCreditNote.issue_date<=datetime.combine(end_date,time.max,tzinfo=timezone.utc),
+        AccountingInvoice.id.in_(ids)).all()
+    for note,inv in credits:
+        note_lines=db.query(AccountingCreditNoteLine).filter_by(
+            organization_id=membership.organization_id,credit_note_id=note.id).all()
+        source_ids=[x.invoice_line_id for x in note_lines]
+        source_lines={x.id:x for x in invoice_lines if x.id in source_ids}
+        for nl in note_lines:
+            src=source_lines.get(nl.invoice_line_id)
+            if not src: continue
+            key=(inv.currency,inv.invoice_type,str(Decimal(src.tax_rate).quantize(Decimal("0.0001"))))
+            item=totals.setdefault(key,{"taxable_base":Decimal("0.00"),"tax":Decimal("0.00")})
+            sign=Decimal("-1") if inv.invoice_type=="receivable" else Decimal("1")
+            item["taxable_base"]+=sign*Decimal(nl.subtotal)
+            item["tax"]+=sign*Decimal(nl.tax_amount)
+    by_rate=[{"currency":k[0],"direction":k[1],"tax_rate":k[2],
+        "taxable_base":str(v["taxable_base"].quantize(Decimal("0.01"))),
+        "tax":str(v["tax"].quantize(Decimal("0.01")))} for k,v in sorted(totals.items())]
+    by_currency={}
+    for row in by_rate:
+        curr=by_currency.setdefault(row["currency"],{"output_tax":Decimal("0.00"),"input_tax":Decimal("0.00")})
+        target="output_tax" if row["direction"]=="receivable" else "input_tax"
+        curr[target]+=Decimal(row["tax"])
+    currency_totals=[{"currency":c,"output_tax":str(v["output_tax"].quantize(Decimal("0.01"))),
+        "input_tax":str(v["input_tax"].quantize(Decimal("0.01"))),
+        "net_tax":str((v["output_tax"]-v["input_tax"]).quantize(Decimal("0.01")))}
+        for c,v in sorted(by_currency.items())]
+    return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),
+        "currency_totals":currency_totals,"by_rate":by_rate,
+        "disclaimer":"Management summary from posted invoices and credit notes; not a tax filing or compliance certificate."}
+
+
+@router.get("/accounting/cash-flow")
+def accounting_cash_flow(start_date:date,end_date:date,
+    membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    if end_date<start_date: raise HTTPException(422,"end_date must not precede start_date")
+    allowed=branch_scope_ids(membership)
+    cash_accounts=db.query(AccountingAccount).filter_by(
+        organization_id=membership.organization_id,is_active=True,is_cash_equivalent=True).all()
+    if not cash_accounts:return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),
+        "currency":None,"operating":"0.00","investing":"0.00","financing":"0.00",
+        "unclassified":"0.00","net_change":"0.00","movements":[]}
+    cash_ids=[x.id for x in cash_accounts]
+    query=db.query(AccountingJournalLine,AccountingJournalLine.journal_id).join(
+        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+        AccountingJournal.organization_id==membership.organization_id,AccountingJournal.status=="posted",
+        AccountingJournal.entry_date>=datetime.combine(start_date,time.min,tzinfo=timezone.utc),
+        AccountingJournal.entry_date<=datetime.combine(end_date,time.max,tzinfo=timezone.utc),
+        AccountingJournalLine.account_id.in_(cash_ids))
+    if allowed is not None:
+        if not allowed:return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),
+            "currency":None,"operating":"0.00","investing":"0.00","financing":"0.00","unclassified":"0.00","net_change":"0.00","movements":[]}
+        query=query.filter(or_(AccountingJournal.branch_id.is_(None),AccountingJournal.branch_id.in_(allowed)))
+    cash_lines=query.all()
+    totals={"operating":Decimal("0.00"),"investing":Decimal("0.00"),"financing":Decimal("0.00"),"unclassified":Decimal("0.00")}
+    movements=[]
+    for cash_line,_journal_id in cash_lines:
+        journal=db.query(AccountingJournal).filter_by(id=cash_line.journal_id,organization_id=membership.organization_id).first()
+        counterpart=db.query(AccountingJournalLine,AccountingAccount).join(
+            AccountingAccount,AccountingAccount.id==AccountingJournalLine.account_id).filter(
+            AccountingJournalLine.journal_id==cash_line.journal_id,
+            AccountingJournalLine.account_id.notin_(cash_ids)).all()
+        net=Decimal(cash_line.debit)-Decimal(cash_line.credit)
+        categories={a.cash_flow_category for l,a in counterpart if a.cash_flow_category}
+        category=next(iter(categories)) if len(categories)==1 else "unclassified"
+        totals[category]+=net
+        movements.append({"journal_id":journal.id,"journal_number":journal.journal_number,
+            "date":journal.entry_date.date().isoformat(),"cash_account_id":cash_line.account_id,
+            "amount":str(net.quantize(Decimal("0.01"))),"category":category})
+    return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),
+        "currency":cash_accounts[0].organization_id and "organization_base_currency",
+        "operating":str(totals["operating"].quantize(Decimal("0.01"))),
+        "investing":str(totals["investing"].quantize(Decimal("0.01"))),
+        "financing":str(totals["financing"].quantize(Decimal("0.01"))),
+        "unclassified":str(totals["unclassified"].quantize(Decimal("0.01"))),
+        "net_change":str(sum(totals.values(),Decimal("0.00")).quantize(Decimal("0.01"))),
+        "movements":movements,
+        "disclaimer":"Classification is based on configured cash-equivalent and counterpart account categories; review unclassified movements."}
+
+
+@router.post("/accounting/invoices/{invoice_id}/refunds",status_code=201)
+def refund_accounting_invoice(invoice_id:int,payload:AccountingInvoiceRefundIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id,organization_id=membership.organization_id).with_for_update().first()
+    if not invoice or invoice.invoice_type!="receivable" or invoice.status not in ("posted","partially_paid","paid"):
+        raise HTTPException(404,"Posted customer invoice not found")
+    if invoice.branch_id and not can_access_branch(membership,invoice.branch_id):raise HTTPException(404,"Invoice not found")
+    duplicate=db.query(AccountingInvoiceRefund).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if duplicate:
+        if duplicate.invoice_id==invoice.id and Decimal(duplicate.amount)==payload.amount:
+            return {"id":duplicate.id,"status":"already_refunded","journal_id":duplicate.journal_id}
+        raise HTTPException(409,"Refund idempotency key has already been used")
+    _accounting_assert_period_open(db,membership.organization_id,payload.refund_date)
+    refundable=Decimal(invoice.amount_paid)-Decimal(invoice.total)
+    if refundable<=0 or payload.amount>refundable:
+        raise HTTPException(409,"Refund exceeds the available customer credit balance")
+    account=_accounting_get_accounts(db,membership.organization_id,[payload.payment_account_id])[payload.payment_account_id]
+    if account.account_type!="asset" or not account.is_cash_equivalent:
+        raise HTTPException(422,"Refund account must be an active cash-equivalent asset account")
+    journal=_accounting_make_journal(db,membership,user,payload.refund_date,
+        "REFUND:"+payload.idempotency_key,"Customer refund "+invoice.invoice_number,[
+        {"account_id":invoice.control_account_id,"description":"Customer credit refund "+invoice.invoice_number,
+         "debit":payload.amount,"credit":Decimal("0.00")},
+        {"account_id":account.id,"description":"Cash refund "+invoice.invoice_number,
+         "debit":Decimal("0.00"),"credit":payload.amount}],invoice.branch_id)
+    row=AccountingInvoiceRefund(organization_id=membership.organization_id,invoice_id=invoice.id,
+        payment_account_id=account.id,journal_id=journal.id,amount=payload.amount,
+        refund_date=datetime.combine(payload.refund_date,time.min,tzinfo=timezone.utc),
+        reference=payload.reference.strip(),idempotency_key=payload.idempotency_key,created_by=user.id)
+    db.add(row)
+    invoice.amount_paid=Decimal(invoice.amount_paid)-payload.amount
+    invoice.status="partially_paid" if Decimal(invoice.amount_paid)>0 else "posted"
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Refund conflicts with another accounting operation")
+    audit(db,user.id,membership.organization_id,"accounting.invoice.refunded","accounting_invoice",invoice.id,
+        "refund:"+str(row.id)+":"+str(payload.amount))
+    return {"id":row.id,"invoice_id":invoice.id,"amount":str(payload.amount),
+        "status":"refunded","journal_id":journal.id,"remaining_credit":str(refundable-payload.amount)}
