@@ -224,7 +224,7 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
             raise HTTPException(422, "Every allocation must target a payable invoice for this supplier")
         if invoice.status not in {"posted", "partially_paid"}:
             raise HTTPException(409, "Only posted and partially paid AP invoices can be settled")
-        if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
+        if not can_access_branch(membership, invoice.branch_id):
             raise HTTPException(404, "Supplier invoice not found")
         branch_ids.add(invoice.branch_id)
         balance = Decimal(invoice.total) - Decimal(invoice.amount_paid)
@@ -523,7 +523,7 @@ def list_supplier_settlements(supplier_id: int | None = Query(default=None, gt=0
             ProcurementSettlementAllocation,
             ProcurementSettlementAllocation.invoice_id == AccountingInvoice.id
         ).filter(ProcurementSettlementAllocation.settlement_id == row.id).all()
-        if all(not branch_id or can_access_branch(membership, branch_id) for (branch_id,) in allocated):
+        if all(can_access_branch(membership, branch_id) for (branch_id,) in allocated):
             visible.append(_settlement_response(row))
     return visible
 
@@ -540,7 +540,7 @@ def supplier_remittance_advice(settlement_id: int, membership=Depends(active_mem
     allocations_scope = db.query(ProcurementSettlementAllocation, AccountingInvoice).join(
         AccountingInvoice, AccountingInvoice.id == ProcurementSettlementAllocation.invoice_id
     ).filter(ProcurementSettlementAllocation.settlement_id == row.id).all()
-    if any(invoice.branch_id and not can_access_branch(membership, invoice.branch_id)
+    if any(not can_access_branch(membership, invoice.branch_id)
            for _, invoice in allocations_scope):
         raise HTTPException(404, "Verified supplier settlement not found")
     supplier = db.query(ProcurementSupplier).filter_by(
@@ -654,7 +654,7 @@ def escalate_purchase_order_approval(order_id: int, payload: ApprovalEscalationI
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=order_id, organization_id=membership.organization_id
     ).with_for_update().first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Purchase order not found")
     if order.status != "draft":
         raise HTTPException(409, "Only a draft purchase order awaiting approval can be escalated")
@@ -725,7 +725,7 @@ def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=order_id, organization_id=membership.organization_id
     ).with_for_update().first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Purchase order not found")
     if order.status != "draft" or order.created_by == user.id:
         raise HTTPException(409, "Order is not awaiting approval or creator cannot approve")
@@ -1283,7 +1283,7 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=receipt.purchase_order_id, organization_id=membership.organization_id, supplier_id=ret.supplier_id
     ).first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Purchase order not found")
     link = db.query(AccountingProcurementLink).filter_by(
         organization_id=membership.organization_id,
@@ -1301,7 +1301,7 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
     ).with_for_update().first()
     if not invoice or invoice.status not in {"posted", "partially_paid", "paid"}:
         raise HTTPException(409, "Source AP invoice must be posted before supplier credit-note posting")
-    if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
+    if not can_access_branch(membership, invoice.branch_id):
         raise HTTPException(404, "Supplier invoice not found")
     _accounting_assert_period_open(db, membership.organization_id, payload.issue_date)
     return_lines = db.query(ProcurementSupplierReturnLine, ProcurementGoodsReceiptLine).join(
@@ -1430,7 +1430,7 @@ def record_supplier_invoice_discrepancy(supplier_invoice_id: int, payload: Discr
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=invoice.purchase_order_id, organization_id=membership.organization_id
     ).first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Supplier invoice not found")
     if invoice.status not in {"matched", "accounted"}:
         raise HTTPException(409, "Discrepancies can only be raised against a matched or accounted invoice")
@@ -1465,7 +1465,7 @@ def resolve_supplier_invoice_discrepancy(discrepancy_id: int, payload: Discrepan
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=invoice.purchase_order_id, organization_id=membership.organization_id
     ).first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Invoice discrepancy not found")
     row.status = "resolved"
     row.resolution_note = payload.resolution_note.strip()
@@ -1500,7 +1500,7 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=source.purchase_order_id, organization_id=membership.organization_id
     ).first()
-    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+    if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Invoice discrepancy not found")
     source_lines = db.query(ProcurementSupplierInvoiceLine).filter_by(
         organization_id=membership.organization_id, invoice_id=source.id
