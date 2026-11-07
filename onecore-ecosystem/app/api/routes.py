@@ -4014,6 +4014,8 @@ def create_healthcare_appointment(payload: HealthcareAppointmentIn,
     if not provider_membership:
         raise HTTPException(404, "Provider is not an active organization member")
     provider_branches = branch_scope_ids(provider_membership)
+    if provider_branches == []:
+        raise HTTPException(403, "Provider has no active branch access")
     if branch_id and provider_branches is not None and branch_id not in provider_branches:
         raise HTTPException(403, "Provider is not assigned access to the appointment branch")
     starts_at = payload.starts_at.astimezone(timezone.utc)
