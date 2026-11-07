@@ -19,16 +19,6 @@ def calculate_pos_line(unit_price: Decimal, quantity: Decimal,
     return subtotal, discount, tax, money(taxable + tax)
 
 
-def allocate_return_amounts(original, quantity: Decimal, prior_returned_amount: Decimal):
-    """Allocate discounts and tax proportionally; final return absorbs rounding residue."""
-    original_qty = Decimal(str(original.quantity))
-    remaining_qty = original_qty - Decimal(str(prior_returned_amount[0]))
-    remaining_total = Decimal(str(original.line_total)) - Decimal(str(prior_returned_amount[1]))
-    if quantity == remaining_qty:
-        return remaining_total
-    return money(Decimal(str(original.line_total)) * Decimal(quantity) / original_qty)
-
-
 def validate_payment_total(total: Decimal, payments) -> None:
     paid = sum((money(Decimal(str(p.amount))) for p in payments), Decimal("0.00"))
     if money(total) != paid:
