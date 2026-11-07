@@ -24,7 +24,7 @@
 <p id="status" role="status" aria-live="polite"></p></main><footer>Powered by OneCore Technologies Ltd</footer>
 <script>
 (()=>{let token=null,org=null,employeesCache=[];const $=id=>document.getElementById(id),status=s=>$('status').textContent=s;
-async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
+async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok){const detail=d?.detail;throw new Error(typeof detail==='string'?detail:(detail?JSON.stringify(detail):'Request failed '+r.status));}return d;}
 async function refreshAttendance(){
  const mine=await api('/hr/my-attendance');const body=$('myAttendance');body.replaceChildren();
  mine.forEach(x=>{const tr=body.insertRow();[x.attendance_date,x.clock_in_at,x.clock_out_at||'—',x.worked_minutes??'—',x.status].forEach(v=>{const td=tr.insertCell();td.textContent=String(v);});});
