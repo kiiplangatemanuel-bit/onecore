@@ -752,7 +752,8 @@ def record_recovery_drill(payload: dict, branch_id: str, m=Depends(active_member
     if not 0<=rpo<=10080 or not 0<=rto<=10080:raise HTTPException(422,"RPO/RTO must be between 0 and 10080 minutes")
     status=payload.get("status")
     if status not in {"passed","failed","partial"}:raise HTTPException(422,"Recovery drill status must be passed, failed or partial")
-    if status=="passed" and not payload.get("restore_verified",False):raise HTTPException(422,"A passed recovery drill requires a verified restore")\n    row=_create(db,m,u,"recovery_drill",{"drill_date":NOW().isoformat(),"status":status,
+    if status=="passed" and not payload.get("restore_verified",False):raise HTTPException(422,"A passed recovery drill requires a verified restore")
+    row=_create(db,m,u,"recovery_drill",{"drill_date":NOW().isoformat(),"status":status,
         "rpo_minutes":rpo,"rto_minutes":rto,"backup_reference":_required_text(payload,"backup_reference",180),
         "restore_verified":bool(payload.get("restore_verified",False)),
         "notes":str(payload.get("notes",""))[:2000],"performed_by":u.id},
