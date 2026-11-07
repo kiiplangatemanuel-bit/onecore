@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine
-from app.core.schemas import ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn
+from app.core.models import ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine
+from app.core.schemas import ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn
 from app.main import app
 
 
@@ -46,3 +46,40 @@ def test_procurement_models_and_routes_are_registered():
     assert "/api/v1/procurement/orders/{order_id}/receive" in paths
     assert "/api/v1/procurement/orders/{order_id}" in paths
     assert "/procurement" in paths
+
+
+def test_requisition_payload_requires_unique_products_and_positive_quantities():
+    valid = ProcurementRequisitionIn(
+        justification="Replacement stock required for branch operations",
+        lines=[{"product_id": 1, "quantity": "2.500"}, {"product_id": 2, "quantity": "1"}],
+    )
+    assert valid.lines[0].quantity == Decimal("2.500")
+    with pytest.raises(ValidationError):
+        ProcurementRequisitionIn(
+            justification="Replacement stock required",
+            lines=[{"product_id": 1, "quantity": "1"}, {"product_id": 1, "quantity": "2"}],
+        )
+    with pytest.raises(ValidationError):
+        ProcurementRequisitionIn(
+            justification="Need more stock",
+            lines=[{"product_id": 1, "quantity": "0"}],
+        )
+    with pytest.raises(ValidationError):
+        ProcurementRequisitionIn(justification="bad", lines=[{"product_id": 1, "quantity": "1"}])
+
+
+def test_requisition_review_reason_is_bounded():
+    assert ProcurementRequisitionReviewIn(reason="Budget not approved").reason.startswith("Budget")
+    with pytest.raises(ValidationError):
+        ProcurementRequisitionReviewIn(reason="x" * 501)
+
+
+def test_requisition_models_and_workflow_routes_are_registered():
+    assert ProcurementRequisition.__tablename__ == "procurement_requisitions"
+    assert ProcurementRequisitionLine.__tablename__ == "procurement_requisition_lines"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/procurement/requisitions" in paths
+    assert "/api/v1/procurement/requisitions/{requisition_id}" in paths
+    assert "/api/v1/procurement/requisitions/{requisition_id}/submit" in paths
+    assert "/api/v1/procurement/requisitions/{requisition_id}/approve" in paths
+    assert "/api/v1/procurement/requisitions/{requisition_id}/reject" in paths
