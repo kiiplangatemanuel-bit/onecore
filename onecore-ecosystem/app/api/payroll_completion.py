@@ -240,7 +240,7 @@ KENYA_2026_RULES = {
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/1979-affordable-housing-levy-ahl", "verified_on": "2026-11-08"},
         {"authority": "NSSF", "url": "https://www.nssf.or.ke/notice-to-employers-year-4-2026-nssf-contribution-rates", "verified_on": "2026-11-08"},
-        {"authority": "Kenya Law / SHA", "url": "https://new.kenyalaw.org/akn/ke/act/ln/2024/49/eng%402024-03-08/source.pdf", "verified_on": "2026-11-08"}
+        {"authority": "SHA / Ministry of Health", "url": "https://health.go.ke/sites/default/files/2024-11/Social%20Health%20Insurance%20%28General%29%20Regulations%2C%202024_0.pdf", "verified_on": "2026-11-08"}
     ],
     "parameters": {
         "paye": {
@@ -408,7 +408,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         statutory_base = money(prorated_base + regular_allowances)
         extras = {**extras,
             "nssf_pensionable_base": extras.get("nssf_pensionable_base", statutory_base),
-            "shif_contribution_base": extras.get("shif_contribution_base", statutory_base),
+            "shif_contribution_base": extras.get("shif_contribution_base", gross),
             "housing_levy_contribution_base": extras.get("housing_levy_contribution_base", statutory_base)}
         for base_name in ("nssf_pensionable_base", "shif_contribution_base", "housing_levy_contribution_base"):
             if money(extras[base_name]) > gross:
