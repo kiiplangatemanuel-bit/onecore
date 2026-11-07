@@ -91,3 +91,12 @@ class POSPeripheralCommand(Base):
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class POSCustomerSale(Base):
+    __tablename__ = "pos_customer_sales"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("pos_customers.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("pos_sales.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("uq_pos_customer_sale", "organization_id", "sale_id", unique=True),)
