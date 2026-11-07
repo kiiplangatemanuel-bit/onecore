@@ -5917,7 +5917,7 @@ def request_pharmacy_replenishment(payload: PharmacyReplenishmentIn,
         id=supplier_id,organization_id=membership.organization_id,is_active=True).first():
         raise HTTPException(404,"Active supplier not found")
     data={"medicine_id":med.id,"branch_id":branch_id,"quantity":str(quantity),
-          "supplier_id":supplier_id,"reason":payload.reason.strip(),
+          "supplier_id":supplier_id,"expected_unit_cost":str(payload.expected_unit_cost),"reason":payload.reason.strip(),
           "purchase_order_status":"awaiting_procurement_conversion"}
     row,_=_pharm_lab_record(db,membership,user,"pharmacy_replenishment",
         payload.idempotency_key,data,branch_id=branch_id)
@@ -5925,6 +5925,47 @@ def request_pharmacy_replenishment(payload: PharmacyReplenishmentIn,
     audit(db,user.id,membership.organization_id,"pharmacy.replenishment.requested",
           "pharmacy_replenishment",row.id,f"medicine:{med.id};qty:{quantity}")
     return {"id":row.id,"status":row.status,"procurement_conversion":"queued_not_submitted"}
+
+
+@router.post("/pharmacy/replenishment/{request_id}/convert")
+def convert_pharmacy_replenishment_to_purchase_order(request_id:int,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    request=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=request_id,organization_id=membership.organization_id,
+        record_type="pharmacy_replenishment").with_for_update().first()
+    if not request or not can_access_branch(membership,request.branch_id):
+        raise HTTPException(404,"Replenishment request not found")
+    if request.status=="converted":
+        return {"request_id":request.id,"status":"already_converted",
+                "purchase_order_id":request.payload.get("purchase_order_id")}
+    if request.status!="pending":raise HTTPException(409,"Replenishment request is not convertible")
+    supplier_id=request.payload.get("supplier_id")
+    if not supplier_id:raise HTTPException(422,"Select a supplier before converting to a purchase order")
+    supplier=db.query(ProcurementSupplier).filter_by(
+        id=supplier_id,organization_id=membership.organization_id,is_active=True).first()
+    medicine=db.query(PharmacyMedicine).filter_by(
+        id=request.payload["medicine_id"],organization_id=membership.organization_id).first()
+    if not supplier or not medicine:raise HTTPException(409,"Supplier or medicine is no longer active")
+    order=ProcurementPurchaseOrder(organization_id=membership.organization_id,
+        branch_id=request.branch_id,supplier_id=supplier.id,
+        order_number=f"PHARM-{request.id}-{uuid.uuid4().hex[:8].upper()}",
+        status="draft",currency="KES",
+        notes=f"Pharmacy replenishment request #{request.id}: {request.payload.get('reason','')}",
+        created_by=user.id)
+    db.add(order);db.flush()
+    db.add(ProcurementPurchaseOrderLine(organization_id=membership.organization_id,
+        purchase_order_id=order.id,product_id=medicine.inventory_product_id,
+        quantity_ordered=Decimal(request.payload["quantity"]),quantity_received=Decimal("0"),
+        unit_cost=Decimal(request.payload["expected_unit_cost"])))
+    request.status="converted"
+    request.payload={**request.payload,"purchase_order_id":order.id,
+        "converted_by":user.id,"converted_at":datetime.now(timezone.utc).isoformat()}
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.replenishment.converted",
+          "procurement_purchase_order",order.id,f"request:{request.id}")
+    return {"request_id":request.id,"status":"converted","purchase_order_id":order.id,
+            "purchase_order_number":order.order_number,"purchase_order_status":"draft"}
 
 
 @router.post("/pharmacy-lab/billing")
