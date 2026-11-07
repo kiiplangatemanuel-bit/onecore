@@ -438,6 +438,10 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
                 "verified_at": datetime.now(timezone.utc).isoformat(), "callback_hash": hashlib.sha256(raw).hexdigest()})
     d["status"] = "paid" if all(x["status"] == "paid" for x in d["rows"]) else ("partial" if any(x["status"] == "paid" for x in d["rows"]) else "failed")
     batch.data = d
+    if d["status"] == "paid":
+        paid_run = db.query(HRPayrollRun).filter_by(id=d["run_id"], organization_id=batch.organization_id).with_for_update().first()
+        if paid_run:
+            paid_run.status = "paid"
     _audit(db, batch.organization_id, None, "hr.payroll.payment.callback", "payment_batch", batch.id, f"employee:{item_id};status:{status}")
     db.commit()
     return {"batch_id": batch.id, "status": d["status"]}
@@ -529,8 +533,9 @@ def my_payroll_history(membership=Depends(active_membership), user=Depends(curre
     employee = db.query(HREmployee).filter_by(organization_id=membership.organization_id, user_id=user.id, status="active").first()
     if not employee or not can_access_branch(membership, employee.branch_id):
         return []
+    approved_run_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).filter(HRPayrollRun.status.in_(["approved","paid"])).all()}
     rows = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
-            if r.data.get("employee_id") == employee.id]
+            if r.data.get("employee_id") == employee.id and r.data.get("run_id") in approved_run_ids]
     return sorted(rows, key=lambda x: x["period_end"], reverse=True)
 
 
@@ -624,6 +629,10 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
         "reconciled_by":user.id,"reconciled_at":datetime.now(timezone.utc).isoformat()}
     d["status"]="paid" if all(x["status"]=="paid" for x in d["rows"]) else ("partial" if matched else "failed")
     batch.data=d
+    if d["status"] == "paid":
+        paid_run=db.query(HRPayrollRun).filter_by(id=d["run_id"],organization_id=membership.organization_id).with_for_update().first()
+        if paid_run:
+            paid_run.status="paid"
     _audit(db,membership.organization_id,user.id,"hr.payroll.bank.reconciled","payment_batch",batch.id,
            f"matched:{len(matched)};unmatched:{len(unmatched)}")
     db.commit()
