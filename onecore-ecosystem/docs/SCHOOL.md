@@ -17,15 +17,20 @@ student information, statutory reporting or safeguarding processes.
 - Controlled publication by a member with organization manage permission.
 - Published assessment results with grade and competition ranking (ties share rank).
 - Weighted term report-card summaries from published assessments.
+- Daily attendance registers with present, absent, late and excused statuses; duplicate
+  learner rows are rejected, entries can be corrected for the same learner/date, and
+  every batch is audited. Learners must be active and enrolled in the selected class.
 - Audit events for admissions, admission, class/subject/assessment creation, mark
-  entry, grade-band configuration and publication.
-- Migration `0007_school`, API routes under `/api/v1/school`, basic workspace at
-  `/school`, and automated model/schema/OpenAPI route tests.
+  entry, grade-band configuration, publication and attendance recording.
+- Migrations `0007_school` and `0013_school_attendance`, API routes under
+  `/api/v1/school`, basic workspace at `/school`, and automated model/schema/OpenAPI tests.
 
 ## API
 
 - `GET/POST /api/v1/school/classes`
 - `GET /api/v1/school/learners`
+- `POST /api/v1/school/attendance` (batch upsert by learner and date)
+- `GET /api/v1/school/attendance?class_id=1&attendance_date=2026-11-07`
 - `POST /api/v1/school/admissions`
 - `POST /api/v1/school/learners/{id}/admit`
 - `GET/POST /api/v1/school/subjects`
@@ -44,7 +49,7 @@ requires manage permission and locks subsequent mark changes.
 ## Explicit gaps
 
 - Full admissions application/review, document uploads, guardian/teacher/staff
-  records, class promotion, attendance, timetable, curriculum/learning areas,
+  records, class promotion, attendance notifications/analytics, timetable, curriculum/learning areas,
   CBC strands/outcomes, lesson plans and learning resources.
 - Configurable weighted subject aggregation beyond the delivered assessment-weight
   report calculation; term/year grading, grade transitions, moderation, remarking,
@@ -58,3 +63,21 @@ requires manage permission and locks subsequent mark changes.
   safeguarding review, performance and pilot UAT.
 - The current workspace is a starter administration UI. No guardian portal or
   production deployment is claimed.
+
+
+## Attendance increment — 7 November 2026
+
+The first attendance slice provides a daily class register. `POST /api/v1/school/attendance`
+accepts a class, date and batch of learner status entries. Posting validates tenant and
+branch access, requires every learner to be active in that class, rejects duplicate
+learner IDs in the submitted batch, and upserts a learner's entry for that date. A
+learner cannot be moved between classes by a register update. `GET` retrieves the
+register for an authorized class/date. The database unique index prevents duplicate
+records for a tenant/date/learner. Migration `0013_school_attendance` is reversible.
+
+Tests added: status and duplicate validation, model table contract and OpenAPI route
+registration. The attendance increment does not yet include period-by-period attendance,
+excused absence approval, guardian notifications, attendance thresholds, analytics,
+biometric/device integrations, bulk CSV import or a dedicated attendance UI. CI must
+pass the full migration downgrade/upgrade and pytest workflow before this increment is
+considered verified.
