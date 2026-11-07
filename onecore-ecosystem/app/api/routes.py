@@ -287,9 +287,9 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
             organization_id=membership.organization_id, is_active=True).first()
         if not branch or not can_access_branch(membership, branch.id):
             raise HTTPException(404, "Stock location not found")
-    elif branch_scope_ids(membership) not in (None, []):
-        raise HTTPException(422, "A branch-scoped user must select an authorized branch")
-    elif branch_scope_ids(membership) == []:
+    elif branch_scope_ids(membership) not in (None, []) and not payload.warehouse_id:
+        raise HTTPException(422, "A branch-scoped user must select an authorized branch or warehouse")
+    elif branch_scope_ids(membership) == [] and not payload.warehouse_id:
         raise HTTPException(403, "No branch access is assigned")
 
     if payload.warehouse_id:
