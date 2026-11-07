@@ -198,7 +198,7 @@ def create_ward(payload: dict, m=Depends(active_membership), u: User=Depends(cur
     _need(db, m, u, "hospital.manage", branch)
     data = {"name": _required_text(payload, "name"), "code": _required_text(payload, "code", 40),
             "specialty": str(payload.get("specialty", "general"))[:80]}
-    row = _create(db, m, u, "ward", data, branch, external_key=data["code"])
+    row = _create(db, m, u, "ward", data, branch, external_key=f"{branch}:{data['code']}")
     db.commit()
     return _view(row)
 
@@ -537,7 +537,7 @@ def record_invoice_payment(invoice_id: int, payload: dict, m=Depends(active_memb
             resource_type="invoice_payment",idempotency_key=payload["idempotency_key"]).first()
         if retry:
             prior=_payload(retry)
-            if retry.patient_id!=invoice.patient_id or retry.parent_id!=invoice.id or retry.amount!=_money(payload.get("amount")) or prior.get("reference")!=payload.get("reference"):
+            if retry.patient_id!=invoice.patient_id or retry.parent_id!=invoice.id or retry.amount!=_money(payload.get("amount")) or prior.get("reference")!=payload.get("reference") or prior.get("method")!=payload.get("method"):
                 raise HTTPException(409,"Payment idempotency key was used for a different payment")
             return {"invoice":_view(invoice),"payment":_view(retry)}
     if invoice.status not in {"issued","partially_paid"}:
@@ -565,6 +565,25 @@ def record_invoice_payment(invoice_id: int, payload: dict, m=Depends(active_memb
         {"invoice_id":invoice.id,"payment_id":payment.id,"amount":str(amount)},invoice.id,payload.get("idempotency_key"))
     db.commit()
     return {"invoice":_view(invoice),"payment":_view(payment)}
+
+
+
+@router.get("/patients/{patient_id}/invoices")
+def list_patient_invoices(patient_id: int, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    patient, emergency, _=_patient_access(db,m,u,patient_id,"patient.read",write=False)
+    _need(db,m,u,"billing.manage",patient.branch_id)
+    rows=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,patient_id=patient.id,resource_type="invoice").order_by(HealthcareResource.id.desc()).all()
+    _audit(db,m,u,patient,"billing.invoices.listed","",emergency);db.commit()
+    return [_view(x) for x in rows]
+
+
+@router.get("/patients/{patient_id}/insurance/claims")
+def list_patient_claims(patient_id: int, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    patient, emergency, _=_patient_access(db,m,u,patient_id,"patient.read",write=False)
+    _need(db,m,u,"insurance.manage",patient.branch_id)
+    rows=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,patient_id=patient.id,resource_type="insurance_claim").order_by(HealthcareResource.id.desc()).all()
+    _audit(db,m,u,patient,"insurance.claims.listed","",emergency);db.commit()
+    return [_view(x) for x in rows]
 
 
 @router.post("/patients/{patient_id}/insurance/eligibility")
@@ -621,8 +640,10 @@ def submit_claim(patient_id: int, payload: dict, m=Depends(active_membership), u
     invoice_id = payload.get("invoice_id")
     if invoice_id:
         invoice = _resource(db,m,int(invoice_id),"invoice")
-        if invoice.patient_id != patient.id or amount > (invoice.amount or Decimal("0")):
-            raise HTTPException(422,"Claim invoice must belong to this patient and cover the claim amount")
+        invoice_data=_payload(invoice)
+        outstanding=Decimal(invoice_data.get("balance",str(invoice.amount or "0")))
+        if invoice.patient_id != patient.id or amount > outstanding:
+            raise HTTPException(422,"Claim invoice must belong to this patient and have sufficient outstanding balance")
     row = _create(db, m, u, "insurance_claim", {"payer": _required_text(payload, "payer"),
         "claim_number": _required_text(payload, "claim_number", 100), "invoice_id": invoice_id,
         "submitted_at": NOW().isoformat(), "settled_amount": "0.00", "adjustment_reason": ""},
@@ -641,6 +662,13 @@ def settle_claim(claim_id: int, payload: dict, m=Depends(active_membership), u: 
     amount = _money(payload.get("settled_amount"))
     data = _payload(claim); already = Decimal(data.get("settled_amount", "0"))
     if amount + already > (claim.amount or Decimal("0")): raise HTTPException(422, "Settlement exceeds claim value")
+    invoice=None; invoice_data=None
+    if data.get("invoice_id"):
+        invoice=_resource(db,m,int(data["invoice_id"]),"invoice",lock=True)
+        if invoice.patient_id!=patient.id: raise HTTPException(409,"Claim invoice patient mismatch")
+        invoice_data=_payload(invoice)
+        outstanding=Decimal(invoice_data.get("balance",str(invoice.amount or "0")))
+        if amount>outstanding: raise HTTPException(422,"Insurance settlement exceeds invoice balance")
     data.update({"settled_amount": str(already + amount), "settlement_reference": _required_text(payload, "settlement_reference", 100),
         "settled_at": NOW().isoformat(), "adjustment_reason": str(payload.get("adjustment_reason", ""))[:1000]})
     claim.encrypted_payload=encrypt(data); claim.status="settled" if already+amount==(claim.amount or Decimal("0")) else "partially_settled"
@@ -648,8 +676,13 @@ def settle_claim(claim_id: int, payload: dict, m=Depends(active_membership), u: 
     _create(db,m,u,"settlement",{"claim_id":claim.id,"settlement_reference":data["settlement_reference"],
         "amount":str(amount),"settled_at":data["settled_at"]},patient.branch_id,patient.id,
         status="posted",external_key=data["settlement_reference"],amount=amount,currency=claim.currency)
+    if invoice is not None:
+        paid=Decimal(invoice_data.get("paid_amount","0.00"))+amount
+        balance=Decimal(invoice_data.get("balance",str(invoice.amount or "0")))-amount
+        invoice_data.update({"paid_amount":str(paid),"balance":str(balance)})
+        invoice.encrypted_payload=encrypt(invoice_data);invoice.status="paid" if balance==0 else "partially_paid";invoice.updated_by=u.id
     _audit(db,m,u,patient,"insurance.claim.settled","",emergency);db.commit()
-    return _view(claim)
+    return {"claim":_view(claim),"invoice":_view(invoice) if invoice else None}
 
 
 # ---- Pharmacy and laboratory integration queue ----
@@ -731,7 +764,7 @@ def create_theatre(payload: dict, m=Depends(active_membership), u: User=Depends(
     branch=payload.get("branch_id");_need(db,m,u,"theatre.manage",branch)
     row=_create(db,m,u,"theatre",{"name":_required_text(payload,"name"),
         "code":_required_text(payload,"code",40),"capacity":int(payload.get("capacity",1))},
-        branch,status="available",external_key=str(payload["code"]))
+        branch,status="available",external_key=f"{branch}:{payload['code']}")
     db.commit();return _view(row)
 
 
@@ -740,6 +773,7 @@ def schedule_procedure(patient_id: int, payload: dict, m=Depends(active_membersh
     patient, emergency, _=_patient_access(db,m,u,patient_id,"clinical.write",write=True)
     _need(db,m,u,"theatre.manage",patient.branch_id)
     theatre=_resource(db,m,int(payload.get("theatre_id",0)),"theatre",lock=True)
+    if theatre.branch_id!=patient.branch_id: raise HTTPException(409,"Theatre must be in the patient branch")
     if theatre.status!="available":raise HTTPException(409,"Theatre is not available")
     starts=str(payload.get("starts_at",""));ends=str(payload.get("ends_at",""))
     try:
@@ -816,11 +850,11 @@ def privacy_monitor(branch_id: str, since_hours: int=Query(24,ge=1,le=720),
     patient_branches={x.id:x.branch_id for x in db.query(HealthcarePatient).filter_by(
         organization_id=m.organization_id).all()}
     audits=[x for x in audits if x.patient_id in patient_branches
-        and can_access_branch(m,patient_branches[x.patient_id])]
+        and patient_branches[x.patient_id]==branch_id]
     sessions=db.query(HealthcareBreakGlassSession).filter_by(
         organization_id=m.organization_id,ended_at=None).all()
     active=[x for x in sessions if as_utc(x.expires_at)>NOW() and x.patient_id in patient_branches
-        and can_access_branch(m,patient_branches[x.patient_id])]
+        and patient_branches[x.patient_id]==branch_id]
     return {"window_hours":since_hours,"access_events":len(audits),
         "emergency_access_events":sum(1 for x in audits if x.emergency),
         "active_break_glass_sessions":[{"id":x.id,"patient_id":x.patient_id,"user_id":x.user_id,
