@@ -1,12 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10243d"><title>OneCore POS</title>
 <style>:root{font-family:system-ui,sans-serif;color:#172438;background:#f4f7fb}body{margin:0}header{background:#10243d;color:#fff;padding:18px}main,footer{max-width:980px;margin:auto;padding:18px}.panel{background:#fff;border:1px solid #dbe3ed;border-radius:12px;padding:18px;margin-bottom:16px}form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}label{display:grid;gap:5px;font-weight:600}input,select,button{font:inherit;padding:10px;border:1px solid #aebdce;border-radius:7px}button{background:#155a9c;color:#fff;border:0;cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f0b429;outline-offset:2px}.muted{color:#5a6878}#status{min-height:1.5em}footer{text-align:center;color:#5a6878}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+@media print{body *{visibility:hidden}#receiptOutput,#receiptOutput *{visibility:visible}#receiptOutput{position:absolute;left:0;top:0;width:100%}}
 </style></head><body><header><strong>ONECORE TECHNOLOGIES LTD · POS</strong><span id="connection" style="float:right">Checking connection…</span></header>
 <main>
 <section class="panel"><h1>Point of sale</h1><p class="muted">Online shift opening, local encrypted transaction queue and idempotent server synchronization.</p>
 <form id="login"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><label>Organization ID<input name="org" inputmode="numeric" required></label><label>Branch ID<input name="branch" required maxlength="36"></label><button>Sign in</button></form>
 <div class="row"><button type="button" id="openShift" disabled>Open cashier shift</button><button type="button" id="sync" disabled>Sync queued sales</button><span id="shift" class="muted">No active shift.</span></div></section>
 <section class="panel"><h2>Checkout</h2><form id="sale"><label>Product<select name="product_id" required><option value="">Load catalogue after sign in</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" value="1" required></label><label>Payment method<select name="method"><option>cash</option><option>card</option><option>bank</option><option>credit</option></select></label><label>Total<input id="total" readonly aria-readonly="true" value="0.00"></label><button id="checkout" disabled>Save sale locally / sync</button></form><p class="muted">The checkout price is read from the organization product catalogue, not supplied by the cashier. Credit is recorded as unsettled. Card and bank entries are tender records only; no gateway is connected.</p></section>
+<section class="panel"><h2>Receipts and returns</h2>
+<form id="receiptLookup"><label>Sale ID<input name="sale_id" type="number" min="1" required></label><button>Load receipt</button></form>
+<div id="receiptOutput"></div><div class="row"><button type="button" id="printReceipt" disabled>Print receipt</button></div>
+<form id="returnForm" hidden><h3>Supervisor return</h3><label>Reason<input name="reason" minlength="5" maxlength="500" required></label><label>Refund method<select name="refund_method"><option value="cash">Cash</option><option value="card">Card (record only)</option><option value="bank">Bank (record only)</option></select></label><button>Record return and restock</button><p class="muted">Requires manage permission. This records the refund; it does not send money through a payment provider.</p></form></section>
 <section class="panel"><h2>Offline queue</h2><p id="queueCount" aria-live="polite">0 transactions waiting.</p><ul id="queueList"></ul><p class="muted">Queued transactions are encrypted with Web Crypto before storage in this browser's IndexedDB. Keep this browser profile and device safe. A still-active signed-in session and open shift are required to create offline sales; offline sign-in after a reload is not yet supported.</p></section>
 <p id="status" role="status" aria-live="polite"></p>
 </main><footer>Powered by OneCore Technologies Ltd</footer>
@@ -25,6 +30,38 @@ async function decrypt(record){const plain=await crypto.subtle.decrypt({name:'AE
 async function saveCache(){const encrypted=await encrypt(catalog);await reqStore('cache','readwrite',s=>s.put({id:'catalog',...encrypted}));}
 async function loadCache(){const r=await reqStore('cache','readonly',s=>s.get('catalog'));if(r)catalog=await decrypt(r);}
 async function queueRecords(){return await reqStore('queue','readonly',s=>s.getAll());}
+let currentReceipt=null;
+async function loadReceipt(saleId){
+ const data=await api('/pos/sales/'+encodeURIComponent(saleId));
+ currentReceipt=data;
+ const out=$('receiptOutput');out.replaceChildren();
+ const heading=document.createElement('h3');heading.textContent='Receipt #'+data.id+' · '+data.created_at;out.append(heading);
+ const meta=document.createElement('p');meta.textContent='Branch '+data.branch_id+' · Shift '+data.shift_id+' · Total '+data.currency+' '+data.total_amount;out.append(meta);
+ const table=document.createElement('table');const head=document.createElement('tr');
+ ['Item','SKU','Sold','Returned','Unit price','Return qty'].forEach(v=>{const th=document.createElement('th');th.textContent=v;head.append(th);});table.append(head);
+ data.lines.forEach(line=>{const tr=document.createElement('tr');
+  [line.name,line.sku,line.quantity,line.returned_quantity,line.unit_price].forEach(v=>{const td=document.createElement('td');td.textContent=String(v);tr.append(td);});
+  const td=document.createElement('td'),input=document.createElement('input');input.type='number';input.min='0';input.max=line.returnable_quantity;input.step='0.001';input.value='0';input.dataset.saleLineId=String(line.id);input.dataset.unitPrice=String(line.unit_price);input.className='return-qty';input.setAttribute('aria-label','Return quantity for '+line.name);td.append(input);tr.append(td);table.append(tr);
+ });out.append(table);
+ const tenders=document.createElement('p');tenders.textContent='Tenders: '+data.payments.map(p=>p.method+' '+p.amount+' ('+p.status+')').join(' · ');out.append(tenders);
+ $('returnForm').hidden=data.status!=='posted';$('printReceipt').disabled=false;
+}
+$('receiptLookup').addEventListener('submit',async e=>{e.preventDefault();try{await loadReceipt(e.currentTarget.elements.sale_id.value);status('Receipt loaded.');}catch(err){status(err.message);}});
+$('printReceipt').addEventListener('click',()=>window.print());
+$('returnForm').addEventListener('submit',async e=>{
+ e.preventDefault();if(!currentReceipt)return;
+ const lines=Array.from(document.querySelectorAll('.return-qty')).filter(input=>Number(input.value)>0).map(input=>({sale_line_id:Number(input.dataset.saleLineId),quantity:Number(input.value).toFixed(3)}));
+ if(!lines.length)return status('Enter at least one return quantity.');
+ const total=lines.reduce((sum,line)=>{const input=document.querySelector('[data-sale-line-id="'+line.sale_line_id+'"]');return sum+Number(input.dataset.unitPrice)*Number(line.quantity);},0);
+ if(!(total>0))return status('Return value must be greater than zero.');
+ const body={client_return_id:crypto.randomUUID(),reason:e.currentTarget.elements.reason.value.trim(),lines,
+  refunds:[{method:e.currentTarget.elements.refund_method.value,amount:(Math.round(total*100)/100).toFixed(2)}]};
+ try{const result=await api('/pos/sales/'+currentReceipt.id+'/returns',{method:'POST',body:JSON.stringify(body)});
+  status('Return '+result.id+' recorded. Stock was returned; payment execution is not automated.');
+  await loadReceipt(currentReceipt.id);e.currentTarget.reset();
+ }catch(err){status(err.message);}
+});
+
 async function updateQueue(){const items=await queueRecords();$('queueCount').textContent=items.length+' transactions waiting to sync.';$('queueList').replaceChildren();items.forEach(x=>{const li=document.createElement('li');li.textContent=x.id; $('queueList').append(li);});}
 async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
 function renderCatalog(){const sel=$('sale').elements.product_id;sel.replaceChildren(new Option('Select product',''));catalog.forEach(p=>sel.add(new Option(p.sku+' · '+p.name+' · KES '+p.sale_price+' · stock '+p.available_quantity,String(p.id))));}
