@@ -105,7 +105,7 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
         ).all()
         tender_fields = {
             "cash": "cash_account_id", "card": "card_clearing_account_id",
-            "bank": "bank_clearing_account_id", "credit": "credit_receivable_account_id",
+            "bank": "bank_clearing_account_id", "mpesa": "bank_clearing_account_id", "credit": "credit_receivable_account_id",
         }
         debit_by_account = {}
         for payment in payments:
@@ -172,7 +172,7 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
         ).all()
         tender_fields = {
             "cash": "cash_account_id", "card": "card_clearing_account_id",
-            "bank": "bank_clearing_account_id",
+            "bank": "bank_clearing_account_id", "mpesa": "bank_clearing_account_id",
         }
         credit_by_account = {}
         for refund in refunds:
