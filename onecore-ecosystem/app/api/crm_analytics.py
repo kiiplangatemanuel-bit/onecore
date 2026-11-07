@@ -260,7 +260,7 @@ def create_attribution(campaign_id:int,payload:dict,m=Depends(active_membership)
         currency=str(payload.get("currency","KES")).upper();key=str(payload["idempotency_key"]).strip()
         occurred=datetime.fromisoformat(str(payload.get("occurred_at") or datetime.now(timezone.utc).isoformat()).replace("Z","+00:00"))
     except Exception:raise HTTPException(422,"Invalid attribution payload")
-    allowed={"lead_created","qualified","quote_accepted","order_won","invoice_paid"}
+    allowed={"lead_created","qualified","quote_accepted","sales_order_confirmed","order_won","invoice_paid"}
     if event not in allowed or not amount.is_finite() or amount<0 or len(key)<8 or len(key)>100 or occurred.tzinfo is None:
         raise HTTPException(422,"Invalid attribution event, amount, idempotency key or timestamp")
     if len(currency)!=3 or not currency.isalpha() or not currency.isupper():raise HTTPException(422,"Invalid currency")
@@ -364,3 +364,21 @@ def provider_health(m=Depends(active_membership)):
         "delivery_callbacks":{"shared_secret_configured":bool(settings.crm_delivery_callback_secret)},
         "marketing_unsubscribe":{"public_https_url_configured":base.startswith("https://")},
         "note":"Configuration presence is not a successful provider health check or proof of message delivery."}
+
+@router.post("/leads/{lead_id}/campaign/{campaign_id}")
+def link_lead_campaign(lead_id:int,campaign_id:int,m=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(m,"manage")
+    lead=db.query(CRMLead).filter_by(id=lead_id,organization_id=m.organization_id).first()
+    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
+    if not lead or not can_access_branch(m,lead.branch_id):raise HTTPException(404,"Lead not found")
+    if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Campaign not found")
+    if lead.branch_id and campaign.branch_id and lead.branch_id!=campaign.branch_id:
+        raise HTTPException(422,"Lead and campaign must belong to the same branch")
+    if lead.source_campaign_id not in (None,campaign.id):raise HTTPException(409,"Lead is already attributed to another campaign")
+    lead.source_campaign_id=campaign.id
+    db.add(AuditEvent(organization_id=m.organization_id,actor_user_id=user.id,
+        action="crm.lead.campaign_linked",resource_type="crm_lead",resource_id=str(lead.id),
+        detail="campaign:%s"%campaign.id))
+    db.commit()
+    return {"lead_id":lead.id,"campaign_id":campaign.id,"linked":True}
