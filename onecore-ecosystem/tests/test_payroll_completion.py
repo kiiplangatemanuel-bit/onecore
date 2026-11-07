@@ -23,6 +23,8 @@ def test_nssf_upper_limit_and_salaried_shif_has_no_non_salaried_minimum():
     # non-salaried households under Regulation 17, not employees.
     assert Decimal(low["shif_employee"]) == Decimal("137.50")
     assert Decimal(low["housing_levy_employee"]) == Decimal("75.00")
+    # KES 300 is a non-salaried household minimum and must never be applied here.
+    assert Decimal(KENYA_2026_RULES["parameters"]["shif"]["non_salaried_minimum"]) == Decimal("300")
 
 
 def test_nonresident_does_not_receive_personal_relief():
