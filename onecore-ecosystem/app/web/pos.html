@@ -243,6 +243,16 @@ const total=cart.reduce((sum,item)=>sum+cartLineTotal(item),0);if(total<=0)retur
 const sale={client_transaction_id:crypto.randomUUID(),shift_id:shift.id,branch_id:branch,customer_ref:$('sale').elements.customer_ref.value.trim()||null,currency:'KES',offline_created_at:new Date().toISOString(),mpesa_phone:$('sale').elements.mpesa_phone.value,lines:cart.map(item=>({product_id:item.product.id,quantity:Number(item.quantity).toFixed(3),discount_percent:Number(item.discount_percent||0).toFixed(4)})),payments:[{method:$('sale').elements.method.value,amount:total.toFixed(2)}]};
 try{const encrypted=await encrypt(sale);await reqStore('queue','readwrite',s=>s.put({id:sale.client_transaction_id,...encrypted,attempt:0}));if('serviceWorker' in navigator){navigator.serviceWorker.ready.then(reg=>reg.sync?.register('onecore-pos-sync')).catch(()=>{});}cart.forEach(item=>{item.product.available_quantity=(Number(item.product.available_quantity)-Number(item.quantity)).toFixed(3);});cart=[];await saveCache();renderCatalog();await updateQueue();status('Multi-product sale stored safely in the local queue.');if(navigator.onLine)await syncQueue();}catch(err){status('Could not save sale locally: '+err.message);}});
 async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=await queueRecords();for(const item of items){
+ try{
+  const conflict=await api('/pos/advanced/conflicts/by-transaction/'+encodeURIComponent(item.id));
+  if(conflict.exists&&conflict.status==='open'){status('Sale '+item.id+' is waiting for supervisor conflict resolution.');break;}
+  if(conflict.exists&&conflict.status==='resolved'&&['void','accept_server'].includes(conflict.resolution)){
+   await reqStore('queue','readwrite',s=>s.delete(item.id));status('Supervisor resolved '+item.id+' without posting the local sale; queued copy discarded.');continue;
+  }
+  if(conflict.exists&&conflict.status==='resolved'&&conflict.resolution==='retry_after_refresh'){
+   item.nextAttemptAt=0;await reqStore('queue','readwrite',s=>s.put(item));
+  }
+ }catch(conflictCheckError){status('Cannot check conflict state for '+item.id+': '+conflictCheckError.message);break;}
  if(item.nextAttemptAt && item.nextAttemptAt>Date.now()){status('Sync retry is backing off until '+new Date(item.nextAttemptAt).toLocaleTimeString()+'.');break;}
  let sale=null;const attempt=(item.attempt||0)+1;item.attempt=attempt;
  try{
