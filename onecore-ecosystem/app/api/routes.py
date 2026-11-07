@@ -2434,9 +2434,22 @@ def accounting_subledger_reconciliation(
         credit_by_invoice[credit.invoice_id] = credit_by_invoice.get(
             credit.invoice_id, Decimal("0.00")) + Decimal(credit.total)
 
+    original_lines = db.query(AccountingInvoiceLine).filter(
+        AccountingInvoiceLine.organization_id == membership.organization_id,
+        AccountingInvoiceLine.invoice_id.in_(invoice_ids),
+    ).all()
+    original_total_by_invoice = {}
+    for line in original_lines:
+        original_total_by_invoice[line.invoice_id] = original_total_by_invoice.get(
+            line.invoice_id, Decimal("0.00")) + Decimal(line.total)
+
     subledger = {account_id: Decimal("0.00") for account_id in control_ids}
     for invoice in invoices:
-        balance = (Decimal(invoice.total)
+        # Invoice.total is reduced when a credit note posts; reconstruct the
+        # original posted invoice value from immutable source lines, then apply
+        # only settlements and credits dated on/before this historical cutoff.
+        original_total = original_total_by_invoice.get(invoice.id, Decimal("0.00"))
+        balance = (original_total
             - paid_by_invoice.get(invoice.id, Decimal("0.00"))
             - credit_by_invoice.get(invoice.id, Decimal("0.00")))
         subledger[invoice.control_account_id] += max(balance, Decimal("0.00"))
