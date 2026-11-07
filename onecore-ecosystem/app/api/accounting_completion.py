@@ -346,6 +346,7 @@ def integrate_procurement_invoice_to_ap(
         organization_id=membership.organization_id, procurement_invoice_id=source.id,
         accounting_invoice_id=ledger_invoice.id, created_by=user.id,
     ))
+    source.status = "accounted"
     # Force the same maker-checker approval path as manually entered supplier bills.
     db.add(AccountingInvoiceApproval(
         organization_id=membership.organization_id, invoice_id=ledger_invoice.id,
