@@ -1,4 +1,5 @@
-"""HR date calculations shared by leave workflows."""
+"""HR date and payroll calculations shared by HR workflows."""
+from decimal import Decimal
 from datetime import date, timedelta
 
 
@@ -27,3 +28,32 @@ def worked_minutes(start, end) -> int:
     if elapsed < 0:
         raise ValueError("End timestamp cannot precede start timestamp")
     return elapsed
+
+
+
+def payroll_money(value):
+    from decimal import Decimal, ROUND_HALF_UP
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def payroll_item_hash(payload) -> str:
+    import hashlib
+    import json
+    body = {
+        "employee_id": payload.employee_id,
+        "item_type": payload.item_type,
+        "code": payload.code.strip().upper(),
+        "description": payload.description.strip(),
+        "amount": str(payroll_money(payload.amount)),
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def payroll_totals(base_pay, items):
+    earnings = sum((payroll_money(x.amount) for x in items if x.item_type == "earning"), Decimal("0.00"))
+    deductions = sum((payroll_money(x.amount) for x in items if x.item_type == "deduction"), Decimal("0.00"))
+    gross = payroll_money(payroll_money(base_pay) + earnings)
+    deductions = payroll_money(deductions)
+    if deductions > gross:
+        raise ValueError("Payroll deductions cannot exceed gross pay")
+    return gross, deductions, payroll_money(gross - deductions)
