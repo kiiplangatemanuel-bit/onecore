@@ -74,3 +74,21 @@ def test_loan_servicing_contracts_and_routes():
     assert "/api/v1/sacco/loans" in paths
     assert "/api/v1/sacco/loans/{loan_id}/schedule" in paths
     assert "/api/v1/sacco/loans/{loan_id}/repayments" in paths
+
+
+def test_sacco_arrears_ageing_route_contract_and_scope():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/sacco/loans/arrears"
+    assert endpoint in paths
+    params = {item["name"] for item in paths[endpoint]["get"]["parameters"]}
+    assert "as_of" in params
+
+
+def test_sacco_arrears_ageing_ui_is_read_only():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "sacco.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="arrearsForm"' in html
+    assert 'id="arrearsRows"' in html
+    assert "/sacco/loans/arrears" in html
+    assert "No late fees or penalties are calculated or posted" in html
