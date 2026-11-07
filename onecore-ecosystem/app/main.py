@@ -13,6 +13,7 @@ from app.api.accounting_statements import router as accounting_statements_router
 from app.api.accounting_completion import router as accounting_completion_router
 from app.api.accounting_pos import router as accounting_pos_router
 from app.api.mpesa import router as mpesa_router
+from app.api.crm_campaigns import router as crm_campaigns_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +38,7 @@ app.include_router(accounting_statements_router)
 app.include_router(accounting_completion_router)
 app.include_router(accounting_pos_router)
 app.include_router(mpesa_router)
+app.include_router(crm_campaigns_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():

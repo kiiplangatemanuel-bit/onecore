@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
 
+    crm_public_base_url: str = ""
+    crm_delivery_callback_secret: str = ""
+
     integration_ai_enabled: bool = False
     ai_base_url: str = ""
     ai_api_key: str = ""
