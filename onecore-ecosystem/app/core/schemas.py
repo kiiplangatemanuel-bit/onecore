@@ -456,6 +456,48 @@ class SchoolAttendanceIn(BaseModel):
         return self
 
 
+class SchoolFeeStructureIn(BaseModel):
+    class_id: int = Field(gt=0)
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    description: str = Field(min_length=2, max_length=180)
+    academic_year: int = Field(ge=2000, le=2200)
+    term: str = Field(min_length=1, max_length=24)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    due_date: date
+
+    @field_validator("code", "description", "term")
+    @classmethod
+    def fee_fields_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Fee code, description and term cannot be blank")
+        return value
+
+
+class SchoolFeeAllocationIn(BaseModel):
+    charge_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+
+class SchoolFeePaymentIn(BaseModel):
+    receipt_number: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    method: str = Field(pattern=r"^(cash|bank|card|mpesa)$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    payment_date: date
+    allocations: list[SchoolFeeAllocationIn] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def allocations_match_payment(self):
+        ids = [item.charge_id for item in self.allocations]
+        if len(ids) != len(set(ids)):
+            raise ValueError("A fee charge may appear only once per receipt")
+        if sum((item.amount for item in self.allocations), Decimal("0.00")) != self.amount:
+            raise ValueError("Payment allocations must equal the receipt amount")
+        return self
+
+
 class ProcurementRequisitionLineIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
