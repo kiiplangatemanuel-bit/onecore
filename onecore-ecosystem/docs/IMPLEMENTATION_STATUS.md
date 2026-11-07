@@ -508,7 +508,8 @@ import/export, team assignment and UAT.
 - CI run for test commit `35d2262c137307fdf6fdfc1139a5d321e8ffcf7f` passed:
   dependencies, migration upgrade, downgrade/re-upgrade, compilation and pytest.
   Documentation/status follow-up run was still in progress at status update time.
-- Follow-on gaps: attendance register UI, guardian notifications, attendance
-  analytics, timetable/period attendance, CSV import and production PostgreSQL
-  concurrency/UAT.
+- Follow-on gaps: guardian notifications, attendance analytics, timetable/period
+  attendance, CSV import and production PostgreSQL concurrency/UAT. A basic staff
+  attendance register UI was added at `/school` with class/date loading, status/note
+  editing and batch save; its UI contract is covered by a test.
 
