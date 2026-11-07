@@ -1,4 +1,7 @@
 from datetime import date, datetime, time, timezone, timedelta
+from urllib.parse import urljoin
+
+from fastapi import Request
 from decimal import Decimal
 import hashlib
 import secrets
@@ -9,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.core.models import (
     AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournalLine,
     AccountingBankStatementLine, ProcurementSupplier, ProcurementPurchaseOrder,
@@ -22,6 +25,7 @@ from app.core.procurement_workflow_models import (
     ProcurementSupplierStatement, ProcurementSupplierStatementLine,
 )
 from app.core.security import current_user
+from app.core.config import settings
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.api.routes import _accounting_make_journal, _accounting_assert_period_open, audit
@@ -41,6 +45,7 @@ class SettlementCreateIn(BaseModel):
     payment_date: date
     provider: str = Field(default="manual", pattern=r"^(manual|bank_transfer|mpesa)$")
     provider_reference: str = Field(default="", max_length=120)
+    provider_phone_number: str = Field(default="", max_length=20)
     reference: str = Field(min_length=2, max_length=120)
     idempotency_key: str = Field(min_length=8, max_length=100)
     allocations: list[SettlementAllocationIn] = Field(min_length=1, max_length=100)
@@ -125,6 +130,7 @@ def _settlement_response(row):
     return {
         "id": row.id, "supplier_id": row.supplier_id, "amount": str(row.amount),
         "currency": row.currency, "provider": row.provider, "provider_reference": row.provider_reference,
+        "provider_phone": ("••••" + row.provider_phone_number[-4:]) if row.provider_phone_number else "",
         "reference": row.reference, "status": row.status, "journal_id": row.journal_id,
         "payment_date": row.payment_date.date().isoformat(),
     }
@@ -189,11 +195,33 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
     if currency != cash_currency(db, membership.organization_id):
         # The ledger is single-base-currency; foreign-currency payments require a configured FX workflow.
         raise HTTPException(422, "Settlement currency must equal the organization's accounting base currency")
+    callback_token = ""
+    provider_phone = ""
+    if payload.provider == "mpesa":
+        if currency != "KES" or total != total.quantize(Decimal("1")):
+            raise HTTPException(422, "M-Pesa B2C supplier payouts require whole KES amounts")
+        if not payload.provider_phone_number:
+            raise HTTPException(422, "A supplier M-Pesa phone number is required for B2C settlement")
+        from app.api.mpesa import _enabled, normalize_phone
+        _enabled()
+        if not all((settings.mpesa_initiator_name, settings.mpesa_security_credential,
+                    settings.mpesa_b2c_result_url, settings.mpesa_b2c_timeout_url)):
+            raise HTTPException(503, "M-Pesa B2C initiator, encrypted credential and callback URLs are required")
+        if not settings.mpesa_b2c_result_url.startswith("https://") or not settings.mpesa_b2c_timeout_url.startswith("https://"):
+            raise HTTPException(503, "M-Pesa B2C result and timeout URLs must use public HTTPS")
+        try:
+            provider_phone = normalize_phone(payload.provider_phone_number)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        callback_token = secrets.token_urlsafe(32)
     row = ProcurementSettlement(
         organization_id=membership.organization_id, supplier_id=supplier.id,
         payment_account_id=cash.id, amount=total, currency=currency,
         provider=payload.provider, provider_reference=payload.provider_reference.strip(),
-        reference=payload.reference.strip(), status="pending_verification",
+        provider_phone_number=provider_phone,
+        callback_token_hash=hashlib.sha256(callback_token.encode()).hexdigest() if callback_token else "",
+        reference=payload.reference.strip(),
+        status="pending_provider" if payload.provider == "mpesa" else "pending_verification",
         payment_date=datetime.combine(payload.payment_date, time.min, tzinfo=timezone.utc),
         idempotency_key=payload.idempotency_key, created_by=user.id,
     )
@@ -212,6 +240,33 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
         db.rollback()
         raise HTTPException(409, "Settlement conflicts with another request")
     db.refresh(row)
+    if row.provider == "mpesa":
+        from app.api.mpesa import _post
+        try:
+            response = _post("mpesa/b2c/v1/paymentrequest", {
+                "InitiatorName": settings.mpesa_initiator_name,
+                "SecurityCredential": settings.mpesa_security_credential,
+                "CommandID": "BusinessPayment", "Amount": int(total),
+                "PartyA": settings.mpesa_shortcode, "PartyB": provider_phone,
+                "Remarks": f"OneCore supplier settlement {row.id}"[:100],
+                "QueueTimeOutURL": urljoin(settings.mpesa_b2c_timeout_url.rstrip("/") + "/", callback_token),
+                "ResultURL": urljoin(settings.mpesa_b2c_result_url.rstrip("/") + "/", callback_token),
+                "Occasion": f"SUP-{row.id}"[:20],
+            })
+            if response.get("ResponseCode") == "0":
+                row.provider_conversation_id = str(response.get("ConversationID") or "")[:100]
+                row.provider_originator_id = str(response.get("OriginatorConversationID") or "")[:100]
+                if not row.provider_conversation_id or not row.provider_originator_id:
+                    row.status = "unknown"
+                    row.provider_result_description = "Daraja accepted request without correlation IDs; reconcile before retrying"
+            else:
+                row.status = "failed"
+                row.provider_result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
+        except HTTPException as exc:
+            row.status = "unknown" if exc.status_code == 503 else "failed"
+            row.provider_result_description = str(exc.detail)[:500]
+        db.commit()
+        db.refresh(row)
     return _settlement_response(row)
 
 
@@ -236,7 +291,10 @@ def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
         if settlement.provider_reference != payload.provider_reference.strip():
             raise HTTPException(409, "Settlement is already verified against a different provider reference")
         return {**_settlement_response(settlement), "status": "already_settled"}
-    if settlement.status != "pending_verification":
+    if settlement.provider == "mpesa":
+        if settlement.status != "provider_confirmed" or settlement.provider_reference != payload.provider_reference.strip():
+            raise HTTPException(409, "M-Pesa settlement must have a verified successful B2C callback before posting")
+    elif settlement.status != "pending_verification":
         raise HTTPException(409, "Only pending settlements can be verified")
     allocations = db.query(ProcurementSettlementAllocation).filter_by(
         organization_id=membership.organization_id, settlement_id=settlement.id
@@ -291,7 +349,8 @@ def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
         allocation.accounting_payment_id = payment.id
         invoice.amount_paid = Decimal(invoice.amount_paid) + amount
         invoice.status = "paid" if invoice.amount_paid == invoice.total else "partially_paid"
-    settlement.provider_reference = payload.provider_reference.strip()
+    if settlement.provider != "mpesa":
+        settlement.provider_reference = payload.provider_reference.strip()
     settlement.status = "settled"
     settlement.journal_id = journal.id
     settlement.verified_by = user.id
@@ -306,6 +365,93 @@ def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
     return {**_settlement_response(settlement), "status": "settled",
             "journal_id": journal.id, "allocation_count": len(allocations)}
 
+
+
+
+def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = False):
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    settlement = db.query(ProcurementSettlement).filter_by(
+        callback_token_hash=digest, provider="mpesa"
+    ).with_for_update().first()
+    if not settlement:
+        return False
+    if settlement.status in {"settled", "provider_confirmed"}:
+        return True
+    result = body.get("Result") or body
+    conversation = str(result.get("ConversationID") or "")
+    if not conversation:
+        return False
+    if not settlement.provider_conversation_id and settlement.status in {"pending_provider", "unknown"}:
+        settlement.provider_conversation_id = conversation[:100]
+        settlement.provider_originator_id = str(result.get("OriginatorConversationID") or "")[:100]
+    elif conversation != settlement.provider_conversation_id:
+        return False
+    settlement.provider_result_code = str(result.get("ResultCode") if result.get("ResultCode") is not None else "")[:40]
+    settlement.provider_result_description = str(result.get("ResultDesc") or ("Provider timeout" if timeout else ""))[:500]
+    if timeout:
+        settlement.status = "unknown"
+    elif settlement.provider_result_code == "0":
+        params = ((result.get("ResultParameters") or {}).get("ResultParameter") or [])
+        metadata = {str(x.get("Key")): x.get("Value") for x in params if isinstance(x, dict)}
+        try:
+            paid = Decimal(str(metadata.get("TransactionAmount"))).quantize(CENT)
+        except Exception:
+            settlement.status = "exception"
+            settlement.provider_result_description = "Successful B2C callback is missing a valid transaction amount"
+            db.commit()
+            return True
+        receipt = str(metadata.get("TransactionReceipt") or "").strip()
+        if paid != Decimal(settlement.amount).quantize(CENT) or not receipt:
+            settlement.status = "exception"
+            settlement.provider_result_description = "B2C callback amount or receipt does not match the settlement"
+            db.commit()
+            return True
+        duplicate = db.query(ProcurementSettlement).filter(
+            ProcurementSettlement.organization_id == settlement.organization_id,
+            ProcurementSettlement.provider_reference == receipt,
+            ProcurementSettlement.id != settlement.id,
+        ).first()
+        if duplicate:
+            settlement.status = "exception"
+            settlement.provider_result_description = "M-Pesa receipt has already been used by another supplier settlement"
+            db.commit()
+            return True
+        settlement.provider_reference = receipt[:120]
+        settlement.status = "provider_confirmed"
+    else:
+        settlement.status = "failed"
+    db.commit()
+    return True
+
+
+@router.post("/supplier-settlements/callbacks/b2c/result/{token}")
+async def supplier_b2c_result_callback(token: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid M-Pesa B2C callback JSON")
+    db = SessionLocal()
+    try:
+        if not _supplier_b2c_callback(db, token, body):
+            raise HTTPException(404, "Unknown or mismatched supplier B2C callback")
+        return {"ResultCode": 0, "ResultDesc": "Accepted"}
+    finally:
+        db.close()
+
+
+@router.post("/supplier-settlements/callbacks/b2c/timeout/{token}")
+async def supplier_b2c_timeout_callback(token: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid M-Pesa B2C timeout JSON")
+    db = SessionLocal()
+    try:
+        if not _supplier_b2c_callback(db, token, body, timeout=True):
+            raise HTTPException(404, "Unknown or mismatched supplier B2C timeout")
+        return {"ResultCode": 0, "ResultDesc": "Accepted"}
+    finally:
+        db.close()
 
 @router.get("/supplier-settlements")
 def list_supplier_settlements(supplier_id: int | None = Query(default=None, gt=0),
