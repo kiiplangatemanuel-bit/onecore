@@ -858,6 +858,7 @@ class CRMCampaign(Base):
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     campaign_number: Mapped[str] = mapped_column(String(60))
     name: Mapped[str] = mapped_column(String(180))
+    subject: Mapped[str] = mapped_column(String(240), default="")
     channel: Mapped[str] = mapped_column(String(16))
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     message: Mapped[str] = mapped_column(Text)
