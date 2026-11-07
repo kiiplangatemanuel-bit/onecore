@@ -25,7 +25,7 @@ from app.core.tenancy import active_membership
 from app.core.authorization import can_access_branch
 from app.services.datetime_utils import as_utc
 from app.api.healthcare_privacy import (
-    _require, _patient, _audit, _treatment_allowed, encrypt, decrypt,
+    _require, _patient, _audit, _treatment_allowed, _has_access, encrypt, decrypt,
 )
 
 router = APIRouter(prefix="/api/v1/healthcare", tags=["Healthcare hospital operations"])
@@ -41,6 +41,7 @@ ADMIN_ROLES = {"healthcare_admin"}
 ROLE_ACTIONS = {
     "hospital.manage": {"healthcare_admin"},
     "admissions.manage": {"healthcare_admin", "clinician", "nurse", "receptionist", "ward_clerk"},
+    "inpatient.clinical.manage": {"healthcare_admin", "clinician", "nurse"},
     "nursing.manage": {"healthcare_admin", "clinician", "nurse"},
     "observations.manage": {"healthcare_admin", "clinician", "nurse"},
     "orders.manage": {"healthcare_admin", "clinician"},
@@ -75,7 +76,19 @@ def _need(db, m, u, action: str, branch_id=None):
 
 def _patient_access(db, m, u, patient_id: int, permission="clinical.read", write=False):
     patient = _patient(db, patient_id, m)
-    emergency, roles = _require(db, m, u, permission, patient.branch_id, patient.id, True)
+    try:
+        emergency, roles = _require(db, m, u, permission, patient.branch_id, patient.id, True)
+    except HTTPException:
+        if permission != "clinical.write":
+            raise
+        emergency, roles = _require(db, m, u, "patient.read", patient.branch_id, patient.id, True)
+        if not emergency and "healthcare_admin" not in roles and not _has_access(
+            db,m.organization_id,u.id,patient.id,"write"):
+            raise HTTPException(403,"A write-level patient grant is required for this clinical workflow")
+    if write and permission == "patient.read" and not emergency and "healthcare_admin" not in roles:
+        if not roles.intersection({"receptionist","ward_clerk"}) and not _has_access(
+            db,m.organization_id,u.id,patient.id,"write"):
+            raise HTTPException(403,"A write-level patient grant is required for this clinical workflow")
     if write and not emergency and not _treatment_allowed(db, m.organization_id, patient.id):
         raise HTTPException(409, "Current treatment consent is required before recording care")
     return patient, emergency, roles
@@ -328,7 +341,7 @@ def admit_patient(payload: dict, m=Depends(active_membership), u: User=Depends(c
 def discharge_patient(admission_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     admission = _resource(db, m, admission_id, "admission", lock=True)
     patient, emergency, _ = _patient_access(db, m, u, admission.patient_id, "clinical.write", write=True)
-    _need(db, m, u, "admissions.manage", patient.branch_id)
+    _need(db, m, u, "inpatient.clinical.manage", patient.branch_id)
     if admission.status != "admitted":
         raise HTTPException(409, "Only an admitted patient can be discharged")
     summary = _required_text(payload, "discharge_summary", 4000)
@@ -352,8 +365,7 @@ def discharge_patient(admission_id: int, payload: dict, m=Depends(active_members
 def transfer_patient(admission_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     admission = _resource(db, m, admission_id, "admission", lock=True)
     patient, emergency, _ = _patient_access(db, m, u, admission.patient_id, "clinical.write", write=True)
-    _need(db, m, u, "admissions.manage", patient.branch_id)
-    if admission.status != "admitted": raise HTTPException(409, "Only admitted patients can be transferred")
+    _need(db, m, u, "inpatient.clinical.manage", patient.branch_id) raise HTTPException(409, "Only admitted patients can be transferred")
     target = _resource(db, m, int(payload.get("target_bed_id", 0)), "bed", lock=True)
     if target.branch_id != patient.branch_id or target.status != "available":
         raise HTTPException(409, "Target bed is not available in the patient's branch")
