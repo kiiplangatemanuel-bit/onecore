@@ -761,3 +761,29 @@ payslip PDF/email, payroll journal or accounting posting. Payroll figures are
 operator-entered and are not a statutory calculation or payment instruction.
 CI and professional jurisdiction-specific validation are required before any
 operational payroll use.
+
+
+## Healthcare patient registration and clinic workflow increment (7 November 2026)
+
+Implemented on branch `feature/healthcare-patient-appointments`, stacked on HR
+payroll and the preceding CRM/HR feature branches:
+
+- Added tenant-unique patient registration with branch-scoped search and patient
+  detail retrieval; patient fields are minimized and do not include national IDs.
+- Added timezone-aware appointment scheduling with active provider membership,
+  provider branch-scope checks and overlap detection for patient/provider bookings.
+- Added controlled appointment lifecycle: scheduled, checked-in, completed,
+  cancelled and no-show. Cancellation/no-show require a reason; completion requires
+  a signed encounter.
+- Added provider-owned draft encounter creation and provider signature. One
+  encounter per appointment is enforced; signed records are immutable via current API.
+- Added healthcare workspace, migration `0025_healthcare_clinic`, validation,
+  lifecycle service, tests and `docs/HEALTHCARE.md`.
+
+Boundaries: pharmacy dispensing, medicine batches/expiry, laboratory catalogue,
+sample tracking/results, inpatient/bed management, billing/insurance, e-prescribing,
+FHIR/HL7 integrations, reminders and UAT remain outstanding. Current access uses
+the coarse organization `manage` permission; field-level encryption, clinician
+roles, patient consent/portal, retention/deletion governance, break-glass access and
+formal privacy/security assessment are not implemented. Do not use live patient
+records until these controls and clinical governance are approved.
