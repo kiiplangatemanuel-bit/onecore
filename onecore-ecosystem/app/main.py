@@ -11,6 +11,7 @@ from app.api.routes import router
 from app.api.platform_routes import router as platform_router
 from app.api.accounting_statements import router as accounting_statements_router
 from app.api.accounting_completion import router as accounting_completion_router
+from app.api.accounting_pos import router as accounting_pos_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,6 +34,7 @@ app.include_router(router)
 app.include_router(platform_router)
 app.include_router(accounting_statements_router)
 app.include_router(accounting_completion_router)
+app.include_router(accounting_pos_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():

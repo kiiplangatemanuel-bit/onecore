@@ -295,3 +295,31 @@ These additions improve the accounting workflow but do not establish statutory c
 - The preview includes the full fiscal-period close checklist. The close action refuses unresolved blockers, requires organization-wide branch access, requires the exact period code as confirmation, and posts the closing journal and closes the period in one database transaction.
 - A stable period-specific journal reference prevents duplicate closing journals. A period with no nominal-account activity can be closed without creating an empty journal.
 - This is an operational accounting close control. It does not calculate tax provisions, statutory reserves, dividends, foreign-exchange translation, consolidation, prior-period restatements or auditor certification. Finance/audit approval and statutory review remain required.
+
+
+## POS automatic journal integration
+
+POS checkout and returns now feed the general ledger through an idempotent source bridge. Organizations configure one tenant-level account mapping for cash, card clearing, bank clearing, credit receivables, sales revenue, sales discounts, output tax and sales returns.
+
+For each posted POS sale:
+- Debit cash/card/bank clearing and credit receivables for the recorded tender allocations.
+- Debit the sales-discount contra-revenue account for discounts.
+- Credit sales revenue for subtotal less discounts.
+- Credit output tax liability for the tax snapshot.
+
+For each POS return:
+- Debit sales returns for the returned amount excluding the returned tax.
+- Debit output tax liability to reverse the original output tax.
+- Credit the original refund tender's cash/card/bank account.
+
+Journals are posted automatically in the same transaction as the POS source record when mappings are valid. A unique source link prevents duplicate journals on replay. Missing mappings, invalid mapped accounts, missing tax mapping for taxable activity, unbalanced source values or closed fiscal periods leave a durable pending integration with a diagnostic reason rather than silently creating a partial journal.
+
+API:
+- GET/PUT `/api/v1/accounting/pos-mapping`
+- GET `/api/v1/accounting/pos-integrations`
+- POST `/api/v1/accounting/pos-integrations/post-pending`
+- POST `/api/v1/accounting/pos-integrations/backfill`
+
+This integration does not execute external refunds or settle payment-provider clearing accounts; those remain separate payment-provider and reconciliation workflows. Account types, base-currency consistency and tax treatment require finance configuration and review.
+
+The Accounting workspace now includes a POS ledger-mapping form, integration status table, pending-post action and legacy-source backfill action. Mapping controls are manager-authorized; integration status is available to users with accounting read access.

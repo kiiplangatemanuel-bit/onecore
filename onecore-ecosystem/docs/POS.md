@@ -65,7 +65,7 @@ attestation.
 
 ## Remaining POS requirements
 
-- Discount and tax calculation, customer accounts, receipt rendering/thermal printing and cash drawer integration.
+- Customer accounts, receipt rendering/thermal printing and cash drawer integration.
 - Offline re-authentication/device registration, local authorization expiry/revocation
   and a robust 24-hour offline entitlement.
 - Discounts, tax calculation, customer accounts, receipt rendering/thermal printing
@@ -112,3 +112,29 @@ Partial and full returns now use the original tax-inclusive discounted line valu
 - `PATCH /api/v1/inventory/products/{product_id}/tax-rate` updates a product's rate and writes an audit event; manage permission is required.
 - The Inventory workspace provides the manager-only tax-rate update form.
 - New POS transactions snapshot the rate. Existing sale lines and receipts are immutable when the product configuration changes.
+
+
+## Automatic POS-to-accounting journals
+
+Posted POS sales and approved POS returns now create their corresponding general-ledger journal automatically in the same database transaction as the source POS record whenever the organization has configured its POS ledger mapping. This prevents a source sale/return from committing while its generated journal is only half-written.
+
+Configure tenant-owned active accounts through `PUT /api/v1/accounting/pos-mapping` (manager permission):
+- Cash tender → cash asset account
+- Card tender → card clearing asset account
+- Bank tender → bank clearing asset account
+- Credit tender → receivables asset account
+- Net sales → sales revenue
+- Discounts → sales discounts (contra-revenue)
+- Output tax → output tax liability
+- Refunds → sales returns (contra-revenue), with tax reversed separately
+
+A sale journal debits each tender/receivable account and discounts, then credits net sales and output tax. A return journal debits sales returns and reverses the tax liability, then credits the relevant refund tender/clearing accounts. Monetary amounts are rounded to two decimal places and each journal is checked for exact debit/credit equality before posting.
+
+- `GET /api/v1/accounting/pos-mapping`
+- `PUT /api/v1/accounting/pos-mapping`
+- `GET /api/v1/accounting/pos-integrations?status=pending|posted`
+- `POST /api/v1/accounting/pos-integrations/post-pending`
+
+Every source has one unique organization/source-type/source-ID bridge link. Replays do not create duplicate journals. When mappings are not configured, or a source date falls in a closed fiscal period, the POS transaction remains operationally recorded and its bridge link stays pending with a reason. After correcting the mapping or period issue, an authorized manager can post pending integrations. The backfill endpoint discovers legacy sales/returns that predate the bridge and processes them in bounded batches. The integration list is branch-scoped.
+
+The mapping uses the organization's chart of accounts and base currency. POS currency must therefore be consistent with the accounting base currency; foreign-currency conversion, payment-gateway settlement, card/M-Pesa execution and bank reconciliation are not performed by this bridge. Finance must verify account classification and statutory tax treatment before production use.

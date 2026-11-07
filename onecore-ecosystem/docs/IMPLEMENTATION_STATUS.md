@@ -737,3 +737,12 @@ Branch: `feature/pos-tax-discounts-returns`; pull request #34.
 CI run 42399313757 passed migration upgrade, downgrade/re-upgrade, Python compilation and pytest on initial PR head `8b0d1caad36d850e017b63875937d22cb660b362`. Subsequent fixes and tests were committed after that run; a fresh CI run on the latest head is still required before merge.
 
 Boundaries: tax is an organization-configured percentage, not an eTIMS/KRA tax classification or filing integration. Discounts use manage permission rather than a threshold approval matrix. Refund records do not execute external payment rails. Production PostgreSQL race testing, finance/security review and pilot UAT remain outstanding.
+
+
+### POS-to-Accounting automatic journal bridge
+
+- Added tenant-owned POS ledger account mappings and unique source-to-journal links.
+- POS sales and returns automatically post balanced general-ledger journals in the source transaction when mappings are configured.
+- Added pending integration diagnostics and manager retry endpoint for missing mappings or closed-period blockers.
+- Added branch-scoped integration listing, audit events, migration 0024, and bridge contract tests.
+- External payment execution/settlement and jurisdiction-specific tax validation remain outside this increment.

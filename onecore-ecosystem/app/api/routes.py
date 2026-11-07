@@ -1571,6 +1571,12 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             provider_reference=payment.provider_reference,
             status="unsettled" if payment.method == "credit" else "recorded"
         ))
+    # Auto-post the source and journal in the same transaction. Missing mappings
+    # create a durable pending bridge item without blocking checkout.
+    from app.api.accounting_pos import post_pos_source
+    accounting_link = post_pos_source(
+        db, membership.organization_id, sale.branch_id, "sale", sale.id, user.id
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -1587,7 +1593,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     audit(db, user.id, membership.organization_id, "pos.sale.synced",
           "pos_sale", sale.id, payload.client_transaction_id)
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
-            "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency}
+            "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency,
+            "accounting_status": accounting_link.status, "accounting_journal_id": accounting_link.journal_id}
 
 
 
@@ -1748,6 +1755,10 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
             status="recorded"))
+    from app.api.accounting_pos import post_pos_source
+    accounting_link = post_pos_source(
+        db, membership.organization_id, result.branch_id, "return", result.id, user.id
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -1764,7 +1775,9 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
           "pos_return", result.id, f"sale:{sale.id};refund:{total};reason:{payload.reason.strip()}")
     return {"id": result.id, "sale_id": sale.id, "status": "recorded",
             "refund_total": str(result.refund_total), "currency": sale.currency,
-            "stock_reintegrated": True, "refunds_executed": False}
+            "stock_reintegrated": True, "refunds_executed": False,
+            "accounting_status": accounting_link.status,
+            "accounting_journal_id": accounting_link.journal_id}
 
 
 @router.get("/pos/shifts/current")
