@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
@@ -148,7 +149,7 @@ def assign_role(payload:dict,m=Depends(active_membership),u:User=Depends(current
         role=role,assigned_by=u.id,is_active=True)
     db.add(row)
     try:db.commit()
-    except Exception:db.rollback();raise HTTPException(409,"Healthcare role assignment already exists")
+    except IntegrityError:db.rollback();raise HTTPException(409,"Healthcare role assignment already exists")
     db.refresh(row)
     db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="healthcare.role.assigned",
         resource_type="healthcare_role_assignment",resource_id=str(row.id),detail=f"user:{uid};role:{role};branch:{branch_id or '*'}"))
