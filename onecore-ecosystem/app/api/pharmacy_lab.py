@@ -189,8 +189,10 @@ def _check_drug_safety(db, m, patient_id, medicine_ids):
         allergen = data.get("allergen", "").casefold()
         for mid in medicine_ids:
             _, med = _medicine(db, m, mid)
-            if allergen and allergen in {med.get("generic_name", "").casefold(),
-                                         med.get("brand_name", "").casefold()}:
+            known_names = {str(med.get("generic_name", "")).casefold(),
+                           str(med.get("brand_name", "")).casefold(),
+                           str(med.get("active_ingredient", "")).casefold()}
+            if allergen and allergen in known_names:
                 item = {"type": "allergy", "medicine_id": mid, "allergen": data.get("allergen"),
                         "reaction": data.get("reaction"), "severity": data.get("severity", "unknown")}
                 (blockers if item["severity"] == "severe" else warnings).append(item)
@@ -233,6 +235,7 @@ def create_pharmacy_medicine(payload: dict, m=Depends(active_membership),
     db.add(product); db.flush()
     data = {"inventory_product_id": product.id, "sku": sku, "generic_name": generic,
         "brand_name": str(payload.get("brand_name","")).strip()[:180],
+        "active_ingredient": str(payload.get("active_ingredient",generic)).strip()[:180],
         "strength": str(payload.get("strength","")).strip()[:80], "dosage_form": form,
         "route": route, "unit": unit, "sale_price": str(price),
         "is_controlled": bool(payload.get("is_controlled", False))}
@@ -535,7 +538,10 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     line_index=int(payload.get("line_index",-1))
     if line_index<0 or line_index>=len(data["lines"]):raise HTTPException(404,"Prescription line not found")
     line=data["lines"][line_index]
-    verifier_id=int(payload.get("verifier_id",0));_verifier(db,m,verifier_id,rx.branch_id)
+    verifier_id=int(payload.get("verifier_id",0))
+    if verifier_id == u.id:
+        raise HTTPException(403,"The dispensing pharmacist cannot verify their own dispense")
+    _verifier(db,m,verifier_id,rx.branch_id)
     qty=_decimal(payload.get("quantity"),"quantity",True)
     total_authorized=Decimal(line["quantity_prescribed"])*Decimal(1+int(line["refills_allowed"]))
     if Decimal(line["quantity_dispensed"])+qty>total_authorized:
@@ -544,7 +550,10 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     prior=db.query(HealthcareResource).filter_by(
         organization_id=m.organization_id,resource_type="pharmacy_dispense",idempotency_key=key).first()
     if prior:
-        if prior.parent_id!=rx.id or Decimal(_payload(prior)["quantity"])!=qty:
+        prior_data=_payload(prior)
+        if (prior.parent_id!=rx.id or Decimal(prior_data["quantity"])!=qty
+            or int(prior_data["line_index"])!=line_index
+            or int(prior_data.get("requested_batch_id") or 0)!=int(payload.get("batch_id") or 0)):
             raise HTTPException(409,"Dispense idempotency key conflicts with another request")
         return {"id":prior.id,"status":"already_recorded","quantity":str(qty)}
     medicine_id=int(line["medicine_id"]);medrow,med=_medicine(db,m,medicine_id)
@@ -559,8 +568,14 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
         if Decimal(bd["remaining_quantity"])>0:candidates.append((b,bd))
     candidates.sort(key=lambda x:(_date(x[1]["expiry_date"],"expiry_date"),x[0].id))
     remaining=qty;allocations=[]
-    for batch,bd in candidates:
-        take=min(remaining,Decimal(bd["remaining_quantity"]))
+    for candidate,_ in candidates:
+        batch,bd=_batch(db,m,candidate.id,lock=True)
+        if batch.status!="active" or bd.get("medicine_id")!=medicine_id:
+            continue
+        if _date(bd["expiry_date"],"expiry_date")<date.today():
+            continue
+        available=Decimal(bd["remaining_quantity"])
+        take=min(remaining,available)
         if take<=0:continue
         bd["remaining_quantity"]=str(Decimal(bd["remaining_quantity"])-take)
         _update(batch,bd,u)
@@ -578,7 +593,7 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     amount=sum((Decimal(a["quantity"])*Decimal(a["unit_price"]) for a in allocations),Decimal("0")).quantize(Decimal("0.01"))
     disp=_create(db,m,u,"pharmacy_dispense",{"prescription_id":rx.id,"line_index":line_index,
         "patient_id":rx.patient_id,"quantity":str(qty),"allocations":allocations,
-        "pharmacist_id":u.id,"verifier_id":verifier_id,"dispensed_at":NOW().isoformat()},
+        "requested_batch_id":requested_batch,"pharmacist_id":u.id,"verifier_id":verifier_id,"dispensed_at":NOW().isoformat()},
         rx.branch_id,rx.patient_id,parent_id=rx.id,status="dispensed",
         idempotency_key=key,amount=amount,currency="KES")
     for allocation in allocations:
@@ -612,8 +627,21 @@ def return_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_membe
     previous=_resource_list(db,m,"pharmacy_return",patient_id=disp.patient_id,limit=1000)
     returned=sum((Decimal(_payload(x)["quantity"]) for x in previous if _payload(x).get("dispense_id")==disp.id),Decimal("0"))
     if returned+qty>Decimal(data["quantity"]):raise HTTPException(422,"Return exceeds dispensed quantity")
+    return_allocations=[];remaining=qty
+    for allocation in data["allocations"]:
+        prior_qty=sum((Decimal(_payload(x).get("quantity","0")) for x in previous
+            if _payload(x).get("dispense_id")==disp.id
+            for a in _payload(x).get("allocations",[]) if int(a["batch_id"])==int(allocation["batch_id"])),Decimal("0"))
+        available=max(Decimal("0"),Decimal(allocation["quantity"])-prior_qty)
+        take=min(remaining,available)
+        if take>0:
+            return_allocations.append({"batch_id":int(allocation["batch_id"]),"quantity":str(take)})
+            remaining-=take
+        if remaining==0:break
+    if remaining>0:raise HTTPException(409,"Unable to trace returned quantity to original dispensed batches")
     row=_create(db,m,u,"pharmacy_return",{"dispense_id":disp.id,"quantity":str(qty),
-        "reason":reason,"stock_disposition":"quarantine_pending","recorded_by":u.id},
+        "allocations":return_allocations,"reason":reason,"stock_disposition":"quarantine_pending",
+        "recorded_by":u.id,"recorded_at":NOW().isoformat()},
         disp.branch_id,disp.patient_id,parent_id=disp.id,status="quarantine_pending")
     _patient_event(db,m,u,patient,"pharmacy.dispense.returned",
         {"dispense_id":disp.id,"return_id":row.id,"quantity":str(qty),"reason":reason},row.id)
