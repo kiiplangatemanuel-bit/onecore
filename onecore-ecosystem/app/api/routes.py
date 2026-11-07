@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -359,6 +359,7 @@ def post_accounting_journal(payload: AccountingJournalIn,
                             membership=Depends(active_membership),
                             user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "create")
+    _accounting_assert_period_open(db,membership.organization_id,payload.entry_date)
     validate_journal_lines(payload.lines)
     allowed = branch_scope_ids(membership)
     branch_ids = {line.branch_id for line in payload.lines if line.branch_id}
@@ -1308,7 +1309,19 @@ def _accounting_get_accounts(db, organization_id, account_ids):
     return mapped
 
 
+def _accounting_assert_period_open(db, organization_id, entry_date):
+    closed=db.query(AccountingFiscalPeriod).filter(
+        AccountingFiscalPeriod.organization_id==organization_id,
+        AccountingFiscalPeriod.status=="closed",
+        AccountingFiscalPeriod.start_date<=datetime.combine(entry_date,time.max,tzinfo=timezone.utc),
+        AccountingFiscalPeriod.end_date>=datetime.combine(entry_date,time.min,tzinfo=timezone.utc)
+    ).first()
+    if closed:
+        raise HTTPException(409,"The accounting date falls inside a closed fiscal period")
+
+
 def _accounting_make_journal(db, membership, user, entry_date, reference, memo, lines, branch_id=None):
+    _accounting_assert_period_open(db,membership.organization_id,entry_date)
     journal=AccountingJournal(
         organization_id=membership.organization_id,branch_id=branch_id,
         journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=reference,
