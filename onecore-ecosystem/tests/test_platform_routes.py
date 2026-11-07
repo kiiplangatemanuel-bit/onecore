@@ -54,3 +54,34 @@ def test_branch_schema_rejects_invalid_code():
     from app.core.schemas import BranchIn
     with pytest.raises(ValidationError):
         BranchIn(code="bad code", name="Branch")
+
+
+def test_invitation_branch_scope_requires_active_branch_in_same_organization():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from fastapi import HTTPException
+    import pytest
+    from app.core.models import Branch
+    from app.api.platform_routes import _validated_branch_scope
+
+    engine = create_engine("sqlite:///:memory:")
+    Branch.__table__.create(engine)
+    with Session(engine) as db:
+        db.add_all([
+            Branch(id="branch-hq", organization_id=1, code="HQ", name="Head Office", is_active=True),
+            Branch(id="branch-closed", organization_id=1, code="OLD", name="Closed", is_active=False),
+            Branch(id="branch-other", organization_id=2, code="HQ", name="Other tenant", is_active=True),
+        ])
+        db.commit()
+        assert _validated_branch_scope(db, 1, " branch-hq ") == "branch-hq"
+        assert _validated_branch_scope(db, 1, "*") == "*"
+        with pytest.raises(HTTPException) as inactive:
+            _validated_branch_scope(db, 1, "branch-closed")
+        assert inactive.value.status_code == 422
+        with pytest.raises(HTTPException):
+            _validated_branch_scope(db, 1, "branch-other")
+        with pytest.raises(HTTPException):
+            _validated_branch_scope(db, 1, "branch-hq,branch-hq")
+        with pytest.raises(HTTPException):
+            _validated_branch_scope(db, 1, "missing-branch")
+    engine.dispose()
