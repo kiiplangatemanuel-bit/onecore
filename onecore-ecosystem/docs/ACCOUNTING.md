@@ -242,3 +242,46 @@ This is an operational close checklist, not a complete statutory close process:
 it does not yet perform retained-earnings transfer, tax filing validation,
 subledger-to-control-account reconciliation, depreciation completeness
 certification, management sign-off or a formal close pack.
+
+
+## Accounting completion: cash flow, tax workpapers, procurement AP and refunds
+
+### Cash-flow reporting
+
+- `GET /api/v1/accounting/cash-flow?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&cash_account_ids=1&cash_account_ids=2`
+- Requires one or more tenant-owned asset accounts representing cash/bank.
+- Uses posted journal lines only, calculates opening cash balance, operating/investing/financing movements, unclassified movement, net change and closing balance.
+- Journal counterpart account types drive classification; multi-category journals are allocated proportionally. Review the method note in the response before relying on classifications. This is a ledger-derived management report, not a cash forecast or an IAS 7 certified statement.
+
+### Statutory tax workpaper
+
+- `GET /api/v1/accounting/statutory-tax-summary?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&tax_account_ids=10&tax_account_ids=11`
+- Requires explicitly selected tenant-owned tax ledger accounts: liability accounts are treated as output tax and asset accounts as input tax.
+- Returns account-level debit/credit movement, output tax, input tax and net tax payable.
+- This is a reconciliation workpaper only. It does not determine Kenyan tax treatment, validate tax invoices, calculate statutory liabilities, file returns, connect to KRA eTIMS or provide statutory certification. Tax account mappings and rates remain configured and reviewed by the organization.
+
+### Procurement-to-AP integration
+
+- `POST /api/v1/accounting/procurement-invoices/{supplier_invoice_id}/integrate`
+- Accepts a due date, AP liability control account, optional input-tax asset account and an explicit expense/asset ledger mapping for every matched procurement invoice line.
+- Only three-way-matched supplier invoices are eligible. The integration creates one draft payable invoice and a durable unique source-to-ledger link; retries return the existing linked invoice.
+- A pending maker-checker invoice approval is created automatically. A different authorized manager must approve it before the existing invoice posting endpoint will post the AP journal.
+- The source procurement invoice is marked `accounted` after the bridge record and AP draft commit. AP settlement then uses the existing invoice payment endpoint and idempotency controls.
+- Procurement invoice currency must match the organization's accounting base currency. Tax is allocated proportionally across source lines; the final line absorbs rounding.
+
+### Credit-note refunds
+
+- `POST /api/v1/accounting/credit-notes/{credit_note_id}/refund`
+- `GET /api/v1/accounting/refunds?invoice_id={id}`
+- Supports customer cash refunds (AR credit note) and supplier refund receipts (AP credit note), against a posted credit note.
+- Refund amount is capped by the remaining credit-note amount and the amount previously settled against the invoice. The selected cash/bank account must be a tenant asset account.
+- A balanced journal, refund record, idempotency key and audit event are committed together. The invoice's settled amount is reduced by the refund.
+- No cash drawer, bank, card or M-Pesa payout/collection provider is called. The journal records the accounting event; external cash execution must be confirmed separately.
+
+### Expanded close blocker
+
+The fiscal-period close checklist now also blocks while a matched procurement supplier invoice dated in the period remains unintegrated into AP. Integrating the invoice changes its source status to `accounted`; it must still pass invoice approval and posting before it can be settled.
+
+### Boundaries
+
+These additions improve the accounting workflow but do not establish statutory compliance or production readiness. Remaining work includes jurisdiction-specific tax determination and KRA eTIMS certification, external payment execution, PostgreSQL production rehearsal, concurrency testing, finance/audit review, formal sign-off and user acceptance testing. Cash-flow classifications are heuristic based on general-ledger account types, and no future cash-flow forecasting model is included.
