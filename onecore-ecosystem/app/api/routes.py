@@ -1321,7 +1321,7 @@ def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_
         prior=db.query(func.coalesce(func.sum(ProcurementSupplierInvoiceLine.quantity),0)).join(
             ProcurementSupplierInvoice,ProcurementSupplierInvoice.id==ProcurementSupplierInvoiceLine.invoice_id).filter(
             ProcurementSupplierInvoice.purchase_order_id==order.id,ProcurementSupplierInvoiceLine.purchase_order_line_id==po.id,
-            ProcurementSupplierInvoice.status.in_(["pending_match","matched"])).scalar() or Decimal("0")
+            ProcurementSupplierInvoice.status.in_(["pending_match","matched","accounted"])).scalar() or Decimal("0")
         returned=db.query(func.coalesce(func.sum(ProcurementSupplierReturnLine.quantity),0)).join(
             ProcurementSupplierReturn,ProcurementSupplierReturn.id==ProcurementSupplierReturnLine.return_id).join(
             ProcurementGoodsReceiptLine,ProcurementGoodsReceiptLine.id==ProcurementSupplierReturnLine.receipt_line_id).filter(

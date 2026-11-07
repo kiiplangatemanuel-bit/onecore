@@ -841,3 +841,10 @@ Release boundary: CI migration/pytest checks and production UAT must pass before
 ## CRM forecasting, targets, attribution and performance reporting
 
 Rebased on the current CRM automation and privacy-hardening base. Adds configurable stage probabilities and forecast scenarios; monthly/quarterly/yearly team and representative forecasts; target quotas and attainment; immutable forecast snapshots and historical variance against realized won-deal values; campaign-to-lead links with automatic quote acceptance and sales-order confirmation attribution; currency-aware ROI and conversion funnels; provider configuration health; scheduler heartbeat and container health. Migration: 0032_crm_forecast_attribution. CI verification for this rebased branch is required before merge. Provider UAT and accounting invoice/payment event publishing remain release gates.
+
+
+## Procurement settlement and supplier governance (branch `feature/procurement-settlement-governance`)
+
+Added migration `0033_procurement_workflows`, supplier settlement and allocation records, Daraja B2C supplier disbursement initiation/callback correlation, maker-verified AP settlement journals, remittance advice, supplier return-to-AP credit-note posting, time-bounded delegated PO approvals, supplier portal access tokens and RFQ/PO/invoice/delivery workflows, supplier statement matching/reconciliation, invoice discrepancy tracking and procurement/AP/bank reconciliation diagnostics. Added route/schema/migration contract tests.
+
+Verification is pending latest GitHub Actions results. Production M-Pesa B2C credentials/entitlement, public HTTPS callback configuration, bank API integration, PostgreSQL race testing, provider UAT and end-to-end finance acceptance remain release gates. Bank-transfer instructions require independent manager verification; no direct bank API initiation is claimed. Supplier delivery updates are supplier-reported rather than carrier tracking. Discrepancy resolution remains auditable and manager-controlled; no silent invoice mutation is performed.

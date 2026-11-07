@@ -582,7 +582,10 @@ async def b2c_result_callback(token: str, request: Request):
     db = SessionLocal()
     try:
         if not _b2c_callback(db, token, body):
-            raise HTTPException(404, "Unknown M-Pesa B2C result callback")
+            # Supplier settlements share the configured Daraja B2C callback base URL.
+            from app.api.procurement_workflows import _supplier_b2c_callback
+            if not _supplier_b2c_callback(db, token, body):
+                raise HTTPException(404, "Unknown M-Pesa B2C result callback")
         return {"ResultCode": 0, "ResultDesc": "Accepted"}
     finally:
         db.close()
@@ -597,7 +600,10 @@ async def b2c_timeout_callback(token: str, request: Request):
     db = SessionLocal()
     try:
         if not _b2c_callback(db, token, body, timeout=True):
-            raise HTTPException(404, "Unknown M-Pesa B2C timeout callback")
+            # Supplier settlement timeout callbacks use the same Daraja callback URL base.
+            from app.api.procurement_workflows import _supplier_b2c_callback
+            if not _supplier_b2c_callback(db, token, body, timeout=True):
+                raise HTTPException(404, "Unknown M-Pesa B2C timeout callback")
         return {"ResultCode": 0, "ResultDesc": "Accepted"}
     finally:
         db.close()

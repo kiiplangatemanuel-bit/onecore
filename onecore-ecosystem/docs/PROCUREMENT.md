@@ -144,3 +144,56 @@ forms for conversion, RFQs, quotation comparison/award, approval policy, invoice
 matching, supplier returns and performance reporting. Automated tests cover payload
 constraints, model/table registration, OpenAPI route registration and workspace
 controls. CI must pass migration upgrade, downgrade/re-upgrade, compilation and pytest.
+
+
+## Procurement settlement and supplier governance increment
+
+Branch: `feature/procurement-settlement-governance`; migration `0033_procurement_workflows`.
+
+### Supplier settlement and remittance
+- `POST /api/v1/procurement/supplier-settlements` creates an idempotent settlement instruction with one or more allocations to posted AP invoices for the same supplier, currency and branch.
+- Allocations are locked and checked against each AP invoice's remaining balance. The payment account must be an active asset account and settlement currency must equal the organization's base currency.
+- Manual/bank-transfer instructions remain pending verification until an authorized manager confirms the external reference. M-Pesa supplier payouts use Safaricom Daraja B2C, configured initiator/security credential and HTTPS result/timeout callbacks.
+- Daraja initiation is persisted before the network call. Callback tokens are high-entropy and only their SHA-256 hashes are stored. Supplier payouts use the same configured B2C result/timeout URL base as the existing POS refund integration; the shared `/api/v1/integrations/mpesa/callbacks/b2c/result/{token}` and timeout handlers dispatch to POS refund or supplier settlement intents. Callback processing checks conversation/originator correlation, exact amount, receipt presence and duplicate receipts, with a partial unique database index for M-Pesa supplier receipts. Successful callbacks set `provider_confirmed`; a separate authorized manager verification posts the AP/cash journal and invoice-payment allocations.
+- Unknown/timeout B2C outcomes are not automatically retried; reconcile with Safaricom before any new payout instruction.
+- `GET /supplier-settlements/{id}/remittance` returns a remittance advice with the invoice allocation breakdown and posted journal reference.
+
+### Credit notes and supplier statement reconciliation
+- `POST /supplier-returns/{return_id}/post-credit-note` converts returned accepted quantities into a posted supplier AP credit note against the AP invoice linked to the matched procurement bill.
+- It allocates quantities to the original AP invoice lines, subtracts previously posted credit-note quantities, reverses the expense/asset and input-tax accounts, debits AP, and posts a balanced journal in an open fiscal period.
+- Supplier statements can be imported, matched line-by-line to original gross AP invoices, AP payments, posted supplier credit notes or consolidated supplier settlement remittances, then reconciled only when every line is matched and opening balance plus statement movements equals closing balance.
+
+### Delegated approvals and supplier portal
+- Delegations are tenant-scoped, time-bounded, branch-aware, auditable and reject overlapping active windows for the same principal. A delegate can approve only the next applicable purchase-order approval tier for the delegated principal's role; the creator cannot approve their own order. Managers can escalate a pending tier to a higher-authority approver through a time-limited substitution.
+- Supplier portal tokens are random, stored as SHA-256 digests, scoped to one supplier, expiring and revocable. The portal supports invited RFQs, quote submission, purchase-order details, supplier invoices and delivery updates. Tokens are shown only once at creation.
+
+### Discrepancy and reconciliation controls
+- Invoice discrepancies can be opened against matched/accounted source invoices and resolved with an auditable resolution note after the invoice returns to a matched/accounted state. An evidence-based auto-resolution action rechecks purchase-order prices, accepted/returned receipt quantities, source/AP totals and duplicate references; unresolved discrepancies remain open for manual correction.
+- `GET /accounting-reconciliation` compares procurement source invoice gross values to AP net values after posted supplier credits, checks each settlement allocation against its AP payment record, verifies AP-control debits and cash/bank credits in the posted journal, and requires the cash journal line to be matched to an imported bank statement line.
+
+### API routes added
+- `POST /supplier-invoices/{id}/integrate-to-ap`
+- `POST/GET /supplier-settlements`
+- `POST /supplier-settlements/{id}/verify`
+- `GET /supplier-settlements/{id}/remittance`
+- `POST /supplier-settlements/callbacks/b2c/result/{token}`
+- `POST /supplier-settlements/callbacks/b2c/timeout/{token}`
+- `POST/GET /approval-delegations`, `POST /approval-delegations/{id}/revoke`
+- `POST /orders/{id}/approve-as-delegate`
+- `POST /supplier-portal/tokens`, `POST /supplier-portal/tokens/{id}/revoke`
+- `GET /supplier-portal/rfqs`, `POST /supplier-portal/rfqs/{id}/quotes`
+- `GET /supplier-portal/purchase-orders`, `GET /supplier-portal/purchase-orders/{id}`
+- `GET /supplier-portal/invoices`, `POST /supplier-portal/delivery-updates`
+- `POST /supplier-statements`, `GET /supplier-statements/{id}`
+- `POST /supplier-statements/{id}/lines/{line_id}/match`, `POST /supplier-statements/{id}/reconcile`
+- `POST /supplier-returns/{id}/post-credit-note`
+- `POST /supplier-invoices/{id}/discrepancies`, `POST /invoice-discrepancies/{id}/resolve`
+- `GET /accounting-reconciliation`
+
+### Production boundaries and release gates
+- Migration `0033_procurement_workflows` adds durable settlement/allocation, delegation, portal-token, discrepancy and supplier-statement records. Alembic registers the new mapped models.
+- The M-Pesa path requires production Daraja B2C entitlement, Safaricom-approved initiator and encrypted credential, public HTTPS callbacks, production secrets and provider UAT. Sandbox checks do not prove production disbursement.
+- Bank-transfer settlement is recorded and manager-verified; there is no direct bank API initiation in this increment. Bank reconciliation uses the existing accounting statement matching workflow.
+- Supplier delivery updates are supplier-reported events, not GPS/carrier tracking. Email delivery of remittance advice and automated supplier notifications require configured outbound messaging and are not claimed here.
+- Invoice discrepancy records support auditable exception resolution; they do not silently rewrite supplier invoices or override price/quantity/tax controls.
+- Run migration upgrade, downgrade/re-upgrade, Python compilation, the full pytest suite, PostgreSQL concurrency tests and end-to-end provider/bank UAT before merge/deployment. Do not regard the branch as verified until its latest CI checks pass.
