@@ -733,3 +733,31 @@ Implemented on branch `feature/hr-attendance-timekeeping`:
 Boundaries: no organization timezone configuration, shift calendars, breaks, overtime,
 geolocation/biometrics, offline punches, manager correction workflow, multiple daily
 sessions or payroll integration. UTC-day attendance is not a local payroll timesheet.
+
+
+## HR payroll preparation and approval increment (7 November 2026)
+
+Implemented on branch `feature/hr-payroll-runs`, stacked on HR employee/leave and
+attendance work:
+
+- Added effective-dated employee payroll profiles with tenant/branch scope and
+  overlap rejection. Base pay is explicitly the amount for one complete pay period.
+- Added draft payroll runs that include active eligible employees with exactly one
+  profile covering the full period; mixed-currency and overlapping periods are
+  rejected.
+- Added one-time earning/deduction items with decimal arithmetic, tenant-unique
+  idempotency keys and canonical request hashes.
+- Gross, deductions and net totals are recalculated from the base period pay and
+  explicit items; deductions greater than gross are rejected.
+- Added manager approval with creator self-approval prevention and immutable
+  approved run snapshots.
+- Added employee self-service retrieval of approved payslips and a basic HR payroll
+  workspace.
+- Added migration `0024_hr_payroll`, payroll schemas/services, tests and HR docs.
+
+Boundaries: no PAYE, NSSF, SHIF, housing levy, pension, benefits tax, reliefs,
+overtime premium, leave-pay or employer-contribution engine; no bank/M-Pesa payout,
+payslip PDF/email, payroll journal or accounting posting. Payroll figures are
+operator-entered and are not a statutory calculation or payment instruction.
+CI and professional jurisdiction-specific validation are required before any
+operational payroll use.
