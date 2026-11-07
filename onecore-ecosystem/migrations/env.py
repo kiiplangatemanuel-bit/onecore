@@ -5,6 +5,7 @@ from app.core.database import Base
 from app.core import models  # noqa: F401 - register all mapped tables
 from app.core import inventory_models  # noqa: F401 - register extended inventory tables
 from app.core import procurement_workflow_models  # noqa: F401 - register procurement workflow tables
+from app.api import pos_advanced  # noqa: F401 - register POS advanced tables
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
