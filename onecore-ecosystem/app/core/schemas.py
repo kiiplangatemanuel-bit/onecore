@@ -173,7 +173,31 @@ class POSShiftOpenIn(BaseModel):
 
 
 class POSShiftCloseIn(BaseModel):
-    closing_cash: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+    closing_cash: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    cash_count: dict[str,int] = Field(min_length=1, max_length=10)
+    note: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def validate_cash_count(self):
+        allowed={"1","5","10","20","40","50","100","200","500","1000"}
+        if set(self.cash_count)-allowed or any(v<0 or v>1000000 for v in self.cash_count.values()):
+            raise ValueError("Invalid KES denomination or quantity")
+        if self.cash_count and sum(Decimal(k)*v for k,v in self.cash_count.items())!=self.closing_cash:
+            raise ValueError("Denomination count must equal closing cash")
+        return self
+
+
+class POSCashMovementIn(BaseModel):
+    movement_type: str = Field(pattern=r"^(cash_in|cash_out|safe_drop)$")
+    amount: Decimal = Field(gt=0,le=Decimal("9999999999999999"),multiple_of=Decimal("0.01"))
+    reason: str = Field(min_length=5,max_length=500)
+    reference: str = Field(default="",max_length=120)
+    idempotency_key: str = Field(min_length=8,max_length=100)
+
+
+class POSShiftReviewIn(BaseModel):
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    note: str = Field(min_length=5,max_length=500)
 
 
 class POSSaleLineIn(BaseModel):

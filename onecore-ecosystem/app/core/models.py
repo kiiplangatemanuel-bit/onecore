@@ -318,6 +318,34 @@ class POSShift(Base):
     closing_cash: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expected_cash: Mapped[Decimal | None] = mapped_column(Numeric(18,2), nullable=True)
+    counted_cash: Mapped[Decimal | None] = mapped_column(Numeric(18,2), nullable=True)
+    cash_variance: Mapped[Decimal | None] = mapped_column(Numeric(18,2), nullable=True)
+    reconciliation_status: Mapped[str] = mapped_column(String(20), default="open")
+    counted_denominations: Mapped[dict] = mapped_column(JSON, default=dict)
+    close_note: Mapped[str] = mapped_column(String(500), default="")
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+
+
+class POSCashMovement(Base):
+    __tablename__ = "pos_cash_movements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("pos_shifts.id"), index=True)
+    movement_type: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18,2))
+    reason: Mapped[str] = mapped_column(String(500))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(16), default="recorded")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    authorized_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_pos_cash_movement_org_key","organization_id","idempotency_key",unique=True),
+        Index("ix_pos_cash_movement_shift","organization_id","shift_id","status"))
 
 
 class POSSale(Base):

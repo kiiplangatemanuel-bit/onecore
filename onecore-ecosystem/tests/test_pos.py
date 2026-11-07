@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.core.models import POSShift, POSSale, POSSaleLine, POSPayment
-from app.core.schemas import POSSaleSyncIn, POSShiftOpenIn
+from app.core.models import POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment
+from app.core.schemas import POSSaleSyncIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn
 from app.services.pos import canonical_request_hash, validate_payment_total
 from app.main import app
 
@@ -92,3 +92,24 @@ def test_pos_return_contracts_idempotency_and_routes():
     paths = set(app.openapi()["paths"])
     assert "/api/v1/pos/sales/{sale_id}" in paths
     assert "/api/v1/pos/sales/{sale_id}/returns" in paths
+
+
+def test_pos_cash_reconciliation_contracts_and_routes():
+    payload=POSShiftCloseIn(closing_cash=Decimal("1265.00"),cash_count={"1000":1,"200":1,"50":1,"10":1,"5":1})
+    assert payload.closing_cash==Decimal("1265.00")
+    with pytest.raises(ValidationError):
+        POSShiftCloseIn(closing_cash=Decimal("1264.00"),cash_count={"1000":1,"200":1,"50":1,"10":1,"5":1})
+    with pytest.raises(ValidationError):
+        POSShiftCloseIn(closing_cash=Decimal("0.00"),cash_count={})
+    with pytest.raises(ValidationError):
+        POSShiftCloseIn(closing_cash=Decimal("10.00"),cash_count={"2":5})
+    assert POSCashMovementIn(movement_type="safe_drop",amount="500.00",reason="Move cash to safe",idempotency_key="safe-drop-001")
+    with pytest.raises(ValidationError):
+        POSCashMovementIn(movement_type="withdraw",amount="10",reason="Wrong movement",idempotency_key="safe-drop-002")
+    with pytest.raises(ValidationError):
+        POSShiftReviewIn(decision="approve",note=" ")
+    assert POSCashMovement.__tablename__=="pos_cash_movements"
+    paths=set(app.openapi()["paths"])
+    assert "/api/v1/pos/shifts/{shift_id}/cash-movements" in paths
+    assert "/api/v1/pos/shifts/{shift_id}/reconciliation" in paths
+    assert "/api/v1/pos/shifts/{shift_id}/review" in paths

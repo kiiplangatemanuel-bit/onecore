@@ -211,3 +211,41 @@ clearing account; configure that account as the M-Pesa clearing control account.
 Safaricom sandbox credentials and registered callback URLs are required for live
 end-to-end verification. Production activation also requires a Safaricom-approved
 shortcode and B2C permissions; these cannot be provisioned by repository code.
+
+
+## POS shift reconciliation and cash management
+
+Opening float is recorded when a cashier opens a shift. Cash-in, cash-out and safe-drop operations are append-only, tenant-idempotent records. Cash-out and safe drops require manager permission. The cash ledger is available at GET /api/v1/pos/shifts/{shift_id}/reconciliation and movements are created at POST /api/v1/pos/shifts/{shift_id}/cash-movements.
+
+Expected till cash = opening float + recorded cash sales - recorded cash refunds + cash-in - cash-out - safe drops. Unsettled tenders and unconfirmed refunds are excluded. Shift close supports KES denomination counts (1, 5, 10, 20, 40, 50, 100, 200, 500 and 1,000) and validates their sum against the declared count. Non-zero variances are sent to manager review with approve/reject and mandatory notes; zero-variance shifts auto-reconcile. All actions are tenant/branch scoped and audit logged.
+
+
+## Shift reconciliation and till cash management
+
+Every cashier shift has a branch-scoped cash ledger. The expected till balance is
+calculated from the opening float, recorded cash tenders, confirmed cash refunds,
+cash-in movements, and cash-out/safe-drop movements. Unsettled M-Pesa and credit
+tenders are excluded until they are recorded as collected cash.
+
+- `GET /api/v1/pos/shifts/{shift_id}/reconciliation` returns the expected balance,
+  component totals, denomination count, variance, review status and movement history.
+- `POST /api/v1/pos/shifts/{shift_id}/cash-movements` records cash-in, cash-out or
+  safe-drop entries. Cash-out and safe-drop require manager permission. An
+  organization-scoped idempotency key prevents duplicate movement recording, and
+  reusing a key with different movement details is rejected.
+- Cash-out and safe-drop amounts cannot exceed the calculated available till balance.
+- `POST /api/v1/pos/shifts/{shift_id}/close` requires a physical KES denomination
+  breakdown; the sum must equal the declared closing cash. It snapshots expected
+  cash and variance and closes the shift.
+- A zero-variance shift is automatically reconciled. A non-zero variance is marked
+  `pending_review`; a manager must approve or reject it with a mandatory note using
+  `POST /api/v1/pos/shifts/{shift_id}/review`.
+- Cash movement records are append-only operational records and produce audit
+  events. Shifts and movements are tenant/branch scoped; cashiers can manage their
+  own open shifts, while managers can review shifts and authorize outflows.
+- The POS screen includes cash movement entry, live reconciliation, denomination
+  counting, shift close and variance review controls.
+
+This is a single-cashier shift control workflow. It does not yet provide physical
+cash drawer hardware integration, multi-cashier shared tills, bank deposit
+reconciliation or production till-count pilot sign-off.
