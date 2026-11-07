@@ -245,7 +245,7 @@ class AccountingInvoiceLineIn(BaseModel):
     account_id: int = Field(gt=0)
     tax_account_id: int | None = Field(default=None, gt=0)
     description: str = Field(min_length=2, max_length=240)
-    quantity: Decimal = Field(gt=0, le=Decimal("999999999"))
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999"), multiple_of=Decimal("0.001"))
     unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
@@ -265,7 +265,7 @@ class AccountingInvoiceIn(BaseModel):
 
 class AccountingInvoicePaymentIn(BaseModel):
     payment_account_id: int = Field(gt=0)
-    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"))
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     payment_date: date
     reference: str = Field(default="", max_length=120)
     idempotency_key: str = Field(min_length=8, max_length=100)
