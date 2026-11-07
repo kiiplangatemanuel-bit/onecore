@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import (
     AccountingAccount, AccountingJournal, AccountingJournalLine,
-    AccountingFiscalPeriod, AuditEvent, POSAccountingMapping, POSAccountingLink,
+    AccountingFiscalPeriod, AuditEvent, Organization, POSAccountingMapping, POSAccountingLink,
     POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund,
 )
 from app.core.security import current_user
@@ -162,6 +162,17 @@ def post_pos_source(db: Session, organization_id: int, branch_id: str,
         link.status = "pending"
         link.failure_reason = "POS accounting mapping has not been configured"
         return link
+    if source_type == "sale":
+        sale_currency = db.query(POSSale.currency).filter_by(
+            id=source_id, organization_id=organization_id
+        ).scalar()
+        organization_currency = db.query(Organization.currency).filter_by(id=organization_id).scalar()
+        if sale_currency and organization_currency and sale_currency != organization_currency:
+            link.status = "pending"
+            link.failure_reason = (
+                f"POS currency {sale_currency} differs from accounting base currency {organization_currency}"
+            )
+            return link
     accounts = _mapping_dict(mapping)
     required = set(accounts.values())
     if None in required:
