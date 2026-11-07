@@ -1696,9 +1696,19 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         if remaining>0:
             raise HTTPException(409, f"Insufficient unreserved stock for product {product_map[product_id].sku}")
         warehouse_allocations[product_id]=allocations
+    customer_id = None
+    if payload.customer_ref:
+        from app.api.pos_advanced import POSCustomer
+        customer = db.query(POSCustomer).filter_by(
+            organization_id=membership.organization_id,
+            customer_ref=payload.customer_ref, is_active=True
+        ).with_for_update().first()
+        if not customer:
+            raise HTTPException(404, "Active POS customer membership was not found")
+        customer_id = customer.id
     sale = POSSale(
         organization_id=membership.organization_id, branch_id=payload.branch_id,
-        shift_id=shift.id, cashier_user_id=user.id,
+        shift_id=shift.id, cashier_user_id=user.id, customer_id=customer_id,
         client_transaction_id=payload.client_transaction_id, request_hash=request_hash,
         total_amount=total, subtotal_amount=subtotal_total,
         discount_amount=discount_total, tax_amount=tax_total,
