@@ -281,7 +281,7 @@ def schedule_campaign(campaign_id:int,payload:dict,m=Depends(active_membership),
     try:
         at=datetime.fromisoformat(str(payload["scheduled_at"]).replace("Z","+00:00"))
         if at.tzinfo is None or at.utcoffset() is None:raise ValueError()
-        zone=str(payload.get("timezone","Africa/Nairobi"))
+        zone=str(payload.get("timezone",payload.get("timezone_name","Africa/Nairobi")))
         ZoneInfo(zone)
     except (KeyError,ValueError,ZoneInfoNotFoundError):
         raise HTTPException(422,"scheduled_at must be timezone-aware and timezone must be an IANA name")
@@ -325,6 +325,7 @@ def list_schedules(m=Depends(active_membership),db:Session=Depends(get_db)):
     return [{"campaign_id":c.id,"campaign_name":c.name,"status":s.status,
         "scheduled_at":s.scheduled_at.isoformat(),"next_run_at":s.next_run_at.isoformat() if s.next_run_at else None,
         "recurrence":s.recurrence,"run_count":s.run_count,"last_error":s.last_error,
+        "last_run_at":s.last_run_at.isoformat() if s.last_run_at else None,
         "last_run_campaign_id":s.last_run_campaign_id} for s,c in q.order_by(CRMCampaignSchedule.next_run_at).all()]
 
 
@@ -345,9 +346,10 @@ def pause_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(c
 def resume_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
     row=db.query(CRMCampaignSchedule).filter_by(organization_id=m.organization_id,campaign_id=campaign_id).first()
-    if not row or row.status!="paused":raise HTTPException(404,"Paused schedule not found")
+    if not row or row.status not in {"paused","failed"}:raise HTTPException(404,"Paused or failed schedule not found")
     if row.recurrence=="once" and row.run_count:raise HTTPException(409,"One-time schedule already ran")
     row.status="scheduled";row.next_run_at=max(_utc(row.scheduled_at),datetime.now(timezone.utc))
+    row.lease_until=None;row.claimed_at=None;row.last_error=""
     db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="crm.schedule.resumed",
         resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
     return {"campaign_id":campaign_id,"status":row.status,"next_run_at":row.next_run_at.isoformat()}
