@@ -27,6 +27,9 @@ def upgrade():
         batch_op.add_column(sa.Column("device_id",sa.Integer(),nullable=True))
         batch_op.create_foreign_key("fk_pos_shift_device","pos_devices",["device_id"],["id"])
         batch_op.create_index("ix_pos_shifts_device_id",["device_id"])
+    op.create_index("uq_pos_shift_open_device","pos_shifts",["organization_id","device_id"],unique=True,
+        sqlite_where=sa.text("status = 'open' AND device_id IS NOT NULL"),
+        postgresql_where=sa.text("status = 'open' AND device_id IS NOT NULL"))
     op.create_table("pos_offline_conflicts",
         sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),
         sa.Column("branch_id",sa.String(36),sa.ForeignKey("branches.id"),nullable=False),sa.Column("device_id",sa.Integer(),sa.ForeignKey("pos_devices.id"),nullable=False),
@@ -51,6 +54,8 @@ def upgrade():
     op.create_index("uq_pos_customer_number","pos_customers",["organization_id","customer_number"],unique=True)
     op.create_index("ix_pos_customers_organization_id","pos_customers",["organization_id"])
     op.create_index("ix_pos_customers_branch_id","pos_customers",["branch_id"])
+    op.create_index("uq_pos_customer_phone","pos_customers",["organization_id","phone"],unique=True,
+        sqlite_where=sa.text("phone <> ''"),postgresql_where=sa.text("phone <> ''"))
     op.create_table("pos_loyalty_entries",
         sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),
         sa.Column("customer_id",sa.Integer(),sa.ForeignKey("pos_customers.id"),nullable=False),sa.Column("sale_id",sa.Integer(),sa.ForeignKey("pos_sales.id")),
@@ -81,10 +86,12 @@ def upgrade():
 
 def downgrade():
     op.drop_table("pos_customer_sales")
+    op.drop_index("uq_pos_customer_phone",table_name="pos_customers")
     op.drop_table("pos_peripheral_commands")
     op.drop_table("pos_loyalty_entries")
     op.drop_table("pos_customers")
     op.drop_table("pos_offline_conflicts")
+    op.drop_index("uq_pos_shift_open_device",table_name="pos_shifts")
     with op.batch_alter_table("pos_shifts") as batch_op:
         batch_op.drop_index("ix_pos_shifts_device_id")
         batch_op.drop_constraint("fk_pos_shift_device",type_="foreignkey")
