@@ -1283,7 +1283,7 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
     prepared = []
     total_sub = Decimal("0.00")
     total_tax = Decimal("0.00")
-    for po_line_id, returned_quantity in returned_by_po_line.items()
+    for po_line_id, returned_quantity in returned_by_po_line.items():
         ap_lines = db.query(AccountingInvoiceLine).filter(
             AccountingInvoiceLine.organization_id == membership.organization_id,
             AccountingInvoiceLine.invoice_id == invoice.id,
