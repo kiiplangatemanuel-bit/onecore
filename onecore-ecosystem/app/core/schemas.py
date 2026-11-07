@@ -269,3 +269,40 @@ class AccountingInvoicePaymentIn(BaseModel):
     payment_date: date
     reference: str = Field(default="", max_length=120)
     idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class AccountingFiscalPeriodIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    start_date: date
+    end_date: date
+
+
+class AccountingBudgetLineIn(BaseModel):
+    account_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    amount: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+
+class AccountingBudgetIn(BaseModel):
+    fiscal_period_id: int = Field(gt=0)
+    name: str = Field(min_length=2, max_length=180)
+    lines: list[AccountingBudgetLineIn] = Field(min_length=1, max_length=500)
+
+
+class AccountingFixedAssetIn(BaseModel):
+    asset_code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    branch_id: str | None = Field(default=None, max_length=36)
+    acquisition_date: date
+    cost: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    salvage_value: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    useful_life_months: int = Field(ge=1, le=1200)
+    asset_account_id: int = Field(gt=0)
+    accumulated_depreciation_account_id: int = Field(gt=0)
+    depreciation_expense_account_id: int = Field(gt=0)
+    payment_account_id: int = Field(gt=0)
+
+
+class AccountingDepreciationIn(BaseModel):
+    period_date: date
+    idempotency_key: str = Field(min_length=8, max_length=100)
