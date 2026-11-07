@@ -147,7 +147,7 @@ def _create(db, m, u, kind: str, data: dict, branch_id=None, patient_id=None,
 
 
 def _event(db, m, u, patient_id, branch_id, event_type, detail, resource_id=None, idempotency_key=None):
-    event_key=f"{event_type}:{idempotency_key}" if idempotency_key else None
+    event_key=hashlib.sha256(f"{event_type}:{idempotency_key}".encode()).hexdigest() if idempotency_key else None
     if event_key and db.query(HealthcareEvent.id).filter_by(
         organization_id=m.organization_id,idempotency_key=event_key).first():
         return
