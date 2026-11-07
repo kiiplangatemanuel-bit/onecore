@@ -79,7 +79,7 @@ The extended inventory API adds:
 - Sales-order and POS-order stock reservations with expiry timestamps, idempotency keys, release and an expiry sweep endpoint. Active unexpired reservations reduce available-to-promise quantities.
 - Lot/batch/serial receipt, expiry metadata, FEFO/FIFO batch issuing, and damaged/expired/quarantined disposition with audit events.
 - Stocktakes with captured expected and counted quantities, maker-checker approval and append-only variance adjustments.
-- Per-warehouse reorder thresholds, lead-time-aware suggested quantities, simple moving-average demand forecasts, multi-store dashboard and inventory alerts.
+- Per-warehouse reorder thresholds, lead-time-aware suggested quantities, idempotent draft procurement requisition generation from reorder rules, simple moving-average demand forecasts, multi-store dashboard and inventory alerts.
 - Organization and branch-specific price lists with per-product prices and promotion percentages.
 - Inventory valuation for batch and non-batch stock using recorded batch receipt costs and configurable product default cost, with FIFO and weighted-average reporting modes.
 
@@ -90,7 +90,7 @@ The extended inventory API adds:
 - `POST /api/v1/inventory/reservations`, `POST /api/v1/inventory/reservations/{id}/release`, `POST /api/v1/inventory/reservations/{id}/consume`, `POST /api/v1/inventory/reservations/expire`
 - `POST /api/v1/inventory/batches/receive`, `POST /api/v1/inventory/batches/issue`, `PATCH /api/v1/inventory/batches/{id}/status`
 - `POST /api/v1/inventory/stocktakes`, `POST /api/v1/inventory/stocktakes/{id}/approve`
-- `PUT /api/v1/inventory/reorder-rules`, `GET /api/v1/inventory/replenishment`, `GET /api/v1/inventory/forecast`
+- `PUT /api/v1/inventory/reorder-rules`, `GET /api/v1/inventory/replenishment`, `POST /api/v1/inventory/replenishment/draft-requisitions`, `GET /api/v1/inventory/forecast`
 - `GET /api/v1/inventory/warehouses/{id}/stock`, `GET /api/v1/inventory/valuation`, `GET /api/v1/inventory/dashboard`, `GET /api/v1/inventory/alerts`
 - `POST /api/v1/inventory/price-lists`, `PUT /api/v1/inventory/price-lists/{id}/prices`, `GET /api/v1/inventory/price-lists/{id}/prices`
 
