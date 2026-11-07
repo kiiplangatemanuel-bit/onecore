@@ -8,7 +8,7 @@ from app.core.models import (User, CRMCommunicationTemplate, CRMAudienceSegment,
     CRMCampaign, CRMCampaignSchedule, CRMContact)
 from app.core.security import current_user
 from app.core.tenancy import active_membership
-from app.core.authorization import require_permission, can_access_branch
+from app.core.authorization import require_permission, can_access_branch, branch_scope_ids
 from app.api.crm_campaigns import dispatch_campaign
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM automation"])
@@ -66,6 +66,7 @@ def create_segment(payload:dict,m=Depends(active_membership),u:User=Depends(curr
     require_permission(m,"manage")
     if not str(payload.get("name","")).strip(): raise HTTPException(422,"Segment name required")
     rules=payload.get("rules",{}); compile_rules(rules)
+    if not (rules.get("all") or rules.get("any")): raise HTTPException(422,"At least one segment condition is required")
     x=CRMAudienceSegment(organization_id=m.organization_id,name=str(payload["name"])[:180],description=str(payload.get("description",""))[:500],rules=rules,created_by=u.id)
     db.add(x); db.commit(); db.refresh(x); return {"id":x.id,"name":x.name}
 
@@ -79,6 +80,8 @@ def preview_segment(segment_id:int,m=Depends(active_membership),db:Session=Depen
         clauses=compile_rules({group:rules.get(group,[])})
         if clauses: groups.append((group,clauses))
     q=db.query(CRMContact).filter(CRMContact.organization_id==m.organization_id)
+    allowed=branch_scope_ids(m)
+    if allowed is not None: q=q.filter(CRMContact.branch_id.in_(allowed)) if allowed else q.filter(CRMContact.id==-1)
     for group,clauses in groups:
         if group=="all":
             for clause in clauses: q=q.filter(clause)
@@ -120,13 +123,13 @@ def cancel_schedule(campaign_id:int,m=Depends(active_membership),db:Session=Depe
 @router.post("/scheduler/run-due")
 def run_due(m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
-    now=datetime.now(timezone.utc); due=db.query(CRMCampaignSchedule).filter_by(organization_id=m.organization_id,status="scheduled").filter(CRMCampaignSchedule.scheduled_at<=now).order_by(CRMCampaignSchedule.scheduled_at).limit(20).with_for_update().all()
+    now=datetime.now(timezone.utc); due=db.query(CRMCampaignSchedule).filter(CRMCampaignSchedule.organization_id==m.organization_id,or_(CRMCampaignSchedule.status=="scheduled",and_(CRMCampaignSchedule.status=="running",CRMCampaignSchedule.claimed_at<now-timedelta(minutes=10)))).filter(CRMCampaignSchedule.scheduled_at<=now).order_by(CRMCampaignSchedule.scheduled_at).limit(20).with_for_update().all()
     results=[]
     for s in due:
         s.status="running"; s.claimed_at=now; db.commit()
         try:
             campaign=db.query(CRMCampaign).filter_by(id=s.campaign_id,organization_id=m.organization_id).first()
-            if not campaign: raise HTTPException(404,"Scheduled campaign not found")
+            if not campaign or not can_access_branch(m,campaign.branch_id): raise HTTPException(404,"Scheduled campaign not found")
             campaign.status="ready"
             db.commit()
             result=dispatch_campaign(s.campaign_id,100,m,u,db)
@@ -143,10 +146,11 @@ def apply_template(campaign_id:int,template_id:int,m=Depends(active_membership),
     require_permission(m,"manage")
     campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
     template=db.query(CRMCommunicationTemplate).filter_by(id=template_id,organization_id=m.organization_id,is_active=True).first()
-    if not campaign or not template: raise HTTPException(404,"Campaign or template not found")
+    if not campaign or not can_access_branch(m,campaign.branch_id) or not template: raise HTTPException(404,"Campaign or template not found")
     if campaign.status!="draft": raise HTTPException(409,"Templates can only be applied to draft campaigns")
     if campaign.channel!=template.channel: raise HTTPException(422,"Template channel must match campaign channel")
     if campaign.purpose!=template.purpose: raise HTTPException(422,"Template purpose must match campaign purpose")
     campaign.message=template.body
+    campaign.subject=template.subject or campaign.name
     db.commit()
     return {"campaign_id":campaign.id,"template_id":template.id,"applied":True,"variables":template.variables}
