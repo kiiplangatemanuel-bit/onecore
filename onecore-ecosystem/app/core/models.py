@@ -337,6 +337,325 @@ class HRPayrollItem(Base):
     __table_args__ = (Index("ix_hr_payroll_item_org_client_id", "organization_id", "client_item_id", unique=True),)
 
 
+class HealthcarePatient(Base):
+    __tablename__ = "healthcare_patients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_number: Mapped[str] = mapped_column(String(40))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    emergency_contact_name: Mapped[str] = mapped_column(String(180), default="")
+    emergency_contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_patient_org_number", "organization_id", "patient_number", unique=True),)
+
+
+class HealthcareAppointment(Base):
+    __tablename__ = "healthcare_appointments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    provider_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")
+    status_note: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_healthcare_appointment_org_provider_start", "organization_id", "provider_user_id", "starts_at"),
+        Index("ix_healthcare_appointment_org_patient_start", "organization_id", "patient_id", "starts_at"),
+    )
+
+
+class HealthcareEncounter(Base):
+    __tablename__ = "healthcare_encounters"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    appointment_id: Mapped[int] = mapped_column(ForeignKey("healthcare_appointments.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    provider_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    chief_complaint: Mapped[str] = mapped_column(String(500))
+    clinical_notes: Mapped[str] = mapped_column(Text, default="")
+    assessment: Mapped[str] = mapped_column(Text, default="")
+    plan: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    signed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_encounter_org_appointment", "organization_id", "appointment_id", unique=True),)
+
+
+class PharmacyMedicine(Base):
+    __tablename__ = "pharmacy_medicines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    inventory_product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    sku: Mapped[str] = mapped_column(String(80))
+    generic_name: Mapped[str] = mapped_column(String(180))
+    brand_name: Mapped[str] = mapped_column(String(180), default="")
+    strength: Mapped[str] = mapped_column(String(80), default="")
+    dosage_form: Mapped[str] = mapped_column(String(60))
+    route: Mapped[str] = mapped_column(String(40), default="oral")
+    unit: Mapped[str] = mapped_column(String(24), default="unit")
+    is_controlled: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_pharmacy_medicine_org_sku", "organization_id", "sku", unique=True),
+        Index("ix_pharmacy_medicine_org_product", "organization_id", "inventory_product_id", unique=True),
+    )
+
+
+class PharmacyBatch(Base):
+    __tablename__ = "pharmacy_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    medicine_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_medicines.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    batch_number: Mapped[str] = mapped_column(String(80))
+    client_batch_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    expiry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    remaining_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    received_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_pharmacy_batch_org_client_id", "organization_id", "client_batch_id", unique=True),
+        Index("ix_pharmacy_batch_org_medicine_branch_number", "organization_id", "medicine_id", "branch_id", "batch_number", unique=True),
+        Index("ix_pharmacy_batch_org_expiry", "organization_id", "expiry_date"),
+    )
+
+
+class LaboratoryTest(Base):
+    __tablename__ = "laboratory_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    unit: Mapped[str] = mapped_column(String(40), default="")
+    reference_range: Mapped[str] = mapped_column(String(180), default="")
+    turnaround_hours: Mapped[int] = mapped_column(Integer, default=24)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_test_org_code", "organization_id", "code", unique=True),)
+
+
+class LaboratoryOrder(Base):
+    __tablename__ = "laboratory_orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    encounter_id: Mapped[int] = mapped_column(ForeignKey("healthcare_encounters.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    ordering_provider_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    client_order_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="ordered")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_order_org_client_id", "organization_id", "client_order_id", unique=True),)
+
+
+class LaboratoryOrderLine(Base):
+    __tablename__ = "laboratory_order_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("laboratory_orders.id"), index=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("laboratory_tests.id"), index=True)
+    test_code: Mapped[str] = mapped_column(String(40))
+    test_name: Mapped[str] = mapped_column(String(180))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    result_unit: Mapped[str] = mapped_column(String(40), default="")
+    reference_range_snapshot: Mapped[str] = mapped_column(String(180), default="")
+    result_value: Mapped[str] = mapped_column(Text, default="")
+    result_notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    entered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    validated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_order_line_order_test", "organization_id", "order_id", "test_id", unique=True),)
+
+
+class LaboratorySample(Base):
+    __tablename__ = "laboratory_samples"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("laboratory_orders.id"), index=True)
+    accession_number: Mapped[str] = mapped_column(String(80))
+    specimen_type: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), default="collected")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    collected_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    __table_args__ = (
+        Index("ix_lab_sample_org_accession", "organization_id", "accession_number", unique=True),
+        Index("ix_lab_sample_org_order", "organization_id", "order_id", unique=True),
+    )
+
+
+class SaccoMember(Base):
+    __tablename__ = "sacco_members"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    member_number: Mapped[str] = mapped_column(String(40))
+    full_name: Mapped[str] = mapped_column(String(180))
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    kyc_status: Mapped[str] = mapped_column(String(16), default="pending")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_member_org_number", "organization_id", "member_number", unique=True),)
+
+
+class SaccoAccount(Base):
+    __tablename__ = "sacco_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    account_number: Mapped[str] = mapped_column(String(40))
+    account_type: Mapped[str] = mapped_column(String(20))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_sacco_account_org_number", "organization_id", "account_number", unique=True),
+        Index("ix_sacco_account_org_member_type", "organization_id", "member_id", "account_type"),
+    )
+
+
+class SaccoTransaction(Base):
+    __tablename__ = "sacco_transactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("sacco_accounts.id"), index=True)
+    transaction_type: Mapped[str] = mapped_column(String(24))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_transaction_org_idempotency", "organization_id", "idempotency_key", unique=True),)
+
+
+class SaccoLoanProduct(Base):
+    __tablename__ = "sacco_loan_products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    minimum_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    maximum_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    minimum_term_months: Mapped[int] = mapped_column(Integer)
+    maximum_term_months: Mapped[int] = mapped_column(Integer)
+    interest_method: Mapped[str] = mapped_column(String(16), default="reducing")
+    requires_guarantor: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_product_org_code", "organization_id", "code", unique=True),)
+
+
+class SaccoLoanApplication(Base):
+    __tablename__ = "sacco_loan_applications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    loan_product_id: Mapped[int] = mapped_column(ForeignKey("sacco_loan_products.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    application_number: Mapped[str] = mapped_column(String(40))
+    requested_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    term_months: Mapped[int] = mapped_column(Integer)
+    purpose: Mapped[str] = mapped_column(String(1000))
+    status: Mapped[str] = mapped_column(String(16), default="submitted")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_app_org_number", "organization_id", "application_number", unique=True),)
+
+
+class SaccoLoan(Base):
+    __tablename__ = "sacco_loans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("sacco_loan_applications.id"), unique=True, index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    loan_number: Mapped[str] = mapped_column(String(40))
+    principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    term_months: Mapped[int] = mapped_column(Integer)
+    interest_method: Mapped[str] = mapped_column(String(16))
+    total_interest: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    outstanding_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    outstanding_interest: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    disbursement_reference: Mapped[str] = mapped_column(String(120), default="")
+    disbursed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_org_number", "organization_id", "loan_number", unique=True),)
+
+
+class SaccoLoanSchedule(Base):
+    __tablename__ = "sacco_loan_schedules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    installment_number: Mapped[int] = mapped_column(Integer)
+    due_date: Mapped[date] = mapped_column(Date)
+    principal_due: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    interest_due: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    principal_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"))
+    interest_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    __table_args__ = (Index("ix_sacco_loan_schedule_number", "organization_id", "loan_id", "installment_number", unique=True),)
+
+
+class SaccoLoanRepayment(Base):
+    __tablename__ = "sacco_loan_repayments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    principal_component: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    interest_component: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_sacco_loan_repayment_org_key", "organization_id", "idempotency_key", unique=True),)
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"

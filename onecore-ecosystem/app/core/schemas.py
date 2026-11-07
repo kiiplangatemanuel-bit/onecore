@@ -1,5 +1,9 @@
+import re
 from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Any
+from decimal import Decimal
+from datetime import date
+from datetime import datetime
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -755,3 +759,289 @@ class HRPayrollItemIn(BaseModel):
 
 class HRPayrollApproveIn(BaseModel):
     note: str = Field(default="", max_length=500)
+
+
+
+class HealthcarePatientIn(BaseModel):
+    patient_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    date_of_birth: date | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: EmailStr | None = None
+    branch_id: str | None = Field(default=None, max_length=36)
+    emergency_contact_name: str = Field(default="", max_length=180)
+    emergency_contact_phone: str = Field(default="", max_length=32)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def patient_names_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Patient name is required")
+        return value
+
+    @model_validator(mode="after")
+    def valid_date_of_birth(self):
+        if self.date_of_birth and self.date_of_birth > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return self
+
+
+class HealthcareAppointmentIn(BaseModel):
+    patient_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    provider_user_id: int = Field(gt=0)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def valid_appointment_window(self):
+        if self.starts_at.tzinfo is None or self.starts_at.utcoffset() is None:
+            raise ValueError("Appointment start must include a timezone")
+        if self.ends_at.tzinfo is None or self.ends_at.utcoffset() is None:
+            raise ValueError("Appointment end must include a timezone")
+        if self.ends_at <= self.starts_at:
+            raise ValueError("Appointment end must be after its start")
+        return self
+
+
+class HealthcareAppointmentStatusIn(BaseModel):
+    status: str = Field(pattern=r"^(checked_in|completed|cancelled|no_show)$")
+    note: str = Field(default="", max_length=500)
+
+
+class HealthcareEncounterIn(BaseModel):
+    chief_complaint: str = Field(min_length=2, max_length=500)
+    clinical_notes: str = Field(default="", max_length=12000)
+    assessment: str = Field(default="", max_length=6000)
+    plan: str = Field(default="", max_length=6000)
+
+    @field_validator("chief_complaint")
+    @classmethod
+    def complaint_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Chief complaint is required")
+        return value
+
+
+class HealthcareEncounterSignIn(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+
+class PharmacyMedicineIn(BaseModel):
+    sku: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    generic_name: str = Field(min_length=2, max_length=180)
+    brand_name: str = Field(default="", max_length=180)
+    strength: str = Field(default="", max_length=80)
+    dosage_form: str = Field(min_length=2, max_length=60)
+    route: str = Field(default="oral", min_length=2, max_length=40)
+    unit: str = Field(default="unit", min_length=1, max_length=24)
+    sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    is_controlled: bool = False
+
+    @field_validator("generic_name", "dosage_form", "route", "sku")
+    @classmethod
+    def medicine_required_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Medicine field cannot be blank")
+        return value
+
+
+class PharmacyBatchIn(BaseModel):
+    client_batch_id: str = Field(min_length=8, max_length=100)
+    batch_number: str = Field(min_length=2, max_length=80)
+    branch_id: str = Field(min_length=1, max_length=36)
+    expiry_date: date
+    received_quantity: Decimal = Field(gt=0, le=Decimal("999999999"), multiple_of=Decimal("0.001"))
+    unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    selling_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("batch_number", "client_batch_id")
+    @classmethod
+    def batch_ids_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Batch identifiers cannot be blank")
+        return value
+
+
+class PharmacyBatchQuarantineIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def quarantine_reason_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("A quarantine reason is required")
+        return value
+
+
+class LaboratoryTestIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    specimen_type: str = Field(min_length=2, max_length=80)
+    unit: str = Field(default="", max_length=40)
+    reference_range: str = Field(default="", max_length=180)
+    turnaround_hours: int = Field(default=24, ge=1, le=720)
+
+    @field_validator("code", "name", "specimen_type")
+    @classmethod
+    def lab_test_required_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Laboratory test fields cannot be blank")
+        return value
+
+
+class LaboratoryOrderIn(BaseModel):
+    client_order_id: str = Field(min_length=8, max_length=100)
+    encounter_id: int = Field(gt=0)
+    test_ids: list[int] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def unique_tests(self):
+        if len(self.test_ids) != len(set(self.test_ids)):
+            raise ValueError("A laboratory test may appear only once per order")
+        if any(test_id <= 0 for test_id in self.test_ids):
+            raise ValueError("Laboratory test IDs must be positive")
+        if len(self.client_order_id.strip()) < 8:
+            raise ValueError("Laboratory order ID is required")
+        return self
+
+
+class LaboratorySampleIn(BaseModel):
+    accession_number: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    specimen_type: str = Field(min_length=2, max_length=80)
+
+
+class LaboratoryResultIn(BaseModel):
+    result_value: str = Field(min_length=1, max_length=4000)
+    result_notes: str = Field(default="", max_length=4000)
+
+    @field_validator("result_value")
+    @classmethod
+    def result_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Laboratory result cannot be blank")
+        return value
+
+
+class LaboratoryValidateIn(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+
+class SaccoMemberIn(BaseModel):
+    member_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    full_name: str = Field(min_length=2, max_length=180)
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: EmailStr | None = None
+    branch_id: str | None = Field(default=None, max_length=36)
+
+    @field_validator("member_number")
+    @classmethod
+    def member_number_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2 or not re.fullmatch(r"[A-Za-z0-9._/-]+", value):
+            raise ValueError("Member number must contain valid identifier characters")
+        return value
+
+    @field_validator("full_name")
+    @classmethod
+    def member_name_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Member name is required")
+        return value
+
+
+class SaccoKYCDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(verified|rejected)$")
+    note: str = Field(min_length=3, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def kyc_note_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A meaningful KYC review note is required")
+        return value
+
+
+class SaccoAccountIn(BaseModel):
+    member_id: int = Field(gt=0)
+    account_type: str = Field(pattern=r"^(savings|shares|contributions)$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+
+
+class SaccoTransactionIn(BaseModel):
+    transaction_type: str = Field(pattern=r"^(deposit|withdrawal|share_contribution|contribution)$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class SaccoLoanProductIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    minimum_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    maximum_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    annual_interest_rate: Decimal = Field(ge=0, le=100, multiple_of=Decimal("0.0001"))
+    minimum_term_months: int = Field(ge=1, le=600)
+    maximum_term_months: int = Field(ge=1, le=600)
+    interest_method: str = Field(default="reducing", pattern=r"^(flat|reducing)$")
+    requires_guarantor: bool = False
+
+    @model_validator(mode="after")
+    def valid_product_limits(self):
+        if self.maximum_principal < self.minimum_principal:
+            raise ValueError("Maximum principal must be at least minimum principal")
+        if self.maximum_term_months < self.minimum_term_months:
+            raise ValueError("Maximum term must be at least minimum term")
+        return self
+
+
+class SaccoLoanApplicationIn(BaseModel):
+    member_id: int = Field(gt=0)
+    loan_product_id: int = Field(gt=0)
+    requested_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    term_months: int = Field(ge=1, le=600)
+    purpose: str = Field(min_length=5, max_length=1000)
+
+    @field_validator("purpose")
+    @classmethod
+    def loan_purpose_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("Loan purpose is required")
+        return value
+
+
+class SaccoLoanDisbursementIn(BaseModel):
+    reference: str = Field(min_length=3, max_length=120)
+
+    @field_validator("reference")
+    @classmethod
+    def disbursement_reference_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A disbursement reference is required")
+        return value
+
+
+class SaccoLoanRepaymentIn(BaseModel):
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class SaccoLoanDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(min_length=3, max_length=500)

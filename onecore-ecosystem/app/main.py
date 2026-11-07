@@ -57,6 +57,21 @@ def crm_ui():
     page = Path(__file__).resolve().parent / "web" / "crm.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
+@app.get("/sacco", response_class=HTMLResponse)
+def sacco_ui():
+    page = Path(__file__).resolve().parent / "web" / "sacco.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/pharmacy-lab", response_class=HTMLResponse)
+def pharmacy_lab_ui():
+    page = Path(__file__).resolve().parent / "web" / "pharmacy_lab.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/healthcare", response_class=HTMLResponse)
+def healthcare_ui():
+    page = Path(__file__).resolve().parent / "web" / "healthcare.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
 @app.get("/hr", response_class=HTMLResponse)
 def hr_ui():
     page = Path(__file__).resolve().parent / "web" / "hr.html"

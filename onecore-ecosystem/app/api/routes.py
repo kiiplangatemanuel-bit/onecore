@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,7 +16,12 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals, payroll_money, payroll_item_hash, payroll_totals
+from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
+from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
+from app.services.healthcare import validate_appointment_transition
+from app.services.pharmacy_lab import pharmacy_batch_hash, laboratory_order_hash
+from app.services.sacco import build_repayment_schedule, add_months, allocate_repayment, money as sacco_money
+from app.services.school_reports import build_learner_report_rows
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -3888,6 +3893,812 @@ def list_my_hr_payslips(membership=Depends(active_membership),
     return payslips
 
 
+
+
+# Healthcare patient registration, scheduling and signed clinical encounter records.
+def _healthcare_patient_out(row):
+    return {
+        "id": row.id, "patient_number": row.patient_number,
+        "first_name": row.first_name, "last_name": row.last_name,
+        "date_of_birth": row.date_of_birth.isoformat() if row.date_of_birth else None,
+        "phone": row.phone, "email": row.email, "branch_id": row.branch_id,
+        "emergency_contact_name": row.emergency_contact_name,
+        "emergency_contact_phone": row.emergency_contact_phone,
+    }
+
+
+def _healthcare_datetime_out(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _healthcare_appointment_out(row, patient=None):
+    return {
+        "id": row.id, "patient_id": row.patient_id,
+        "patient_number": patient.patient_number if patient else None,
+        "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
+        "branch_id": row.branch_id, "provider_user_id": row.provider_user_id,
+        "starts_at": _healthcare_datetime_out(row.starts_at), "ends_at": _healthcare_datetime_out(row.ends_at),
+        "reason": row.reason, "status": row.status, "status_note": row.status_note,
+    }
+
+
+@router.post("/healthcare/patients", status_code=201)
+def create_healthcare_patient(payload: HealthcarePatientIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    _crm_branch_check(db, membership, payload.branch_id)
+    patient_number = payload.patient_number.strip().upper()
+    if db.query(HealthcarePatient).filter_by(
+        organization_id=membership.organization_id, patient_number=patient_number
+    ).first():
+        raise HTTPException(409, "Patient number already exists in this organization")
+    row = HealthcarePatient(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        patient_number=patient_number, first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(), date_of_birth=payload.date_of_birth,
+        phone=payload.phone.strip() if payload.phone else None,
+        email=str(payload.email).lower() if payload.email else None,
+        emergency_contact_name=payload.emergency_contact_name.strip(),
+        emergency_contact_phone=payload.emergency_contact_phone.strip(),
+        created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Patient number conflicts with an existing patient")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.patient.created",
+          "healthcare_patient", row.id)
+    return _healthcare_patient_out(row)
+
+
+@router.get("/healthcare/patients")
+def list_healthcare_patients(q: str | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(HealthcarePatient).filter_by(
+        organization_id=membership.organization_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(HealthcarePatient.branch_id.in_(allowed))
+    if q and q.strip():
+        term = "%" + q.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.filter(or_(
+            HealthcarePatient.patient_number.ilike(term),
+            HealthcarePatient.first_name.ilike(term),
+            HealthcarePatient.last_name.ilike(term),
+            HealthcarePatient.phone.ilike(term),
+        ))
+    rows = query.order_by(HealthcarePatient.id.desc()).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "healthcare.patient.listed",
+          "healthcare_patient", "search", f"count:{len(rows)}")
+    return [_healthcare_patient_out(row) for row in rows]
+
+
+@router.get("/healthcare/patients/{patient_id}")
+def get_healthcare_patient(patient_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcarePatient).filter_by(
+        id=patient_id, organization_id=membership.organization_id
+    ).first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Patient not found")
+    audit(db, user.id, membership.organization_id, "healthcare.patient.viewed",
+          "healthcare_patient", row.id)
+    return _healthcare_patient_out(row)
+
+
+@router.post("/healthcare/appointments", status_code=201)
+def create_healthcare_appointment(payload: HealthcareAppointmentIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=payload.patient_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not patient or not can_access_branch(membership, patient.branch_id):
+        raise HTTPException(404, "Patient not found")
+    branch_id = payload.branch_id or patient.branch_id
+    _crm_branch_check(db, membership, branch_id)
+    provider_membership = db.query(Membership).filter_by(
+        user_id=payload.provider_user_id, organization_id=membership.organization_id,
+        is_active=True,
+    ).with_for_update().first()
+    if not provider_membership:
+        raise HTTPException(404, "Provider is not an active organization member")
+    provider_branches = branch_scope_ids(provider_membership)
+    if provider_branches == []:
+        raise HTTPException(403, "Provider has no active branch access")
+    if branch_id and provider_branches is not None and branch_id not in provider_branches:
+        raise HTTPException(403, "Provider is not assigned access to the appointment branch")
+    starts_at = payload.starts_at.astimezone(timezone.utc)
+    ends_at = payload.ends_at.astimezone(timezone.utc)
+    if starts_at <= datetime.now(timezone.utc):
+        raise HTTPException(422, "Appointments must be scheduled in the future")
+    active_statuses = ["scheduled", "checked_in"]
+    provider_conflict = db.query(HealthcareAppointment).filter(
+        HealthcareAppointment.organization_id == membership.organization_id,
+        HealthcareAppointment.provider_user_id == payload.provider_user_id,
+        HealthcareAppointment.status.in_(active_statuses),
+        HealthcareAppointment.starts_at < ends_at,
+        HealthcareAppointment.ends_at > starts_at,
+    ).first()
+    if provider_conflict:
+        raise HTTPException(409, "Provider already has an overlapping appointment")
+    patient_conflict = db.query(HealthcareAppointment).filter(
+        HealthcareAppointment.organization_id == membership.organization_id,
+        HealthcareAppointment.patient_id == patient.id,
+        HealthcareAppointment.status.in_(active_statuses),
+        HealthcareAppointment.starts_at < ends_at,
+        HealthcareAppointment.ends_at > starts_at,
+    ).first()
+    if patient_conflict:
+        raise HTTPException(409, "Patient already has an overlapping appointment")
+    row = HealthcareAppointment(
+        organization_id=membership.organization_id, patient_id=patient.id,
+        branch_id=branch_id, provider_user_id=payload.provider_user_id,
+        starts_at=starts_at, ends_at=ends_at, reason=payload.reason.strip(),
+        status="scheduled", created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Appointment conflicts with an existing record")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.created",
+          "healthcare_appointment", row.id, f"patient:{patient.id};provider:{payload.provider_user_id}")
+    return _healthcare_appointment_out(row, patient)
+
+
+@router.get("/healthcare/appointments")
+def list_healthcare_appointments(status: str | None = None,
+    starts_after: datetime | None = None, ends_before: datetime | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(HealthcareAppointment, HealthcarePatient).join(
+        HealthcarePatient, HealthcarePatient.id == HealthcareAppointment.patient_id
+    ).filter(HealthcareAppointment.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(HealthcareAppointment.branch_id.in_(allowed))
+    if status:
+        if status not in {"scheduled", "checked_in", "completed", "cancelled", "no_show"}:
+            raise HTTPException(422, "Invalid appointment status")
+        query = query.filter(HealthcareAppointment.status == status)
+    if starts_after:
+        if starts_after.tzinfo is None or starts_after.utcoffset() is None:
+            raise HTTPException(422, "starts_after must include a timezone")
+        query = query.filter(HealthcareAppointment.starts_at >= starts_after.astimezone(timezone.utc))
+    if ends_before:
+        if ends_before.tzinfo is None or ends_before.utcoffset() is None:
+            raise HTTPException(422, "ends_before must include a timezone")
+        query = query.filter(HealthcareAppointment.ends_at <= ends_before.astimezone(timezone.utc))
+    rows = query.order_by(HealthcareAppointment.starts_at).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.listed",
+          "healthcare_appointment", "schedule", f"count:{len(rows)}")
+    return [_healthcare_appointment_out(appointment, patient) for appointment, patient in rows]
+
+
+@router.post("/healthcare/appointments/{appointment_id}/status")
+def update_healthcare_appointment_status(appointment_id: int,
+    payload: HealthcareAppointmentStatusIn, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareAppointment).filter_by(
+        id=appointment_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Appointment not found")
+    validate_appointment_transition(row.status, payload.status)
+    if payload.status in {"cancelled", "no_show"} and len(payload.note.strip()) < 3:
+        raise HTTPException(422, "A reason is required when cancelling or marking no-show")
+    if payload.status == "completed":
+        encounter = db.query(HealthcareEncounter).filter_by(
+            organization_id=membership.organization_id, appointment_id=row.id,
+            status="signed",
+        ).first()
+        if not encounter:
+            raise HTTPException(409, "A signed clinical encounter is required before completing the visit")
+    previous = row.status
+    row.status = payload.status
+    row.status_note = payload.note.strip()
+    db.commit()
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.status_changed",
+          "healthcare_appointment", row.id, f"{previous}->{row.status};reason_recorded:{bool(payload.note.strip())}")
+    return {"id": row.id, "status": row.status}
+
+
+@router.post("/healthcare/appointments/{appointment_id}/encounter", status_code=201)
+def create_healthcare_encounter(appointment_id: int, payload: HealthcareEncounterIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    appointment = db.query(HealthcareAppointment).filter_by(
+        id=appointment_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not appointment or not can_access_branch(membership, appointment.branch_id):
+        raise HTTPException(404, "Appointment not found")
+    if appointment.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may create the clinical encounter")
+    if appointment.status != "checked_in":
+        raise HTTPException(409, "Patient must be checked in before an encounter is opened")
+    existing = db.query(HealthcareEncounter).filter_by(
+        organization_id=membership.organization_id, appointment_id=appointment.id
+    ).first()
+    if existing:
+        raise HTTPException(409, "An encounter already exists for this appointment")
+    row = HealthcareEncounter(
+        organization_id=membership.organization_id, appointment_id=appointment.id,
+        patient_id=appointment.patient_id, branch_id=appointment.branch_id,
+        provider_user_id=appointment.provider_user_id,
+        chief_complaint=payload.chief_complaint.strip(),
+        clinical_notes=payload.clinical_notes.strip(), assessment=payload.assessment.strip(),
+        plan=payload.plan.strip(), status="draft", created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "An encounter already exists for this appointment")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.created",
+          "healthcare_encounter", row.id, f"appointment:{appointment.id}")
+    return {"id": row.id, "appointment_id": appointment.id, "patient_id": row.patient_id,
+            "status": row.status}
+
+
+@router.get("/healthcare/appointments/{appointment_id}/encounter")
+def get_healthcare_encounter(appointment_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareEncounter).filter_by(
+        organization_id=membership.organization_id, appointment_id=appointment_id
+    ).first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Encounter not found")
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.viewed",
+          "healthcare_encounter", row.id)
+    return {
+        "id": row.id, "appointment_id": row.appointment_id, "patient_id": row.patient_id,
+        "provider_user_id": row.provider_user_id, "chief_complaint": row.chief_complaint,
+        "clinical_notes": row.clinical_notes, "assessment": row.assessment,
+        "plan": row.plan, "status": row.status,
+        "signed_by": row.signed_by, "signed_at": _healthcare_datetime_out(row.signed_at) if row.signed_at else None,
+    }
+
+
+@router.post("/healthcare/encounters/{encounter_id}/sign")
+def sign_healthcare_encounter(encounter_id: int, payload: HealthcareEncounterSignIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareEncounter).filter_by(
+        id=encounter_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Encounter not found")
+    if row.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may sign this encounter")
+    if row.status != "draft":
+        raise HTTPException(409, "Only draft encounters can be signed")
+    row.status = "signed"
+    row.signed_by = user.id
+    row.signed_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.signed",
+          "healthcare_encounter", row.id, "signed")
+    return {"id": row.id, "status": row.status, "signed_at": row.signed_at.isoformat()}
+
+
+
+
+# Pharmacy catalogue and batch stock; laboratory order/sample/result validation.
+def _pharmacy_medicine_out(row):
+    return {
+        "id": row.id, "inventory_product_id": row.inventory_product_id,
+        "sku": row.sku, "generic_name": row.generic_name, "brand_name": row.brand_name,
+        "strength": row.strength, "dosage_form": row.dosage_form,
+        "route": row.route, "unit": row.unit, "is_controlled": row.is_controlled,
+        "is_active": row.is_active,
+    }
+
+
+def _pharmacy_batch_out(batch, medicine):
+    state = batch.status
+    if state == "active" and batch.expiry_date < date.today():
+        state = "expired"
+    return {
+        "id": batch.id, "medicine_id": medicine.id, "sku": medicine.sku,
+        "medicine_name": medicine.generic_name, "branch_id": batch.branch_id,
+        "batch_number": batch.batch_number, "expiry_date": batch.expiry_date.isoformat(),
+        "received_quantity": str(batch.received_quantity),
+        "remaining_quantity": str(batch.remaining_quantity),
+        "unit_cost": str(batch.unit_cost), "selling_price": str(batch.selling_price),
+        "status": state, "received_at": batch.received_at.isoformat(),
+    }
+
+
+@router.post("/pharmacy/medicines", status_code=201)
+def create_pharmacy_medicine(payload: PharmacyMedicineIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    sku = payload.sku.strip().upper()
+    if db.query(PharmacyMedicine).filter_by(
+        organization_id=membership.organization_id, sku=sku
+    ).first():
+        raise HTTPException(409, "Medicine SKU already exists in this organization")
+    if db.query(InventoryProduct).filter_by(
+        organization_id=membership.organization_id, sku=sku
+    ).first():
+        raise HTTPException(409, "SKU is already used by another inventory product")
+    product = InventoryProduct(
+        organization_id=membership.organization_id, sku=sku,
+        name=f"{payload.generic_name.strip()} {payload.strength.strip()}".strip(),
+        description=f"{payload.brand_name.strip()} | {payload.dosage_form.strip()} | {payload.route.strip()}",
+        unit=payload.unit.strip(), sale_price=payload.sale_price,
+        is_active=True, created_by=user.id,
+    )
+    db.add(product)
+    db.flush()
+    row = PharmacyMedicine(
+        organization_id=membership.organization_id, inventory_product_id=product.id,
+        sku=sku, generic_name=payload.generic_name.strip(),
+        brand_name=payload.brand_name.strip(), strength=payload.strength.strip(),
+        dosage_form=payload.dosage_form.strip(), route=payload.route.strip().lower(),
+        unit=payload.unit.strip(), is_controlled=payload.is_controlled,
+        is_active=True, created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Medicine SKU conflicts with an existing inventory item")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.medicine.created",
+          "pharmacy_medicine", row.id, f"sku:{sku};controlled:{payload.is_controlled}")
+    return _pharmacy_medicine_out(row)
+
+
+@router.get("/pharmacy/medicines")
+def list_pharmacy_medicines(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    rows = db.query(PharmacyMedicine).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(PharmacyMedicine.generic_name, PharmacyMedicine.strength).limit(limit).all()
+    return [_pharmacy_medicine_out(row) for row in rows]
+
+
+@router.post("/pharmacy/medicines/{medicine_id}/batches", status_code=201)
+def receive_pharmacy_batch(medicine_id: int, payload: PharmacyBatchIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    _crm_branch_check(db, membership, payload.branch_id)
+    medicine = db.query(PharmacyMedicine).filter_by(
+        id=medicine_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not medicine:
+        raise HTTPException(404, "Active medicine not found")
+    if payload.expiry_date <= date.today():
+        raise HTTPException(422, "Expired or same-day-expiry stock cannot be received")
+    request_hash = pharmacy_batch_hash(payload, medicine.id)
+    existing = db.query(PharmacyBatch).filter_by(
+        organization_id=membership.organization_id, client_batch_id=payload.client_batch_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash or existing.medicine_id != medicine.id:
+            raise HTTPException(409, "Batch client ID was reused with different data")
+        return {"id": existing.id, "status": "already_recorded",
+                "remaining_quantity": str(existing.remaining_quantity)}
+    batch_number = payload.batch_number.strip().upper()
+    if db.query(PharmacyBatch).filter_by(
+        organization_id=membership.organization_id, medicine_id=medicine.id,
+        branch_id=payload.branch_id, batch_number=batch_number
+    ).first():
+        raise HTTPException(409, "Batch number already exists for this medicine and branch")
+    key = "pharmacy-batch:" + hashlib.sha256(payload.client_batch_id.encode()).hexdigest()[:40]
+    row = PharmacyBatch(
+        organization_id=membership.organization_id, medicine_id=medicine.id,
+        branch_id=payload.branch_id, batch_number=batch_number,
+        client_batch_id=payload.client_batch_id, request_hash=request_hash,
+        expiry_date=payload.expiry_date, received_quantity=payload.received_quantity,
+        remaining_quantity=payload.received_quantity, unit_cost=payload.unit_cost,
+        selling_price=payload.selling_price, status="active", received_by=user.id,
+    )
+    db.add(row)
+    db.add(InventoryStockMovement(
+        organization_id=membership.organization_id,
+        product_id=medicine.inventory_product_id, branch_id=payload.branch_id,
+        quantity_delta=payload.received_quantity, movement_type="receipt",
+        reference=f"pharmacy-batch:{batch_number}", idempotency_key=key, created_by=user.id,
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(PharmacyBatch).filter_by(
+            organization_id=membership.organization_id, client_batch_id=payload.client_batch_id
+        ).first()
+        if existing and existing.request_hash == request_hash and existing.medicine_id == medicine.id:
+            return {"id": existing.id, "status": "already_recorded",
+                    "remaining_quantity": str(existing.remaining_quantity)}
+        raise HTTPException(409, "Batch receipt conflicts with an existing batch or stock movement")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.received",
+          "pharmacy_batch", row.id, f"medicine:{medicine.id};qty:{payload.received_quantity};branch:{payload.branch_id}")
+    return {"id": row.id, "status": "received", "remaining_quantity": str(row.remaining_quantity),
+            "inventory_product_id": medicine.inventory_product_id}
+
+
+@router.get("/pharmacy/batches")
+def list_pharmacy_batches(medicine_id: int | None = None, branch_id: str | None = None,
+    status: str | None = None, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    query = db.query(PharmacyBatch, PharmacyMedicine).join(
+        PharmacyMedicine, PharmacyMedicine.id == PharmacyBatch.medicine_id
+    ).filter(PharmacyBatch.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(PharmacyBatch.branch_id.in_(allowed))
+    if branch_id:
+        if not can_access_branch(membership, branch_id):
+            raise HTTPException(404, "Branch not found")
+        query = query.filter(PharmacyBatch.branch_id == branch_id)
+    if medicine_id:
+        query = query.filter(PharmacyBatch.medicine_id == medicine_id)
+    if status == "expired":
+        query = query.filter(PharmacyBatch.status == "active",
+                             PharmacyBatch.expiry_date < date.today())
+    elif status in {"active", "quarantined"}:
+        query = query.filter(PharmacyBatch.status == status)
+        if status == "active":
+            query = query.filter(PharmacyBatch.expiry_date >= date.today())
+    elif status:
+        raise HTTPException(422, "Invalid batch status")
+    rows = query.order_by(PharmacyBatch.expiry_date, PharmacyBatch.id).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.listed",
+          "pharmacy_batch", "batch-list", f"count:{len(rows)}")
+    return [_pharmacy_batch_out(batch, medicine) for batch, medicine in rows]
+
+
+@router.post("/pharmacy/batches/{batch_id}/quarantine")
+def quarantine_pharmacy_batch(batch_id: int, payload: PharmacyBatchQuarantineIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(PharmacyBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Batch not found")
+    if row.status != "active":
+        raise HTTPException(409, "Only active batches can be quarantined")
+    row.status = "quarantined"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.quarantined",
+          "pharmacy_batch", row.id, payload.reason.strip())
+    return {"id": row.id, "status": row.status}
+
+
+def _lab_order_out(order, patient):
+    return {
+        "id": order.id, "client_order_id": order.client_order_id,
+        "encounter_id": order.encounter_id, "patient_id": order.patient_id,
+        "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
+        "branch_id": order.branch_id, "ordering_provider_id": order.ordering_provider_id,
+        "status": order.status, "created_at": order.created_at.isoformat(),
+    }
+
+
+@router.post("/lab/tests", status_code=201)
+def create_laboratory_test(payload: LaboratoryTestIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    code = payload.code.strip().upper()
+    if db.query(LaboratoryTest).filter_by(
+        organization_id=membership.organization_id, code=code
+    ).first():
+        raise HTTPException(409, "Laboratory test code already exists")
+    row = LaboratoryTest(
+        organization_id=membership.organization_id, code=code,
+        name=payload.name.strip(), specimen_type=payload.specimen_type.strip().lower(),
+        unit=payload.unit.strip(), reference_range=payload.reference_range.strip(),
+        turnaround_hours=payload.turnaround_hours, is_active=True, created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Laboratory test code conflicts with an existing test")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "lab.test.created",
+          "laboratory_test", row.id, f"code:{row.code}")
+    return {"id": row.id, "code": row.code, "name": row.name,
+            "specimen_type": row.specimen_type, "unit": row.unit,
+            "reference_range": row.reference_range,
+            "turnaround_hours": row.turnaround_hours}
+
+
+@router.get("/lab/tests")
+def list_laboratory_tests(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    rows = db.query(LaboratoryTest).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(LaboratoryTest.name).limit(limit).all()
+    return [{"id": row.id, "code": row.code, "name": row.name,
+             "specimen_type": row.specimen_type, "unit": row.unit,
+             "reference_range": row.reference_range,
+             "turnaround_hours": row.turnaround_hours} for row in rows]
+
+
+@router.post("/lab/orders", status_code=201)
+def create_laboratory_order(payload: LaboratoryOrderIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    encounter = db.query(HealthcareEncounter).filter_by(
+        id=payload.encounter_id, organization_id=membership.organization_id, status="signed"
+    ).first()
+    if not encounter or not can_access_branch(membership, encounter.branch_id):
+        raise HTTPException(404, "Signed encounter not found")
+    if encounter.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may order laboratory tests")
+    request_hash = laboratory_order_hash(payload)
+    existing = db.query(LaboratoryOrder).filter_by(
+        organization_id=membership.organization_id, client_order_id=payload.client_order_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Laboratory order ID was reused with different data")
+        patient = db.query(HealthcarePatient).filter_by(
+            id=existing.patient_id, organization_id=membership.organization_id
+        ).first()
+        return {**_lab_order_out(existing, patient), "status": "already_recorded"}
+    tests = db.query(LaboratoryTest).filter(
+        LaboratoryTest.organization_id == membership.organization_id,
+        LaboratoryTest.is_active == True,
+        LaboratoryTest.id.in_(payload.test_ids),
+    ).all()
+    if {test.id for test in tests} != set(payload.test_ids):
+        raise HTTPException(404, "One or more active laboratory tests were not found")
+    if len({test.specimen_type for test in tests}) != 1:
+        raise HTTPException(422, "Tests requiring different specimen types must be placed in separate orders")
+    row = LaboratoryOrder(
+        organization_id=membership.organization_id, encounter_id=encounter.id,
+        patient_id=encounter.patient_id, branch_id=encounter.branch_id,
+        ordering_provider_id=user.id, client_order_id=payload.client_order_id,
+        request_hash=request_hash, status="ordered", created_by=user.id,
+    )
+    db.add(row)
+    db.flush()
+    for test in tests:
+        db.add(LaboratoryOrderLine(
+            organization_id=membership.organization_id, order_id=row.id,
+            test_id=test.id, test_code=test.code, test_name=test.name,
+            specimen_type=test.specimen_type, result_unit=test.unit,
+            reference_range_snapshot=test.reference_range, status="pending",
+        ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(LaboratoryOrder).filter_by(
+            organization_id=membership.organization_id, client_order_id=payload.client_order_id
+        ).first()
+        if existing and existing.request_hash == request_hash:
+            patient = db.query(HealthcarePatient).filter_by(
+                id=existing.patient_id, organization_id=membership.organization_id
+            ).first()
+            return {**_lab_order_out(existing, patient), "status": "already_recorded"}
+        raise HTTPException(409, "Laboratory order conflicts with an existing order")
+    db.refresh(row)
+    patient = db.query(HealthcarePatient).filter_by(
+        id=row.patient_id, organization_id=membership.organization_id
+    ).first()
+    audit(db, user.id, membership.organization_id, "lab.order.created",
+          "laboratory_order", row.id, f"encounter:{encounter.id};tests:{len(tests)}")
+    return {**_lab_order_out(row, patient), "status": "ordered"}
+
+
+@router.get("/lab/orders")
+def list_laboratory_orders(status: str | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(LaboratoryOrder, HealthcarePatient).join(
+        HealthcarePatient, HealthcarePatient.id == LaboratoryOrder.patient_id
+    ).filter(LaboratoryOrder.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(LaboratoryOrder.branch_id.in_(allowed))
+    if status:
+        if status not in {"ordered", "sample_collected", "processing", "results_entered", "validated"}:
+            raise HTTPException(422, "Invalid laboratory order status")
+        query = query.filter(LaboratoryOrder.status == status)
+    rows = query.order_by(LaboratoryOrder.created_at.desc()).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "lab.order.listed",
+          "laboratory_order", "order-list", f"count:{len(rows)}")
+    return [_lab_order_out(order, patient) for order, patient in rows]
+
+
+@router.get("/lab/orders/{order_id}")
+def get_laboratory_order(order_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=order.patient_id, organization_id=membership.organization_id
+    ).first()
+    sample = db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).first()
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).order_by(LaboratoryOrderLine.id).all()
+    audit(db, user.id, membership.organization_id, "lab.order.viewed",
+          "laboratory_order", order.id)
+    return {
+        **_lab_order_out(order, patient),
+        "sample": ({"accession_number": sample.accession_number,
+                    "specimen_type": sample.specimen_type, "status": sample.status,
+                    "collected_at": sample.collected_at.isoformat()} if sample else None),
+        "lines": [{
+            "id": line.id, "test_id": line.test_id, "test_code": line.test_code,
+            "test_name": line.test_name, "specimen_type": line.specimen_type,
+            "result_unit": line.result_unit,
+            "reference_range": line.reference_range_snapshot,
+            "result_value": line.result_value, "result_notes": line.result_notes,
+            "status": line.status, "entered_by": line.entered_by,
+            "validated_by": line.validated_by,
+            "validated_at": line.validated_at.isoformat() if line.validated_at else None,
+        } for line in lines],
+    }
+
+
+@router.post("/lab/orders/{order_id}/sample", status_code=201)
+def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    existing = db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).first()
+    if existing:
+        if (existing.accession_number == payload.accession_number.strip().upper()
+                and existing.specimen_type == payload.specimen_type.strip().lower()):
+            return {"id": existing.id, "order_id": order.id,
+                    "accession_number": existing.accession_number,
+                    "specimen_type": existing.specimen_type, "status": "already_recorded"}
+        raise HTTPException(409, "A different sample is already registered for this order")
+    if order.status != "ordered":
+        raise HTTPException(409, "Only newly ordered tests can have a sample collected")
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).all()
+    if not lines or any(line.specimen_type != payload.specimen_type.strip().lower() for line in lines):
+        raise HTTPException(422, "Sample specimen type does not match every ordered test")
+    row = LaboratorySample(
+        organization_id=membership.organization_id, order_id=order.id,
+        accession_number=payload.accession_number.strip().upper(),
+        specimen_type=payload.specimen_type.strip().lower(),
+        status="collected", collected_at=datetime.now(timezone.utc), collected_by=user.id,
+    )
+    db.add(row)
+    order.status = "sample_collected"
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Accession number or sample already exists")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "lab.sample.collected",
+          "laboratory_sample", row.id, f"order:{order.id}")
+    return {"id": row.id, "order_id": order.id, "accession_number": row.accession_number,
+            "specimen_type": row.specimen_type, "status": row.status}
+
+
+@router.post("/lab/orders/{order_id}/lines/{line_id}/result")
+def enter_laboratory_result(order_id: int, line_id: int, payload: LaboratoryResultIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    if order.status not in {"sample_collected", "processing"}:
+        raise HTTPException(409, "Results can only be entered after sample collection and before validation")
+    line = db.query(LaboratoryOrderLine).filter_by(
+        id=line_id, organization_id=membership.organization_id, order_id=order.id
+    ).with_for_update().first()
+    if not line:
+        raise HTTPException(404, "Laboratory order line not found")
+    if line.status != "pending":
+        raise HTTPException(409, "A result has already been entered for this test")
+    line.result_value = payload.result_value.strip()
+    line.result_notes = payload.result_notes.strip()
+    line.entered_by = user.id
+    line.status = "entered"
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).all()
+    order.status = "results_entered" if all(x.status == "entered" for x in lines) else "processing"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "lab.result.entered",
+          "laboratory_order_line", line.id, f"order:{order.id}")
+    return {"id": line.id, "status": line.status, "order_status": order.status}
+
+
+@router.post("/lab/orders/{order_id}/validate")
+def validate_laboratory_order(order_id: int, payload: LaboratoryValidateIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    if order.status != "results_entered":
+        raise HTTPException(409, "Every test result must be entered before validation")
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).with_for_update().all()
+    if not lines or any(line.status != "entered" or not line.result_value.strip() for line in lines):
+        raise HTTPException(409, "Laboratory order has missing results")
+    if any(line.entered_by == user.id for line in lines):
+        raise HTTPException(403, "A result author cannot validate their own laboratory order")
+    now_utc = datetime.now(timezone.utc)
+    for line in lines:
+        line.status = "validated"
+        line.validated_by = user.id
+        line.validated_at = now_utc
+    order.status = "validated"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "lab.order.validated",
+          "laboratory_order", order.id, "independent validation completed")
+    return {"id": order.id, "status": order.status,
+            "validated_lines": len(lines), "note_recorded": bool(payload.note.strip())}
+
+
 @router.get("/crm/forecast")
 def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
@@ -4064,3 +4875,657 @@ def list_school_learner_placements(learner_id: int,
             "reason": row.reason, "changed_by": row.changed_by})
     return {"learner_id": learner.id, "current_class_id": learner.class_id, "placements": results}
 
+
+
+# SACCO member, savings and loan-origination APIs.
+def _sacco_member_or_404(db, membership, member_id):
+    member = db.query(SaccoMember).filter_by(
+        id=member_id, organization_id=membership.organization_id
+    ).first()
+    if not member or (member.branch_id and not can_access_branch(membership, member.branch_id)):
+        raise HTTPException(404, "SACCO member not found")
+    return member
+
+
+def _sacco_account_balance(db, organization_id, account_id):
+    rows = db.query(SaccoTransaction.transaction_type, SaccoTransaction.amount).filter_by(
+        organization_id=organization_id, account_id=account_id
+    ).all()
+    balance = Decimal("0.00")
+    for transaction_type, amount in rows:
+        amount = Decimal(str(amount))
+        if transaction_type == "withdrawal":
+            balance -= amount
+        else:
+            balance += amount
+    return balance.quantize(Decimal("0.01"))
+
+
+@router.post("/sacco/members", status_code=201)
+def create_sacco_member(payload: SaccoMemberIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    if payload.branch_id:
+        branch = db.query(Branch).filter_by(
+            id=payload.branch_id, organization_id=membership.organization_id, is_active=True
+        ).first()
+        if not branch or not can_access_branch(membership, branch.id):
+            raise HTTPException(404, "Branch not found")
+    row = SaccoMember(organization_id=membership.organization_id,
+        branch_id=payload.branch_id, member_number=payload.member_number.strip(),
+        full_name=payload.full_name.strip(), phone=payload.phone, email=payload.email,
+        status="pending", kyc_status="pending", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.member.created", resource_type="sacco_member",
+        resource_id=payload.member_number, detail="KYC pending"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Member number already exists in this organization")
+    db.refresh(row)
+    return {"id": row.id, "member_number": row.member_number, "full_name": row.full_name,
+        "status": row.status, "kyc_status": row.kyc_status, "branch_id": row.branch_id}
+
+
+@router.get("/sacco/members")
+def list_sacco_members(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(SaccoMember).filter_by(
+        organization_id=membership.organization_id
+    ).order_by(SaccoMember.created_at.desc(), SaccoMember.id.desc()).all()
+    return [{"id": row.id, "member_number": row.member_number, "full_name": row.full_name,
+        "phone": row.phone, "email": row.email, "status": row.status,
+        "kyc_status": row.kyc_status, "branch_id": row.branch_id,
+        "created_at": row.created_at.isoformat()} for row in rows
+        if not row.branch_id or can_access_branch(membership, row.branch_id)]
+
+
+@router.post("/sacco/members/{member_id}/kyc-decision")
+def decide_sacco_member_kyc(member_id: int, payload: SaccoKYCDecisionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    member = _sacco_member_or_404(db, membership, member_id)
+    if member.kyc_status != "pending":
+        raise HTTPException(409, "KYC has already been decided")
+    member.kyc_status = payload.decision
+    member.status = "active" if payload.decision == "verified" else "rejected"
+    member.reviewed_by = user.id
+    member.reviewed_at = datetime.now(timezone.utc)
+    member.review_note = payload.note.strip()
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.member.kyc_decided", resource_type="sacco_member",
+        resource_id=member.id, detail=f"{payload.decision}:{payload.note.strip()}"))
+    db.commit()
+    return {"id": member.id, "status": member.status, "kyc_status": member.kyc_status}
+
+
+@router.post("/sacco/accounts", status_code=201)
+def create_sacco_account(payload: SaccoAccountIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    member = _sacco_member_or_404(db, membership, payload.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member must pass KYC before opening an account")
+    account_number = f"SAC-{membership.organization_id}-{uuid.uuid4().hex[:10].upper()}"
+    row = SaccoAccount(organization_id=membership.organization_id,
+        member_id=member.id, branch_id=member.branch_id, account_number=account_number,
+        account_type=payload.account_type, currency=payload.currency,
+        status="active", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.account.opened", resource_type="sacco_account",
+        resource_id=account_number, detail=f"member:{member.id};type:{payload.account_type}"))
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "account_number": row.account_number, "member_id": row.member_id,
+        "account_type": row.account_type, "currency": row.currency, "status": row.status,
+        "balance": "0.00"}
+
+
+@router.get("/sacco/accounts")
+def list_sacco_accounts(member_id: int | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoAccount).filter_by(organization_id=membership.organization_id)
+    if member_id is not None:
+        member = _sacco_member_or_404(db, membership, member_id)
+        query = query.filter(SaccoAccount.member_id == member.id)
+    rows = query.order_by(SaccoAccount.created_at.desc(), SaccoAccount.id.desc()).all()
+    result = []
+    for row in rows:
+        if row.branch_id and not can_access_branch(membership, row.branch_id):
+            continue
+        result.append({"id": row.id, "account_number": row.account_number,
+            "member_id": row.member_id, "account_type": row.account_type,
+            "currency": row.currency, "status": row.status,
+            "balance": str(_sacco_account_balance(db, membership.organization_id, row.id))})
+    return result
+
+
+@router.post("/sacco/accounts/{account_id}/transactions", status_code=201)
+def post_sacco_transaction(account_id: int, payload: SaccoTransactionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    account = db.query(SaccoAccount).filter_by(
+        id=account_id, organization_id=membership.organization_id, status="active"
+    ).with_for_update().first()
+    if not account or (account.branch_id and not can_access_branch(membership, account.branch_id)):
+        raise HTTPException(404, "Active SACCO account not found")
+    member = _sacco_member_or_404(db, membership, account.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member KYC is not active")
+    expected_type = {"savings": {"deposit", "withdrawal"},
+        "shares": {"share_contribution"}, "contributions": {"contribution"}}
+    if payload.transaction_type not in expected_type[account.account_type]:
+        raise HTTPException(422, "Transaction type does not match the account type")
+    if payload.transaction_type == "withdrawal":
+        require_permission(membership, "manage")
+    amount = Decimal(str(payload.amount)).quantize(Decimal("0.01"))
+    request_body = {"account_id": account.id, "transaction_type": payload.transaction_type,
+        "amount": str(amount), "reference": payload.reference.strip()}
+    request_hash = hashlib.sha256(json.dumps(request_body, sort_keys=True,
+        separators=(",", ":")).encode()).hexdigest()
+    existing = db.query(SaccoTransaction).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Idempotency key was used for different transaction data")
+        return {"id": existing.id, "account_id": account.id, "status": "already_recorded",
+            "balance": str(_sacco_account_balance(db, membership.organization_id, account.id))}
+    balance = _sacco_account_balance(db, membership.organization_id, account.id)
+    if payload.transaction_type == "withdrawal" and amount > balance:
+        raise HTTPException(422, "Withdrawal exceeds available savings balance")
+    row = SaccoTransaction(organization_id=membership.organization_id,
+        account_id=account.id, transaction_type=payload.transaction_type,
+        amount=amount, reference=payload.reference.strip(),
+        idempotency_key=payload.idempotency_key, request_hash=request_hash,
+        created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action=f"sacco.transaction.{payload.transaction_type}", resource_type="sacco_account",
+        resource_id=account.id, detail=f"amount:{amount};reference:{payload.reference.strip()}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoTransaction).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key).first()
+        if existing and existing.request_hash == request_hash:
+            return {"id": existing.id, "account_id": account.id, "status": "already_recorded",
+                "balance": str(_sacco_account_balance(db, membership.organization_id, account.id))}
+        raise HTTPException(409, "Concurrent transaction conflicts with this idempotency key")
+    db.refresh(row)
+    return {"id": row.id, "account_id": account.id, "transaction_type": row.transaction_type,
+        "amount": str(row.amount), "balance": str(_sacco_account_balance(db, membership.organization_id, account.id)),
+        "status": "recorded"}
+
+
+@router.get("/sacco/accounts/{account_id}/transactions")
+def list_sacco_transactions(account_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    account = db.query(SaccoAccount).filter_by(
+        id=account_id, organization_id=membership.organization_id).first()
+    if not account or (account.branch_id and not can_access_branch(membership, account.branch_id)):
+        raise HTTPException(404, "SACCO account not found")
+    rows = db.query(SaccoTransaction).filter_by(
+        organization_id=membership.organization_id, account_id=account.id
+    ).order_by(SaccoTransaction.created_at, SaccoTransaction.id).all()
+    balance = Decimal("0.00")
+    result = []
+    for row in rows:
+        amount = Decimal(str(row.amount))
+        balance += -amount if row.transaction_type == "withdrawal" else amount
+        result.append({"id": row.id, "transaction_type": row.transaction_type,
+            "amount": str(row.amount), "reference": row.reference,
+            "created_at": row.created_at.isoformat(), "running_balance": str(balance)})
+    return {"account_id": account.id, "currency": account.currency,
+        "balance": str(balance), "transactions": result}
+
+
+@router.post("/sacco/loan-products", status_code=201)
+def create_sacco_loan_product(payload: SaccoLoanProductIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = SaccoLoanProduct(organization_id=membership.organization_id,
+        code=payload.code.strip(), name=payload.name.strip(),
+        minimum_principal=payload.minimum_principal, maximum_principal=payload.maximum_principal,
+        annual_interest_rate=payload.annual_interest_rate,
+        minimum_term_months=payload.minimum_term_months, maximum_term_months=payload.maximum_term_months,
+        interest_method=payload.interest_method, requires_guarantor=payload.requires_guarantor,
+        is_active=True, created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan_product.created", resource_type="sacco_loan_product",
+        resource_id=payload.code, detail=payload.name))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Loan product code already exists")
+    db.refresh(row)
+    return {"id": row.id, "code": row.code, "name": row.name,
+        "minimum_principal": str(row.minimum_principal), "maximum_principal": str(row.maximum_principal),
+        "annual_interest_rate": str(row.annual_interest_rate), "interest_method": row.interest_method,
+        "requires_guarantor": row.requires_guarantor, "is_active": row.is_active}
+
+
+@router.get("/sacco/loan-products")
+def list_sacco_loan_products(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(SaccoLoanProduct).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(SaccoLoanProduct.name).all()
+    return [{"id": row.id, "code": row.code, "name": row.name,
+        "minimum_principal": str(row.minimum_principal), "maximum_principal": str(row.maximum_principal),
+        "annual_interest_rate": str(row.annual_interest_rate), "minimum_term_months": row.minimum_term_months,
+        "maximum_term_months": row.maximum_term_months, "interest_method": row.interest_method,
+        "requires_guarantor": row.requires_guarantor} for row in rows]
+
+
+@router.post("/sacco/loan-applications", status_code=201)
+def create_sacco_loan_application(payload: SaccoLoanApplicationIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    member = _sacco_member_or_404(db, membership, payload.member_id)
+    if member.status != "active" or member.kyc_status != "verified":
+        raise HTTPException(409, "Member must pass KYC before applying for a loan")
+    product = db.query(SaccoLoanProduct).filter_by(
+        id=payload.loan_product_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not product:
+        raise HTTPException(404, "Active loan product not found")
+    if product.requires_guarantor:
+        raise HTTPException(422, "This product requires guarantor capture, which is not yet supported")
+    principal = Decimal(str(payload.requested_principal)).quantize(Decimal("0.01"))
+    if principal < product.minimum_principal or principal > product.maximum_principal:
+        raise HTTPException(422, "Requested principal is outside loan product limits")
+    if not product.minimum_term_months <= payload.term_months <= product.maximum_term_months:
+        raise HTTPException(422, "Requested term is outside loan product limits")
+    application_number = f"LA-{membership.organization_id}-{uuid.uuid4().hex[:12].upper()}"
+    row = SaccoLoanApplication(organization_id=membership.organization_id,
+        member_id=member.id, loan_product_id=product.id, branch_id=member.branch_id,
+        application_number=application_number, requested_principal=principal,
+        term_months=payload.term_months, purpose=payload.purpose.strip(),
+        status="submitted", created_by=user.id)
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan_application.submitted", resource_type="sacco_loan_application",
+        resource_id=application_number, detail=f"principal:{principal};term:{payload.term_months}"))
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "application_number": row.application_number,
+        "requested_principal": str(row.requested_principal), "term_months": row.term_months,
+        "status": row.status}
+
+
+@router.get("/sacco/loan-applications")
+def list_sacco_loan_applications(status: str | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoLoanApplication).filter_by(organization_id=membership.organization_id)
+    if status:
+        if status not in {"submitted", "approved", "rejected"}:
+            raise HTTPException(422, "Invalid application status filter")
+        query = query.filter(SaccoLoanApplication.status == status)
+    rows = query.order_by(SaccoLoanApplication.created_at.desc()).all()
+    result = []
+    for row in rows:
+        if row.branch_id and not can_access_branch(membership, row.branch_id):
+            continue
+        result.append({"id": row.id, "application_number": row.application_number,
+            "member_id": row.member_id, "loan_product_id": row.loan_product_id,
+            "requested_principal": str(row.requested_principal), "term_months": row.term_months,
+            "purpose": row.purpose, "status": row.status, "review_note": row.review_note,
+            "created_at": row.created_at.isoformat()})
+    return result
+
+
+@router.post("/sacco/loan-applications/{application_id}/decision")
+def decide_sacco_loan_application(application_id: int, payload: SaccoLoanDecisionIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(SaccoLoanApplication).filter_by(
+        id=application_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or (row.branch_id and not can_access_branch(membership, row.branch_id)):
+        raise HTTPException(404, "Loan application not found")
+    if row.status != "submitted":
+        raise HTTPException(409, "Loan application has already been decided")
+    if row.created_by == user.id:
+        raise HTTPException(403, "The loan applicant cannot approve their own application")
+    row.status = payload.decision
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    row.review_note = payload.note.strip()
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action=f"sacco.loan_application.{payload.decision}", resource_type="sacco_loan_application",
+        resource_id=row.application_number, detail=payload.note.strip()))
+    db.commit()
+    return {"id": row.id, "application_number": row.application_number,
+        "status": row.status, "reviewed_by": row.reviewed_by,
+        "review_note": row.review_note}
+
+
+@router.post("/sacco/loan-applications/{application_id}/disburse", status_code=201)
+def disburse_sacco_loan(application_id: int, payload: SaccoLoanDisbursementIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Record an approved loan disbursement and generate its contractual schedule."""
+    require_permission(membership, "manage")
+    application = db.query(SaccoLoanApplication).filter_by(
+        id=application_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not application or (application.branch_id and not can_access_branch(membership, application.branch_id)):
+        raise HTTPException(404, "Loan application not found")
+    existing = db.query(SaccoLoan).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).first()
+    if existing:
+        return {"id": existing.id, "loan_number": existing.loan_number,
+            "status": "already_disbursed", "funds_transfer_executed": False}
+    if application.status != "approved":
+        raise HTTPException(409, "Only approved loan applications may be disbursed")
+    if application.created_by == user.id:
+        raise HTTPException(403, "The loan applicant cannot disburse their own loan")
+    product = db.query(SaccoLoanProduct).filter_by(
+        id=application.loan_product_id, organization_id=membership.organization_id,
+        is_active=True).first()
+    if not product:
+        raise HTTPException(409, "The originating loan product is no longer active")
+    if product.requires_guarantor:
+        raise HTTPException(409, "Guarantor verification is not available for this product")
+    disbursed_at = datetime.now(timezone.utc)
+    first_due_date = add_months(disbursed_at.date(), 1)
+    try:
+        schedule = build_repayment_schedule(
+            application.requested_principal, product.annual_interest_rate,
+            application.term_months, product.interest_method, first_due_date)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    total_interest = sacco_money(sum((item["interest_due"] for item in schedule), Decimal("0.00")))
+    loan_number = f"LN-{membership.organization_id}-{uuid.uuid4().hex[:12].upper()}"
+    loan = SaccoLoan(organization_id=membership.organization_id,
+        application_id=application.id, member_id=application.member_id,
+        branch_id=application.branch_id, loan_number=loan_number,
+        principal=application.requested_principal,
+        annual_interest_rate=product.annual_interest_rate,
+        term_months=application.term_months, interest_method=product.interest_method,
+        total_interest=total_interest, outstanding_principal=application.requested_principal,
+        outstanding_interest=total_interest, status="active",
+        disbursement_reference=payload.reference, disbursed_at=disbursed_at,
+        created_by=user.id)
+    db.add(loan)
+    db.flush()
+    for item in schedule:
+        db.add(SaccoLoanSchedule(organization_id=membership.organization_id,
+            loan_id=loan.id, installment_number=item["installment_number"],
+            due_date=item["due_date"], principal_due=item["principal_due"],
+            interest_due=item["interest_due"], principal_paid=Decimal("0.00"),
+            interest_paid=Decimal("0.00"), status="pending"))
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan.disbursement_recorded", resource_type="sacco_loan",
+        resource_id=loan_number, detail=f"application:{application.application_number};principal:{loan.principal};reference:{payload.reference}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoLoan).filter_by(
+            organization_id=membership.organization_id, application_id=application.id).first()
+        if existing:
+            return {"id": existing.id, "loan_number": existing.loan_number,
+                "status": "already_disbursed", "funds_transfer_executed": False}
+        raise HTTPException(409, "Loan disbursement conflicted with another request")
+    db.refresh(loan)
+    return {"id": loan.id, "loan_number": loan.loan_number, "status": loan.status,
+        "principal": str(loan.principal), "total_interest": str(loan.total_interest),
+        "installments": len(schedule), "first_due_date": schedule[0]["due_date"].isoformat(),
+        "disbursement_reference": loan.disbursement_reference,
+        "funds_transfer_executed": False}
+
+
+@router.get("/sacco/loans")
+def list_sacco_loans(status: str | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoLoan).filter_by(organization_id=membership.organization_id)
+    if status:
+        if status not in {"active", "closed"}:
+            raise HTTPException(422, "Invalid loan status filter")
+        query = query.filter(SaccoLoan.status == status)
+    rows = query.order_by(SaccoLoan.disbursed_at.desc()).all()
+    return [{"id": row.id, "loan_number": row.loan_number, "member_id": row.member_id,
+        "application_id": row.application_id, "principal": str(row.principal),
+        "total_interest": str(row.total_interest),
+        "outstanding_principal": str(row.outstanding_principal),
+        "outstanding_interest": str(row.outstanding_interest),
+        "term_months": row.term_months, "interest_method": row.interest_method,
+        "status": row.status, "disbursed_at": row.disbursed_at.isoformat()}
+        for row in rows if not row.branch_id or can_access_branch(membership, row.branch_id)]
+
+
+@router.get("/sacco/loans/{loan_id}/schedule")
+def get_sacco_loan_schedule(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id).first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    rows = db.query(SaccoLoanSchedule).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanSchedule.installment_number).all()
+    return {"loan_id": loan.id, "loan_number": loan.loan_number,
+        "currency": "KES", "status": loan.status,
+        "outstanding_principal": str(loan.outstanding_principal),
+        "outstanding_interest": str(loan.outstanding_interest),
+        "installments": [{"number": row.installment_number, "due_date": row.due_date.isoformat(),
+            "principal_due": str(row.principal_due), "interest_due": str(row.interest_due),
+            "principal_paid": str(row.principal_paid), "interest_paid": str(row.interest_paid),
+            "status": row.status} for row in rows]}
+
+
+@router.post("/sacco/loans/{loan_id}/repayments", status_code=201)
+def record_sacco_loan_repayment(loan_id: int, payload: SaccoLoanRepaymentIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    amount = sacco_money(payload.amount)
+    request_data = {"loan_id": loan.id, "amount": str(amount), "reference": payload.reference.strip()}
+    request_hash = hashlib.sha256(json.dumps(request_data, sort_keys=True,
+        separators=(",", ":")).encode()).hexdigest()
+    existing = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Idempotency key was used for different repayment data")
+        return {"id": existing.id, "loan_id": loan.id, "status": "already_recorded",
+            "amount": str(existing.amount), "outstanding_principal": str(loan.outstanding_principal),
+            "outstanding_interest": str(loan.outstanding_interest)}
+    if loan.status != "active":
+        raise HTTPException(409, "Only active loans can receive repayments")
+    rows = db.query(SaccoLoanSchedule).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanSchedule.installment_number).with_for_update().all()
+    try:
+        principal_component, interest_component, allocations = allocate_repayment(amount, rows)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if not allocations:
+        raise HTTPException(409, "Loan has no outstanding installments")
+    for schedule_row, interest_part, principal_part in allocations:
+        schedule_row.interest_paid = sacco_money(Decimal(str(schedule_row.interest_paid)) + interest_part)
+        schedule_row.principal_paid = sacco_money(Decimal(str(schedule_row.principal_paid)) + principal_part)
+        if schedule_row.interest_paid >= schedule_row.interest_due and schedule_row.principal_paid >= schedule_row.principal_due:
+            schedule_row.status = "paid"
+        elif schedule_row.interest_paid > 0 or schedule_row.principal_paid > 0:
+            schedule_row.status = "partial"
+    loan.outstanding_principal = sacco_money(Decimal(str(loan.outstanding_principal)) - principal_component)
+    loan.outstanding_interest = sacco_money(Decimal(str(loan.outstanding_interest)) - interest_component)
+    if loan.outstanding_principal == 0 and loan.outstanding_interest == 0:
+        loan.status = "closed"
+    repayment = SaccoLoanRepayment(organization_id=membership.organization_id,
+        loan_id=loan.id, amount=amount, principal_component=principal_component,
+        interest_component=interest_component, reference=payload.reference.strip(),
+        idempotency_key=payload.idempotency_key, request_hash=request_hash,
+        created_by=user.id)
+    db.add(repayment)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan.repayment_recorded", resource_type="sacco_loan",
+        resource_id=loan.loan_number, detail=f"amount:{amount};principal:{principal_component};interest:{interest_component}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoLoanRepayment).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key).first()
+        if existing and existing.request_hash == request_hash:
+            loan = db.query(SaccoLoan).filter_by(id=loan_id, organization_id=membership.organization_id).first()
+            return {"id": existing.id, "loan_id": loan.id, "status": "already_recorded",
+                "amount": str(existing.amount), "outstanding_principal": str(loan.outstanding_principal),
+                "outstanding_interest": str(loan.outstanding_interest)}
+        raise HTTPException(409, "Concurrent repayment conflicts with this idempotency key")
+    db.refresh(repayment)
+    return {"id": repayment.id, "loan_id": loan.id, "amount": str(repayment.amount),
+        "principal_component": str(repayment.principal_component),
+        "interest_component": str(repayment.interest_component),
+        "outstanding_principal": str(loan.outstanding_principal),
+        "outstanding_interest": str(loan.outstanding_interest), "loan_status": loan.status,
+        "status": "recorded"}
+
+
+@router.get("/sacco/loans/{loan_id}/repayments")
+def list_sacco_loan_repayments(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id).first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    rows = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanRepayment.created_at, SaccoLoanRepayment.id).all()
+    return [{"id": row.id, "amount": str(row.amount),
+        "principal_component": str(row.principal_component),
+        "interest_component": str(row.interest_component), "reference": row.reference,
+        "created_at": row.created_at.isoformat()} for row in rows]
+
+
+@router.get("/school/learners/{learner_id}/report-card")
+def get_school_learner_report_card(learner_id: int, academic_year: int,
+    term: str, attendance_start: date | None = None, attendance_end: date | None = None,
+    scale_name: str = "default", membership=Depends(active_membership),
+    db: Session=Depends(get_db)):
+    """Build a report card from published assessments only; drafts never leak."""
+    require_permission(membership, "read")
+    if academic_year < 2000 or academic_year > 2200 or not term.strip():
+        raise HTTPException(422, "A valid academic year and term are required")
+    if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,24}", term.strip()):
+        raise HTTPException(422, "Invalid term value")
+    term = term.strip()
+    learner = db.query(SchoolLearner).filter_by(
+        id=learner_id, organization_id=membership.organization_id
+    ).first()
+    if not learner or not can_access_branch(membership, learner.branch_id):
+        raise HTTPException(404, "Learner not found")
+    class_ids = {learner.class_id} if learner.class_id else set()
+    placement_history = db.query(SchoolEnrollmentHistory).filter_by(
+        organization_id=membership.organization_id, learner_id=learner.id
+    ).all()
+    for placement in placement_history:
+        class_ids.add(placement.from_class_id)
+        class_ids.add(placement.to_class_id)
+    class_ids.discard(None)
+    historical_classes = db.query(SchoolClass).filter(
+        SchoolClass.organization_id == membership.organization_id,
+        SchoolClass.id.in_(class_ids),
+        SchoolClass.academic_year == academic_year,
+    ).order_by(SchoolClass.name, SchoolClass.stream).all() if class_ids else []
+    if not historical_classes:
+        raise HTTPException(404, "No learner class placement found for the requested academic year")
+    if any(not can_access_branch(membership, item.branch_id) for item in historical_classes):
+        raise HTTPException(404, "Learner class placement not found")
+    report_class_ids = [item.id for item in historical_classes]
+    if (attendance_start is None) != (attendance_end is None):
+        raise HTTPException(422, "Provide both attendance_start and attendance_end")
+    if attendance_start and attendance_end and attendance_start > attendance_end:
+        raise HTTPException(422, "Attendance start date must not be after end date")
+    assessments = db.query(SchoolAssessment, SchoolSubject.name, SchoolMark.score).join(
+        SchoolSubject, and_(SchoolSubject.id == SchoolAssessment.subject_id,
+            SchoolSubject.organization_id == membership.organization_id)
+    ).outerjoin(SchoolMark, and_(
+        SchoolMark.assessment_id == SchoolAssessment.id,
+        SchoolMark.learner_id == learner.id,
+        SchoolMark.organization_id == membership.organization_id,
+    )).filter(
+        SchoolAssessment.organization_id == membership.organization_id,
+        SchoolAssessment.class_id.in_(report_class_ids),
+        SchoolAssessment.academic_year == academic_year,
+        SchoolAssessment.term == term,
+        SchoolAssessment.status == "published",
+        SchoolSubject.is_active.is_(True),
+    ).order_by(SchoolSubject.name, SchoolAssessment.created_at).all()
+    rows = [{
+        "assessment_id": assessment.id, "title": assessment.title,
+        "subject_id": assessment.subject_id, "subject_name": subject_name,
+        "maximum_score": assessment.maximum_score, "weight": assessment.weight,
+        "score": score,
+    } for assessment, subject_name, score in assessments]
+    grade_bands = db.query(SchoolGradeBand).filter_by(
+        organization_id=membership.organization_id, scale_name=scale_name
+    ).all()
+    try:
+        report = build_learner_report_rows(rows, grade_bands)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    attendance = None
+    if attendance_start and attendance_end:
+        start = datetime.combine(attendance_start, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(attendance_end, time.max, tzinfo=timezone.utc)
+        records = db.query(SchoolAttendance.status, func.count(SchoolAttendance.id)).filter(
+            SchoolAttendance.organization_id == membership.organization_id,
+            SchoolAttendance.learner_id == learner.id,
+            SchoolAttendance.attendance_date >= start,
+            SchoolAttendance.attendance_date <= end,
+        ).group_by(SchoolAttendance.status).all()
+        counts = {status: count for status, count in records}
+        total_days = sum(counts.values())
+        attendance = {"start_date": attendance_start.isoformat(),
+            "end_date": attendance_end.isoformat(), "total_recorded_days": total_days,
+            "present": counts.get("present", 0), "late": counts.get("late", 0),
+            "absent": counts.get("absent", 0), "excused": counts.get("excused", 0),
+            "attendance_rate": (str((Decimal(counts.get("present", 0) + counts.get("late", 0)) /
+                Decimal(total_days) * Decimal("100")).quantize(Decimal("0.01")))
+                if total_days else None)}
+    return {
+        "learner": {"id": learner.id, "admission_number": learner.admission_number,
+            "name": f"{learner.first_name} {learner.last_name}",
+            "guardian_name": learner.guardian_name},
+        "class": {"id": historical_classes[0].id if len(historical_classes) == 1 else None,
+            "name": " / ".join(f"{item.name} {item.stream}".strip() for item in historical_classes),
+            "stream": historical_classes[0].stream if len(historical_classes) == 1 else "Multiple placements",
+            "academic_year": academic_year},
+        "class_placements": [{"id": item.id, "name": item.name,
+            "stream": item.stream, "branch_id": item.branch_id} for item in historical_classes],
+        "academic_year": academic_year, "term": term,
+        "publication_basis": "Published assessments only",
+        **report, "attendance": attendance,
+    }

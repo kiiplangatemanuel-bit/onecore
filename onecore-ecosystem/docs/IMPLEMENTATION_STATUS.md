@@ -761,3 +761,120 @@ payslip PDF/email, payroll journal or accounting posting. Payroll figures are
 operator-entered and are not a statutory calculation or payment instruction.
 CI and professional jurisdiction-specific validation are required before any
 operational payroll use.
+
+
+## Healthcare patient registration and clinic workflow increment (7 November 2026)
+
+Implemented on branch `feature/healthcare-patient-appointments`, stacked on HR
+payroll and the preceding CRM/HR feature branches:
+
+- Added tenant-unique patient registration with branch-scoped search and patient
+  detail retrieval; patient fields are minimized and do not include national IDs.
+- Added timezone-aware appointment scheduling with active provider membership,
+  provider branch-scope checks and overlap detection for patient/provider bookings.
+- Added controlled appointment lifecycle: scheduled, checked-in, completed,
+  cancelled and no-show. Cancellation/no-show require a reason; completion requires
+  a signed encounter.
+- Added provider-owned draft encounter creation and provider signature. One
+  encounter per appointment is enforced; signed records are immutable via current API.
+- Added healthcare workspace, migration `0025_healthcare_clinic`, validation,
+  lifecycle service, tests and `docs/HEALTHCARE.md`.
+
+Boundaries: pharmacy dispensing, medicine batches/expiry, laboratory catalogue,
+sample tracking/results, inpatient/bed management, billing/insurance, e-prescribing,
+FHIR/HL7 integrations, reminders and UAT remain outstanding. Current access uses
+the coarse organization `manage` permission; field-level encryption, clinician
+roles, patient consent/portal, retention/deletion governance, break-glass access and
+formal privacy/security assessment are not implemented. Do not use live patient
+records until these controls and clinical governance are approved.
+
+
+## Pharmacy batch and laboratory workflow increment (7 November 2026)
+
+Implemented on branch `feature/pharmacy-lab-workflows`, stacked on the healthcare
+patient/clinic and HR/CRM feature branches:
+
+- Added tenant-owned pharmacy medicine catalogue entries linked to
+  `InventoryProduct`.
+- Added branch-owned medicine batches with expiry, received/remaining quantity,
+  unit cost, selling price, idempotent receipt and append-only stock ledger movement.
+- Added expired/active/quarantined batch visibility and quarantine action.
+- Added laboratory test catalogue, signed-encounter-linked orders and specimen type
+  consistency validation.
+- Added one sample/accession per order, result entry, catalogue reference-range
+  snapshots and independent second-person result validation.
+- Added `0026_pharmacy_lab`, pharmacy/lab workspace, tests and
+  `docs/PHARMACY_LAB.md`.
+
+Boundaries: prescription writing, FEFO dispensing, controlled medicine approval,
+pharmacy returns, suppliers/billing, multiple sample containers, lab equipment and
+instrument integration, QC/calibration, result amendments/delivery, critical-value
+escalation and UAT remain outstanding. Current clinical data permissions use the
+coarse `manage` permission; granular roles, field-level encryption, consent,
+retention governance and formal privacy/security review remain mandatory before
+live clinical use.
+
+
+## SACCO member savings and loan origination increment (7 November 2026)
+
+Implemented on `feature/sacco-members-savings-loans`, stacked on the pharmacy/lab
+workflow branch:
+
+- Added tenant-unique member registration and manager-reviewed KYC decisions.
+  Members must be verified before account opening or loan application.
+- Added savings, shares and contributions accounts, transaction ledger and
+  balance derivation. Savings withdrawals require manager permission and cannot
+  exceed available balance; shares/contributions are non-withdrawable in this API.
+- Added tenant-unique transaction idempotency with canonical request hashes and
+  conflict detection.
+- Added configurable loan products, application limit/term validation and
+  manager review with applicant self-approval prevention.
+- Added `0027_sacco_foundation`, SACCO API routes, validation tests and the
+  `/sacco` member-finance workspace.
+- No external payment integration is claimed. Ledger rows are internal records.
+
+Boundaries: loan approval does not disburse funds. Loan accounts, amortization,
+repayment allocation, arrears, guarantors, collateral, interest accrual, accounting
+journals, member statements, regulatory reports, payment rails, granular roles,
+AML/KYC document verification and UAT remain outstanding. Products requiring a
+guarantor are blocked from application until guarantor capture is implemented.
+
+
+## SACCO loan disbursement and repayment increment (7 November 2026)
+
+Implemented on `feature/sacco-loan-servicing`, stacked on the SACCO member/savings
+foundation:
+
+- Approved loan applications can be recorded as disbursed loans; a unique loan
+  account is created and the application cannot be disbursed twice.
+- Flat and reducing-balance installment schedules are generated with decimal
+  arithmetic, month-end date handling and final-installment reconciliation.
+- Repayments allocate chronologically to earliest installments, interest before
+  principal; overpayments are rejected and idempotency keys prevent duplicates.
+- Loan balances and schedule paid amounts update atomically; fully settled loans
+  close. Added migration `0028_sacco_loan_servicing`, service arithmetic tests,
+  API routes and workspace actions.
+
+Boundaries: disbursement and repayment are internal records only; no external
+cash transfer, bank/M-Pesa confirmation or payment callback exists. No arrears,
+late fees, collateral/guarantor workflow, restructuring, early-settlement rebate,
+variable rates, accounting journal, prudential reporting or production UAT.
+
+
+## School term report card increment (7 November 2026)
+
+- Added `GET /api/v1/school/learners/{learner_id}/report-card` for weighted term
+  results based only on published assessments.
+- Calculates subject and overall percentages using assessment weights and the
+  configured grade-band scale.
+- A missing mark in any published assessment marks the subject and overall report
+  incomplete; no final grade is issued until all published assessment marks exist.
+- Uses learner placement history to locate class(es) for a historical academic year.
+- Optional attendance date bounds add present/late/absent/excused totals and a
+  recorded attendance rate (present + late divided by recorded days).
+- Added a school report-card workspace with browser print support and tests.
+
+Boundaries: no PDF generation, guardian portal/email delivery, principal sign-off,
+class ranking across all learners, report-card templates, competency narrative,
+CBC strands/learning outcomes, fee-clearance gating, transcript certification or
+UAT. Historical results depend on retained learner placement records.
