@@ -35,11 +35,12 @@ def _branch_ok(membership,branch_id):
 def _roles(db,membership,user,branch_id):
     if branch_id is not None:
         _branch_ok(membership,branch_id)
-    q=db.query(HealthcareRoleAssignment).filter_by(
-        organization_id=membership.organization_id,user_id=user.id,is_active=True)
-    rows=q.all()
+    rows=db.query(HealthcareRoleAssignment).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,is_active=True).all()
     allowed=(membership.branch_scope or "").strip()
-    if branch_id is None and allowed!="*":
+    if branch_id is None:
+        if allowed=="*":
+            return {x.role for x in rows}
         branch_ids={x.strip() for x in allowed.split(",") if x.strip()}
         return {x.role for x in rows if x.branch_id is None or x.branch_id in branch_ids}
     return {x.role for x in rows if x.branch_id is None or x.branch_id==branch_id}
@@ -63,7 +64,9 @@ def _has_grant(db,org,user,patient_id,permission):
     return any(permission in (x.permissions or []) and (x.expires_at is None or x.expires_at>now) for x in rows)
 
 
-def _authorize(db,membership,user,permission,branch_id=None,patient_id=None,allow_breakglass=False):
+def _authorize(db,membership,user,permission,branch_id=None,patient_id=None,allow_breakglass=False,allow_unscoped=False):
+    if branch_id is None and (membership.branch_scope or "").strip()!="*" and not allow_unscoped:
+        raise HTTPException(403,"A branch must be selected for branch-scoped healthcare access")
     roles=_roles(db,membership,user,branch_id)
     if not roles:
         raise HTTPException(403,"No active healthcare role assigned for this branch")
@@ -169,7 +172,7 @@ def register_patient(payload:HealthcarePatientIn,membership=Depends(active_membe
 @router.get("/patients")
 def list_patients(q:str="",limit:int=Query(100,ge=1,le=500),membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
-    _authorize(db,membership,user,"patient.read")
+    _authorize(db,membership,user,"patient.read",allow_unscoped=True)
     query=db.query(HealthcarePatient).filter_by(organization_id=membership.organization_id)
     allowed=(membership.branch_scope or "").strip()
     if allowed!="*":
@@ -372,7 +375,7 @@ def sign_encounter(encounter_id:int,membership=Depends(active_membership),
 @router.get("/audit")
 def healthcare_audit(limit:int=Query(100,ge=1,le=500),patient_id:int|None=None,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    _authorize(db,membership,user,"audit.read")
+    _authorize(db,membership,user,"audit.read",allow_unscoped=True)
     q=db.query(HealthcareAccessAudit).filter_by(organization_id=membership.organization_id)
     if patient_id is not None:
         patient=_patient(db,membership,patient_id);q=q.filter(HealthcareAccessAudit.patient_id==patient.id)
@@ -381,6 +384,17 @@ def healthcare_audit(limit:int=Query(100,ge=1,le=500),patient_id:int|None=None,
         branches=[x.strip() for x in allowed.split(",") if x.strip()]
         q=q.join(HealthcarePatient,HealthcarePatient.id==HealthcareAccessAudit.patient_id,isouter=True)
         q=q.filter((HealthcareAccessAudit.patient_id.is_(None))|(HealthcarePatient.branch_id.in_(branches)))
+    assignments=db.query(HealthcareRoleAssignment).filter_by(
+        organization_id=membership.organization_id,user_id=user.id,is_active=True).all()
+    if not any(x.role=="healthcare_admin" and x.branch_id is None for x in assignments):
+        privacy_branches=[x.branch_id for x in assignments if x.role=="privacy_officer" and x.branch_id]
+        org_privacy=any(x.role=="privacy_officer" and x.branch_id is None for x in assignments)
+        if not org_privacy:
+            if not privacy_branches:
+                raise HTTPException(403,"No privacy officer assignment for this organization")
+            if allowed=="*":
+                q=q.join(HealthcarePatient,HealthcarePatient.id==HealthcareAccessAudit.patient_id,isouter=True)
+            q=q.filter(HealthcarePatient.branch_id.in_(privacy_branches))
     rows=q.order_by(HealthcareAccessAudit.created_at.desc(),HealthcareAccessAudit.id.desc()).limit(limit).all()
     return [{"id":x.id,"patient_id":x.patient_id,"actor_user_id":x.actor_user_id,
         "action":x.action,"resource_type":x.resource_type,"resource_id":x.resource_id,
