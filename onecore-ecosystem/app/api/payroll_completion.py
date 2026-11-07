@@ -345,6 +345,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         extras = {**extras, "as_at_date": run.period_end.isoformat()}
         if "resident_for_tax" in extras and not isinstance(extras["resident_for_tax"], bool):
             raise HTTPException(422, "resident_for_tax must be a verified boolean employee tax status")
+        extras.setdefault("resident_for_tax", True)
         try:
             period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
             days_employed = int(extras.get("days_employed", period_days))
