@@ -50,6 +50,7 @@ def test_crm_automation_and_healthcare_routes_registered():
     assert HealthcareConsent.__tablename__=="healthcare_consents"
     assert HealthcareAccessAudit.__tablename__=="healthcare_access_audits"
     assert HealthcareRoleAssignment.__tablename__=="healthcare_role_assignments"
+    assert hasattr(HealthcareRoleAssignment,"scope_key")
     assert HealthcareBreakGlassSession.__tablename__=="healthcare_break_glass_sessions"
     assert HealthcareAppointment.__tablename__=="healthcare_appointments"
 
