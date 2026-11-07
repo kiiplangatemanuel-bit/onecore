@@ -4325,6 +4325,12 @@ def receive_pharmacy_batch(medicine_id: int, payload: PharmacyBatchIn,
         selling_price=payload.selling_price, status="active", received_by=user.id,
     )
     db.add(row)
+    db.flush()
+    if medicine.is_controlled:
+        db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+            medicine_id=medicine.id,batch_id=row.id,event_type="received",
+            quantity=payload.received_quantity,reason="Controlled medicine batch receipt",
+            actor_id=user.id))
     db.add(InventoryStockMovement(
         organization_id=membership.organization_id,
         product_id=medicine.inventory_product_id, branch_id=payload.branch_id,
@@ -4622,6 +4628,10 @@ def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
     )
     db.add(row)
     order.status = "sample_collected"
+    _pharm_lab_record(db,membership,user,"lab_chain_of_custody",None,
+        {"sample_id":row.id,"accession_number":row.accession_number,
+         "action":"collected","actor_id":user.id},parent_id=order.id,
+        branch_id=order.branch_id,status="collected")
     try:
         db.commit()
     except IntegrityError:
@@ -5879,6 +5889,9 @@ def request_pharmacy_replenishment(payload: PharmacyReplenishmentIn,
     med=db.query(PharmacyMedicine).filter_by(
         id=medicine_id,organization_id=membership.organization_id,is_active=True).first()
     if not med or not can_access_branch(membership,branch_id):raise HTTPException(404,"Medicine or branch not found")
+    if supplier_id and not db.query(ProcurementSupplier).filter_by(
+        id=supplier_id,organization_id=membership.organization_id,is_active=True).first():
+        raise HTTPException(404,"Active supplier not found")
     data={"medicine_id":med.id,"branch_id":branch_id,"quantity":str(quantity),
           "supplier_id":supplier_id,"reason":payload.reason.strip(),
           "purchase_order_status":"awaiting_procurement_conversion"}
@@ -6104,14 +6117,20 @@ def queue_laboratory_result_delivery(order_id:int,payload:dict,
     content=[{"test_code":x.test_code,"test_name":x.test_name,"result":x.result_value,
               "unit":x.result_unit,"reference_range":x.reference_range_snapshot} for x in lines]
     key=f"lab-delivery:{order.id}:{recipient_type}:{recipient_id}"
-    row,_=_pharm_lab_record(db,membership,user,"lab_result_delivery",key,
-        {"order_id":order.id,"patient_id":order.patient_id,"recipient_type":recipient_type,
+    access_token=uuid.uuid4().hex+uuid.uuid4().hex if recipient_type=="patient" else None
+    delivery_payload={"order_id":order.id,"patient_id":order.patient_id,"recipient_type":recipient_type,
          "recipient_id":recipient_id,"results":content,"delivery_channel":"secure_in_app",
-         "delivery_status":"queued"},parent_id=order.id,branch_id=order.branch_id,status="queued")
+         "delivery_status":"queued"}
+    if access_token:
+        delivery_payload["access_token_hash"]=hashlib.sha256(access_token.encode()).hexdigest()
+        delivery_payload["access_token_expires_at"]=(datetime.now(timezone.utc)+__import__("datetime").timedelta(days=7)).isoformat()
+    row,_=_pharm_lab_record(db,membership,user,"lab_result_delivery",key,
+        delivery_payload,parent_id=order.id,branch_id=order.branch_id,status="queued")
     db.commit()
     audit(db,user.id,membership.organization_id,"lab.result.delivery_queued",
           "lab_result_delivery",row.id,f"recipient:{recipient_type}:{recipient_id}")
-    return {"delivery_id":row.id,"status":row.status,"channel":"secure_in_app"}
+    return {"delivery_id":row.id,"status":row.status,"channel":"secure_in_app",
+            "patient_access_token":access_token,"token_expires_in_days":7 if access_token else None}
 
 
 @router.get("/lab/deliveries/{delivery_id}")
@@ -6129,6 +6148,26 @@ def get_laboratory_delivery(delivery_id:int,membership=Depends(active_membership
     audit(db,user.id,membership.organization_id,"lab.result.delivery_accessed",
           "lab_result_delivery",row.id)
     return {"id":row.id,"status":row.status,"results":row.payload["results"]}
+
+
+@router.get("/lab/public-deliveries/{delivery_id}")
+def get_patient_laboratory_delivery(delivery_id:int,x_delivery_token:str=Header(...,min_length=32),
+    db:Session=Depends(get_db)):
+    row=db.query(PharmacyLabWorkflowRecord).filter_by(
+        id=delivery_id,record_type="lab_result_delivery",status="queued").first()
+    if not row or row.payload.get("recipient_type")!="patient":
+        raise HTTPException(404,"Secure result delivery not found")
+    expected=row.payload.get("access_token_hash","")
+    if not expected or not __import__("hmac").compare_digest(
+        expected,hashlib.sha256(x_delivery_token.encode()).hexdigest()):
+        raise HTTPException(403,"Invalid result delivery token")
+    expires=row.payload.get("access_token_expires_at")
+    if not expires or datetime.fromisoformat(expires)<datetime.now(timezone.utc):
+        raise HTTPException(410,"Result delivery token expired")
+    row.status="accessed"
+    row.payload={**row.payload,"accessed_at":datetime.now(timezone.utc).isoformat()}
+    db.commit()
+    return {"delivery_id":row.id,"results":row.payload["results"],"status":"accessed"}
 
 
 @router.get("/pharmacy-lab/traceability")
@@ -6183,6 +6222,11 @@ def reverse_pharmacy_dispense(dispense_id:int,payload:PharmacyDispenseReversalIn
     line.quantity_dispensed=max(Decimal("0"),line.quantity_dispensed-disp.quantity)
     line.status="pending" if line.quantity_dispensed==0 else "partially_dispensed"
     disp.status="reversed"
+    invoice=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="pharmacy_invoice",parent_id=disp.id).first()
+    if invoice:
+        invoice.status="reversed"
+        invoice.payload={**invoice.payload,"status":"reversed","reversed_by":user.id}
     row,_=_pharm_lab_record(db,membership,user,"pharmacy_dispense_reversal",
         f"dispense-reversal:{disp.id}",{"dispense_id":disp.id,"reason":payload.reason.strip(),
         "restock_quantity":str(payload.restock_quantity),"verifier_id":payload.verifier_id,
