@@ -609,7 +609,7 @@ def decide_preauthorization(preauth_id: int, payload: dict, m=Depends(active_mem
 
 @router.post("/patients/{patient_id}/insurance/claims", status_code=201)
 def submit_claim(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.read", write=False)
+    patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=False)
     _need(db, m, u, "insurance.manage", patient.branch_id)
     amount = _money(payload.get("amount"))
     invoice_id = payload.get("invoice_id")
@@ -630,7 +630,7 @@ def submit_claim(patient_id: int, payload: dict, m=Depends(active_membership), u
 @router.post("/insurance/claims/{claim_id}/settle")
 def settle_claim(claim_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     claim = _resource(db, m, claim_id, "insurance_claim", lock=True)
-    patient, emergency, _ = _patient_access(db, m, u, claim.patient_id, "clinical.read", write=False)
+    patient, emergency, _ = _patient_access(db, m, u, claim.patient_id, "patient.read", write=False)
     _need(db, m, u, "insurance.manage", patient.branch_id)
     amount = _money(payload.get("settled_amount"))
     data = _payload(claim); already = Decimal(data.get("settled_amount", "0"))
@@ -678,7 +678,7 @@ def laboratory_order(patient_id: int, payload: dict, m=Depends(active_membership
 def integration_result(job_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     row = _resource(db,m,job_id)
     if row.resource_type not in {"pharmacy_job","laboratory_job","integration_job"}: raise HTTPException(404,"Integration job not found")
-    patient, emergency, _ = _patient_access(db,m,u,row.patient_id,"clinical.write",write=True)
+    patient, emergency, _ = _patient_access(db,m,u,row.patient_id,"patient.read",write=True)
     action = "pharmacy.manage" if row.resource_type=="pharmacy_job" else "lab.manage"
     _need(db,m,u,action,patient.branch_id)
     if row.status not in {"queued","processing"}: raise HTTPException(409,"Integration job is not awaiting a result")
