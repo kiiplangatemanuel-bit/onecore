@@ -329,3 +329,33 @@ opening balances or unlinked manual control-account entries may produce differen
   statement certification.
 - Currency is the organization's configured base currency; this report does not
   perform multi-currency translation or consolidation.
+
+
+## Extended AP, VAT reporting, cash flow and customer refunds
+
+- A three-way-matched Procurement supplier invoice can be linked to a draft
+  Accounting AP invoice using `POST /api/v1/procurement/supplier-invoices/{id}/post-to-accounting`.
+  The link is one-to-one and retry-safe. The resulting AP invoice remains subject
+  to accounting approval and normal posting controls.
+- `GET /api/v1/accounting/statutory-tax-summary` reports posted sales and purchase
+  tax by rate, less posted credit notes, with output/input and net VAT grouped by
+  currency. It is a management report, not an eTIMS/KRA filing or tax certificate.
+- `GET /api/v1/accounting/cash-flow` classifies posted cash-equivalent movements
+  using chart-of-account cash-flow categories (operating, investing, financing).
+  Configure bank/cash accounts as cash equivalents and counterpart accounts
+  with the relevant activity category. Unclassified movements are explicitly shown.
+- `POST /api/v1/accounting/invoices/{id}/refunds` settles only a customer credit
+  balance created by posted credit notes. It requires an active asset cash/bank
+  account, uses an idempotency key, posts a balanced journal and reduces the
+  invoice's paid amount. Refunds cannot exceed the refundable credit balance.
+- Fiscal close checks now block on matched Procurement supplier invoices that
+  have not yet been converted into the accounting AP subledger.
+
+## Configuration and compliance boundaries
+
+VAT rates and tax accounts remain organization-configured. The summary does not
+determine legal tax treatment, submit returns, create eTIMS receipts, or certify
+statutory compliance. Cash-flow classifications are user-configured and must be
+reviewed by the organization's finance team. Multi-currency consolidation and
+foreign-exchange revaluation are not performed; the current invoice ledger requires
+the organization base currency.
