@@ -57,6 +57,8 @@ def _active_grant(db, patient, user, membership, write=False):
         HealthcareBreakGlass.expires_at > now,
     ).order_by(HealthcareBreakGlass.id.desc()).first()
     if emergency: return "break_glass", emergency.reason
+    _audit(db, patient, user, "patient.access_denied", "denied",
+           "No active patient-specific healthcare access grant")
     raise HTTPException(403, "No active patient-specific healthcare access grant")
 
 
@@ -68,8 +70,7 @@ def _audit(db, patient, user, action, mode, reason=""):
 
 
 def _patient_out(row):
-    return {"id": row.id, "patient_number": decrypt_identifier(row.patient_number_hash)
-            if False else None,
+    return {"id": row.id,
             "full_name": decrypt_identifier(row.full_name_encrypted),
             "date_of_birth": decrypt_identifier(row.date_of_birth_encrypted),
             "phone": decrypt_identifier(row.phone_encrypted),
@@ -174,6 +175,8 @@ def record_patient_consent(patient_id: int, payload: HealthcareConsentIn,
                            db: Session=Depends(get_db)):
     _require_role(membership, ADMIN_ROLES | CLINICAL_ROLES)
     patient = _patient(db, patient_id, membership)
+    if _role(membership) in CLINICAL_ROLES:
+        _active_grant(db, patient, user, membership, write=True)
     if payload.expires_at and (payload.expires_at.tzinfo is None or payload.expires_at <= datetime.now(timezone.utc)):
         raise HTTPException(422, "Consent expiry must be a future timezone-aware timestamp")
     row = HealthcareConsent(organization_id=membership.organization_id, patient_id=patient.id,
