@@ -502,7 +502,7 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
     _require_manage(membership)
     batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
-    if not batch or batch.data["method"] != "mpesa" or batch.data["status"] not in ("authorized", "processing"):
+    if not batch or batch.data["method"] != "mpesa" or batch.data["status"] not in ("authorized", "processing", "partial", "failed"):
         raise HTTPException(409, "An authorized M-Pesa batch is required")
     from app.core.config import settings
     import httpx
@@ -537,7 +537,7 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
             access_token = token_response.json()["access_token"]
             body = {"InitiatorName": os.getenv("MPESA_INITIATOR_NAME"),
                 "SecurityCredential": os.getenv("MPESA_SECURITY_CREDENTIAL"),
-                "CommandID": os.getenv("MPESA_B2C_COMMAND_ID", "BusinessPayment"),
+                "CommandID": os.getenv("MPESA_B2C_COMMAND_ID", "SalaryPayment"),
                 "Amount": int(amount_decimal),
                 "PartyA": settings.mpesa_shortcode, "PartyB": phone,
                 "Remarks": f"Salary {batch.data['run_id']}"[:100],
@@ -591,6 +591,8 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     status = payload.get("status")
     if status not in ("paid", "failed"):
         raise HTTPException(422, "Callback status must be paid or failed")
+    if row["status"] == "reversed":
+        raise HTTPException(409, "A reversed salary payment cannot be marked paid again")
     if row["status"] == "paid" and (status != "paid" or row.get("provider_reference") != payload.get("provider_reference")):
         raise HTTPException(409, "A settled salary payment cannot be downgraded or assigned a different reference")
     if status == "paid" and not payload.get("provider_reference"):
@@ -791,7 +793,7 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
     seen=set()
     for tx in statement:
         ref=str(tx.get("reference","")); row=expected.get(ref)
-        if not row or ref in seen or money(tx.get("amount",0)) != money(row["amount"]):
+        if not row or row["status"] == "reversed" or ref in seen or money(tx.get("amount",0)) != money(row["amount"]):
             unmatched.append({"reference":ref,"amount":str(tx.get("amount","")),"reason":"unknown_duplicate_or_amount_mismatch"})
             continue
         seen.add(ref); row["status"]="paid"; row["provider_reference"]=ref
