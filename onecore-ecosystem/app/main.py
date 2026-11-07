@@ -30,6 +30,11 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
 app.include_router(router)
 app.include_router(platform_router)
 
+@app.get("/accounting", response_class=HTMLResponse)
+def accounting_ui():
+    page = Path(__file__).resolve().parent / "web" / "accounting.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
 @app.get("/inventory", response_class=HTMLResponse)
 def inventory_ui():
     page = Path(__file__).resolve().parent / "web" / "inventory.html"
