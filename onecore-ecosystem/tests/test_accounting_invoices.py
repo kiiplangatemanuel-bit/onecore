@@ -36,6 +36,9 @@ def test_invoice_payment_requires_positive_amount_and_idempotency_key():
     with pytest.raises(ValidationError):
         AccountingInvoicePaymentIn(payment_account_id=1, amount=0,
                                    payment_date="2026-11-08", idempotency_key="receipt-0001")
+    with pytest.raises(ValidationError):
+        AccountingInvoicePaymentIn(payment_account_id=1, amount="1.005",
+                                   payment_date="2026-11-08", idempotency_key="receipt-0002")
 
 
 def test_ar_ap_models_and_routes_are_registered():
