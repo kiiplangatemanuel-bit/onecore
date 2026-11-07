@@ -696,7 +696,7 @@ class CRMCampaignIn(BaseModel):
 class CRMCampaignTemplateIn(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     channel: str = Field(pattern=r"^(email|sms|whatsapp)$")
-    purpose: str = Field(default="marketing", pattern=r"^(marketing|service)$")
+    purpose: str = Field(default="marketing", pattern=r"^marketing$")
     subject: str = Field(default="", max_length=240)
     body: str = Field(min_length=2, max_length=5000)
 
