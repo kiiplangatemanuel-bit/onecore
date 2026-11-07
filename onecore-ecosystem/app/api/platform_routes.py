@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, Membership, OrganizationInvitation, User, AuditEvent
+from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, Membership, OrganizationInvitation, User, AuditEvent, Branch
 from app.core.security import current_user, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, ROLE_PERMISSIONS
@@ -206,13 +206,30 @@ class InvitationIn(BaseModel):
 class AcceptInvitationIn(BaseModel):
     token: str = Field(min_length=20, max_length=200)
 
+def _validated_branch_scope(db, organization_id: int, scope: str, status_code: int = 422) -> str:
+    """Return a canonical branch scope after checking active branches belong to the tenant."""
+    normalized = scope.strip()
+    if normalized == "*":
+        return "*"
+    branch_ids = [part.strip() for part in normalized.split(",")]
+    if (not branch_ids or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", part) for part in branch_ids)
+            or len(branch_ids) != len(set(branch_ids))):
+        raise HTTPException(status_code, "Branch scope must contain unique valid branch IDs")
+    rows = db.query(Branch.id).filter(
+        Branch.organization_id == organization_id,
+        Branch.is_active.is_(True),
+        Branch.id.in_(branch_ids),
+    ).all()
+    found = {row[0] for row in rows}
+    if found != set(branch_ids):
+        raise HTTPException(status_code, "Branch scope must reference active branches in this organization")
+    return ",".join(branch_ids)
+
 @router.post("/invitations", status_code=201)
 def create_invitation(payload:InvitationIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
     email=str(payload.email).lower()
-    scope=payload.branch_scope.strip()
-    if scope!="*" and (not scope or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,100}",part.strip()) for part in scope.split(","))):
-        raise HTTPException(422,"Invalid branch scope")
+    scope=_validated_branch_scope(db,membership.organization_id,payload.branch_scope)
     pending=db.query(OrganizationInvitation).filter_by(organization_id=membership.organization_id,email=email,accepted_at=None,revoked_at=None).first()
     if pending:
         raise HTTPException(409,"An active invitation already exists for this email")
@@ -247,13 +264,14 @@ def accept_invitation(payload:AcceptInvitationIn,user:User=Depends(current_user)
     org=db.get(Organization,row.organization_id)
     if not org or not org.is_active:
         raise HTTPException(404,"Organization not found")
+    validated_scope=_validated_branch_scope(db,row.organization_id,row.branch_scope,status_code=409)
     existing=db.query(Membership).filter_by(user_id=user.id,organization_id=row.organization_id).first()
     if existing and existing.is_active:
         raise HTTPException(409,"You already have active access to this organization")
     if existing:
-        existing.role=row.role;existing.branch_scope=row.branch_scope;existing.is_active=True
+        existing.role=row.role;existing.branch_scope=validated_scope;existing.is_active=True
     else:
-        db.add(Membership(user_id=user.id,organization_id=row.organization_id,role=row.role,branch_scope=row.branch_scope))
+        db.add(Membership(user_id=user.id,organization_id=row.organization_id,role=row.role,branch_scope=validated_scope))
     row.accepted_at=datetime.now(timezone.utc);db.commit()
     _audit(db,user.id,row.organization_id,"invitation.accepted","organization_invitation",row.id,row.email)
     return {"organization_id":row.organization_id,"organization_name":org.name,"role":row.role}
