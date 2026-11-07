@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingYearEndCloseIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -2595,6 +2595,195 @@ def _accounting_period_close_check(db, organization_id, period):
     return {"period_id": period.id, "period_code": period.code,
         "start_date": start.date().isoformat(), "end_date": end.date().isoformat(),
         "ready_to_close": not blockers, "checks": counts, "blockers": blockers}
+
+
+def _accounting_year_end_close_preview(db, organization_id, period, retained_earnings_account_id):
+    start = datetime.combine(period.start_date.date(), time.min, tzinfo=timezone.utc)
+    end = datetime.combine(period.end_date.date(), time.max, tzinfo=timezone.utc)
+    rows = db.query(
+        AccountingAccount.id, AccountingAccount.code, AccountingAccount.name,
+        AccountingAccount.account_type,
+        func.coalesce(func.sum(AccountingJournalLine.debit), 0).label("debits"),
+        func.coalesce(func.sum(AccountingJournalLine.credit), 0).label("credits"),
+    ).join(
+        AccountingJournalLine, AccountingJournalLine.account_id == AccountingAccount.id
+    ).join(
+        AccountingJournal, AccountingJournal.id == AccountingJournalLine.journal_id
+    ).filter(
+        AccountingAccount.organization_id == organization_id,
+        AccountingJournalLine.organization_id == organization_id,
+        AccountingJournal.organization_id == organization_id,
+        AccountingJournal.status == "posted",
+        AccountingJournal.entry_date >= start,
+        AccountingJournal.entry_date <= end,
+        AccountingAccount.account_type.in_(("revenue", "expense")),
+    ).group_by(
+        AccountingAccount.id, AccountingAccount.code, AccountingAccount.name,
+        AccountingAccount.account_type,
+    ).order_by(AccountingAccount.code).all()
+
+    revenue_total = Decimal("0.00")
+    expense_total = Decimal("0.00")
+    closing_lines = []
+    details = []
+    for row in rows:
+        debit, credit = Decimal(row.debits), Decimal(row.credits)
+        balance = credit - debit if row.account_type == "revenue" else debit - credit
+        if row.account_type == "revenue":
+            revenue_total += balance
+            # Revenue normal credit balances are closed with a debit.
+            close_debit, close_credit = balance, Decimal("0.00")
+        else:
+            expense_total += balance
+            # Expense normal debit balances are closed with a credit.
+            close_debit, close_credit = Decimal("0.00"), balance
+        details.append({
+            "account_id": row.id, "code": row.code, "name": row.name,
+            "account_type": row.account_type,
+            "period_balance": str(balance.quantize(Decimal("0.01"))),
+            "closing_debit": str(close_debit.quantize(Decimal("0.01"))),
+            "closing_credit": str(close_credit.quantize(Decimal("0.01"))),
+        })
+        if balance > 0:
+            closing_lines.append({
+                "account_id": row.id, "debit": close_debit, "credit": close_credit,
+                "description": "Year-end close " + period.code,
+            })
+        elif balance < 0:
+            closing_lines.append({
+                "account_id": row.id, "debit": -close_credit, "credit": -close_debit,
+                "description": "Year-end close " + period.code,
+            })
+
+    net_income = revenue_total - expense_total
+    retained = db.query(AccountingAccount).filter_by(
+        id=retained_earnings_account_id, organization_id=organization_id,
+        is_active=True, account_type="equity",
+    ).first()
+    if not retained:
+        raise HTTPException(422, "Retained earnings account must be an active equity account in this organization")
+    if net_income > 0:
+        retained_debit, retained_credit = Decimal("0.00"), net_income
+    elif net_income < 0:
+        retained_debit, retained_credit = -net_income, Decimal("0.00")
+    else:
+        retained_debit = retained_credit = Decimal("0.00")
+    if net_income:
+        closing_lines.append({
+            "account_id": retained.id, "debit": retained_debit,
+            "credit": retained_credit, "description": "Transfer net result to retained earnings",
+        })
+    total_debits = sum((line["debit"] for line in closing_lines), Decimal("0.00"))
+    total_credits = sum((line["credit"] for line in closing_lines), Decimal("0.00"))
+    return {
+        "period_id": period.id, "period_code": period.code,
+        "start_date": period.start_date.date().isoformat(),
+        "end_date": period.end_date.date().isoformat(),
+        "revenue": str(revenue_total.quantize(Decimal("0.01"))),
+        "expenses": str(expense_total.quantize(Decimal("0.01"))),
+        "net_income": str(net_income.quantize(Decimal("0.01"))),
+        "retained_earnings_account_id": retained.id,
+        "retained_earnings_account_code": retained.code,
+        "closing_debits": str(total_debits.quantize(Decimal("0.01"))),
+        "closing_credits": str(total_credits.quantize(Decimal("0.01"))),
+        "balanced": total_debits == total_credits,
+        "accounts": details,
+        "_journal_lines": closing_lines,
+    }
+
+
+@router.get("/accounting/fiscal-periods/{period_id}/year-end-close-preview")
+def accounting_year_end_close_preview(period_id: int, retained_earnings_account_id: int,
+    membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Year-end close preview requires organization-wide accounting access")
+    period = db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id, organization_id=membership.organization_id).first()
+    if not period:
+        raise HTTPException(404, "Fiscal period not found")
+    preview = _accounting_year_end_close_preview(
+        db, membership.organization_id, period, retained_earnings_account_id)
+    close_check = _accounting_period_close_check(db, membership.organization_id, period)
+    preview.pop("_journal_lines", None)
+    preview["period_close_check"] = close_check
+    preview["ready_to_post"] = (
+        period.status == "open" and close_check["ready_to_close"] and preview["balanced"]
+    )
+    return preview
+
+
+@router.post("/accounting/fiscal-periods/{period_id}/year-end-close", status_code=201)
+def post_accounting_year_end_close(period_id: int, payload: AccountingYearEndCloseIn,
+    membership=Depends(active_membership), user: User = Depends(current_user),
+    db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Year-end close requires organization-wide accounting access")
+    period = db.query(AccountingFiscalPeriod).filter_by(
+        id=period_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not period:
+        raise HTTPException(404, "Fiscal period not found")
+    if period.status != "open":
+        raise HTTPException(409, "Only an open fiscal period can be year-end closed")
+    if payload.confirmation_code.strip() != period.code:
+        raise HTTPException(422, "Confirmation code must exactly match the fiscal period code")
+    close_check = _accounting_period_close_check(db, membership.organization_id, period)
+    if not close_check["ready_to_close"]:
+        raise HTTPException(409, detail={
+            "message": "Fiscal period has unresolved close controls",
+            "period_id": period.id, "blockers": close_check["blockers"],
+            "checks": close_check["checks"],
+        })
+    preview = _accounting_year_end_close_preview(
+        db, membership.organization_id, period, payload.retained_earnings_account_id)
+    if not preview["balanced"]:
+        raise HTTPException(409, "Calculated year-end closing journal is not balanced")
+    # A period can only have one close journal; the reference makes retries safe.
+    reference = "YEAR-END-CLOSE:" + str(period.id)
+    existing = db.query(AccountingJournal).filter_by(
+        organization_id=membership.organization_id, reference=reference).first()
+    if existing:
+        raise HTTPException(409, "A year-end close journal already exists for this period")
+    lines = preview.pop("_journal_lines")
+    journal = None
+    if lines:
+        journal = AccountingJournal(
+            organization_id=membership.organization_id, branch_id=None,
+            journal_number="YEC-" + uuid.uuid4().hex[:16].upper(),
+            reference=reference, memo="Year-end closing journal for " + period.code,
+            status="posted",
+            entry_date=datetime.combine(period.end_date.date(), time.min, tzinfo=timezone.utc),
+            created_by=user.id, posted_by=user.id, posted_at=datetime.now(timezone.utc),
+        )
+        db.add(journal)
+        db.flush()
+        for line in lines:
+            db.add(AccountingJournalLine(
+                organization_id=membership.organization_id, journal_id=journal.id,
+                account_id=line["account_id"], branch_id=None,
+                description=line["description"], debit=line["debit"], credit=line["credit"],
+            ))
+    period.status = "closed"
+    period.closed_by = user.id
+    period.closed_at = datetime.now(timezone.utc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Year-end close conflicted with another accounting operation")
+    audit(db, user.id, membership.organization_id, "accounting.year_end.closed",
+          "accounting_period", period.id, reference)
+    return {
+        "period_id": period.id, "period_code": period.code, "status": period.status,
+        "journal_id": journal.id if journal else None,
+        "journal_number": journal.journal_number if journal else None,
+        "revenue_closed": preview["revenue"], "expenses_closed": preview["expenses"],
+        "net_income_transferred": preview["net_income"],
+        "retained_earnings_account_id": preview["retained_earnings_account_id"],
+        "closed_at": period.closed_at.isoformat(),
+    }
 
 
 @router.get("/accounting/fiscal-periods/{period_id}/close-check")
