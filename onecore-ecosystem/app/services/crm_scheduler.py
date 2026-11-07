@@ -119,10 +119,10 @@ def _execute_schedule(db,schedule_id,now):
     run_number=schedule.run_count+1
     child=_prepare_child(db,schedule,parent,membership,user,now,run_number)
     if child.status!="sent":
-        for _ in range(1000):
+        for _ in range(1500):
             schedule.lease_until=datetime.now(timezone.utc)+timedelta(minutes=10)
             db.commit()
-            result=dispatch_campaign(child.id,batch_size=25,membership=membership,user=user,db=db)
+            result=dispatch_campaign(child.id,batch_size=20,membership=membership,user=user,db=db)
             if result.get("remaining",0)<=0 or result.get("processed",0)<=0:break
     db.refresh(child)
     schedule.last_run_at=datetime.now(timezone.utc)
