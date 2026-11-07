@@ -174,7 +174,6 @@ class POSShiftCloseIn(BaseModel):
 class POSSaleLineIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
-    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
 
 
 class POSPaymentIn(BaseModel):
