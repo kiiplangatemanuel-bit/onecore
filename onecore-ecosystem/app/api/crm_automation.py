@@ -2,7 +2,7 @@
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from app.core.database import get_db
 from app.core.models import (User, CRMCommunicationTemplate, CRMAudienceSegment,
     CRMCampaign, CRMCampaignSchedule, CRMContact)
