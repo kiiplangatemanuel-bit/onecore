@@ -400,7 +400,9 @@ def discharge_patient(admission_id: int, payload: dict, m=Depends(active_members
 def transfer_patient(admission_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     admission = _resource(db, m, admission_id, "admission", lock=True)
     patient, emergency, _ = _patient_access(db, m, u, admission.patient_id, "clinical.write", write=True)
-    _need(db, m, u, "inpatient.clinical.manage", patient.branch_id) raise HTTPException(409, "Only admitted patients can be transferred")
+    _need(db, m, u, "inpatient.clinical.manage", patient.branch_id)
+    if admission.status != "admitted":
+        raise HTTPException(409, "Only admitted patients can be transferred")
     target = _resource(db, m, int(payload.get("target_bed_id", 0)), "bed", lock=True)
     if target.branch_id != patient.branch_id or target.status != "available":
         raise HTTPException(409, "Target bed is not available in the patient's branch")
