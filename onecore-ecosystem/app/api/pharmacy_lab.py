@@ -937,6 +937,51 @@ def create_laboratory_test(payload:dict,m=Depends(active_membership),u:User=Depe
     return {"id":row.id,**data}
 
 
+@router.put("/lab/tests/{test_id}")
+def update_laboratory_test(test_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    row=_get(db,m,test_id,"lab_test",lock=True)
+    _need_any(db,m,u,"lab.manage")
+    data=_payload(row)
+    for field,limit in (("name",180),("specimen_type",80),("unit",40),("reference_range",180)):
+        if field in payload:
+            data[field]=_required_text(payload,field,limit).lower() if field=="specimen_type" else _required_text(payload,field,limit)
+    if "price" in payload:
+        data["price"]=str(_decimal(payload["price"],"price",places=2))
+    if "turnaround_hours" in payload:
+        hours=int(payload["turnaround_hours"])
+        if not 1<=hours<=720:raise HTTPException(422,"Turnaround hours must be 1 to 720")
+        data["turnaround_hours"]=hours
+    if "critical_low" in payload:
+        value=payload["critical_low"]
+        data["critical_low"]=str(_decimal(value,"critical_low")) if value is not None else None
+    if "critical_high" in payload:
+        value=payload["critical_high"]
+        data["critical_high"]=str(_decimal(value,"critical_high")) if value is not None else None
+    low=data.get("critical_low");high=data.get("critical_high")
+    if low is not None and high is not None and Decimal(low)>=Decimal(high):
+        raise HTTPException(422,"Critical low threshold must be below critical high threshold")
+    _update(row,data,u)
+    _audit_action(db,m,u,"lab.test.updated","lab_test",row.id)
+    db.commit()
+    return {"id":row.id,**data,"status":row.status}
+
+
+@router.post("/lab/tests/{test_id}/deactivate")
+def deactivate_laboratory_test(test_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    row=_get(db,m,test_id,"lab_test",lock=True)
+    _need_any(db,m,u,"lab.manage")
+    if row.status!="active":raise HTTPException(409,"Test is already inactive")
+    data=_payload(row);data["is_active"]=False
+    data["deactivated_at"]=NOW().isoformat();data["deactivated_by"]=u.id
+    data["deactivation_reason"]=_required_text(payload,"reason",500)
+    _update(row,data,u,status="inactive")
+    _audit_action(db,m,u,"lab.test.deactivated","lab_test",row.id,data["deactivation_reason"])
+    db.commit()
+    return {"id":row.id,"status":row.status}
+
+
 @router.get("/lab/tests")
 def list_laboratory_tests(m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db),limit:int=Query(500,ge=1,le=1000)):
@@ -1036,6 +1081,28 @@ def get_laboratory_order(order_id:int,m=Depends(active_membership),u:User=Depend
     samples=_resource_list(db,m,"lab_sample",branch_id=row.branch_id,patient_id=row.patient_id,limit=1000)
     samples=[x for x in samples if x.parent_id==row.id]
     return {**_view(row),"samples":[_view(x) for x in samples]}
+
+
+@router.post("/lab/orders/{order_id}/start-processing")
+def start_laboratory_processing(order_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    order=_get(db,m,order_id,"lab_order",lock=True)
+    _need(db,m,u,"lab.manage",order.branch_id)
+    if order.status not in {"sample_collected","processing"}:
+        raise HTTPException(409,"Order is not ready for processing")
+    samples=_resource_list(db,m,"lab_sample",branch_id=order.branch_id,
+        patient_id=order.patient_id,limit=1000)
+    if not any(x.parent_id==order.id and x.status=="accepted" for x in samples):
+        raise HTTPException(409,"At least one accepted sample is required")
+    data=_payload(order);data["status"]="processing"
+    data["processing_started_at"]=data.get("processing_started_at") or NOW().isoformat()
+    data["processing_started_by"]=u.id
+    _update(order,data,u,status="processing")
+    patient=_patient(db,order.patient_id,m)
+    _patient_event(db,m,u,patient,"lab.order.processing_started",
+        {"order_id":order.id},order.id)
+    db.commit()
+    return {"order_id":order.id,"status":order.status}
 
 
 @router.post("/lab/orders/{order_id}/samples",status_code=201)
@@ -1495,6 +1562,64 @@ def settle_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_members
         raise HTTPException(409,"Only approved claims can be settled")
     from app.api.healthcare_hospital import settle_claim
     return settle_claim(claim_id,payload,m,u,db)
+
+
+@router.get("/pharmacy/reports/stock")
+def pharmacy_stock_report(branch_id:str,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db),near_expiry_days:int=Query(90,ge=1,le=365)):
+    _need(db,m,u,"pharmacy.manage",branch_id)
+    cutoff=date.today();expiry_cutoff=cutoff+timedelta(days=near_expiry_days)
+    rows=_resource_list(db,m,"pharmacy_batch",branch_id=branch_id,limit=5000)
+    totals={};expired=near=quarantined=recalled=0
+    for row in rows:
+        data=_payload(row);medicine_id=int(data["medicine_id"])
+        bucket=totals.setdefault(medicine_id,{"medicine_id":medicine_id,"received":Decimal("0"),
+            "available":Decimal("0"),"unit_cost_value":Decimal("0"),"batch_count":0})
+        bucket["batch_count"]+=1
+        bucket["received"]+=Decimal(data["received_quantity"])
+        remaining=Decimal(data["remaining_quantity"])
+        if row.status=="active":
+            expiry=_date(data["expiry_date"],"expiry_date")
+            if expiry<cutoff:expired+=1
+            elif expiry<=expiry_cutoff and remaining>0:near+=1
+            else:bucket["available"]+=remaining
+            bucket["unit_cost_value"]+=remaining*Decimal(data["unit_cost"])
+        elif row.status=="quarantined":quarantined+=1
+        elif row.status=="recalled":recalled+=1
+    return {"branch_id":branch_id,"as_of":cutoff.isoformat(),"near_expiry_days":near_expiry_days,
+        "summary":{"medicine_count":len(totals),"expired_batches":expired,
+            "near_expiry_batches":near,"quarantined_batches":quarantined,"recalled_batches":recalled},
+        "medicines":[{"medicine_id":v["medicine_id"],"batch_count":v["batch_count"],
+            "received_quantity":str(v["received"]),"available_quantity":str(v["available"]),
+            "inventory_cost_value":str(v["unit_cost_value"].quantize(Decimal("0.01")))}
+            for v in totals.values()]}
+
+
+@router.get("/lab/reports/operations")
+def laboratory_operations_report(branch_id:str,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    _need(db,m,u,"lab.manage",branch_id)
+    orders=_resource_list(db,m,"lab_order",branch_id=branch_id,limit=5000)
+    samples=_resource_list(db,m,"lab_sample",branch_id=branch_id,limit=5000)
+    alerts=_resource_list(db,m,"lab_critical_alert",branch_id=branch_id,limit=5000)
+    counts={}
+    turnaround=[]
+    for order in orders:
+        counts[order.status]=counts.get(order.status,0)+1
+        data=_payload(order)
+        if order.status=="validated" and data.get("ordered_at") and data.get("validated_at"):
+            start=datetime.fromisoformat(data["ordered_at"]);end=datetime.fromisoformat(data["validated_at"])
+            turnaround.append(max(0,(end-start).total_seconds()/3600))
+    sample_counts={}
+    for sample in samples:sample_counts[sample.status]=sample_counts.get(sample.status,0)+1
+    alert_counts={}
+    for alert in alerts:alert_counts[alert.status]=alert_counts.get(alert.status,0)+1
+    average=round(sum(turnaround)/len(turnaround),2) if turnaround else None
+    return {"branch_id":branch_id,"as_of":NOW().isoformat(),
+        "orders":{"total":len(orders),"by_status":counts,"validated_average_turnaround_hours":average},
+        "samples":{"total":len(samples),"by_status":sample_counts},
+        "critical_alerts":{"total":len(alerts),"by_status":alert_counts,
+            "unacknowledged":sum(1 for x in alerts if x.status=="queued")}}
 
 
 @router.get("/pharmacy-lab/traceability")
