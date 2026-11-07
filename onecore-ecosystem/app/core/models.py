@@ -866,6 +866,7 @@ class CRMCampaign(Base):
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     message: Mapped[str] = mapped_column(Text)
     budget_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    budget_currency: Mapped[str] = mapped_column(String(3), default="KES")
     status: Mapped[str] = mapped_column(String(16), default="draft")
     prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
