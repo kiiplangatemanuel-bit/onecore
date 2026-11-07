@@ -195,7 +195,7 @@ def create_patient(payload:dict,m=Depends(active_membership),u:User=Depends(curr
         medical_record_number=mrn,encrypted_profile=encrypt(profile),created_by=u.id)
     db.add(row)
     try:db.flush()
-    except Exception:db.rollback();raise HTTPException(409,"Medical record number already exists")
+    except IntegrityError:db.rollback();raise HTTPException(409,"Medical record number already exists")
     roles=_roles(db,m,u,branch_id)
     if "healthcare_admin" not in roles:
         db.add(HealthcarePatientAccess(organization_id=m.organization_id,patient_id=row.id,user_id=u.id,
@@ -286,6 +286,7 @@ def list_access(patient_id:int,m=Depends(active_membership),u:User=Depends(curre
     p=_patient(db,patient_id,m);_require(db,m,u,"access.manage",p.branch_id)
     rows=db.query(HealthcarePatientAccess).filter_by(
         organization_id=m.organization_id,patient_id=p.id).order_by(HealthcarePatientAccess.id.desc()).all()
+    _audit(db,m,u,p,"access.grants.read");db.commit()
     return [{"id":x.id,"user_id":x.user_id,"access_level":x.access_level,"reason":x.reason,
         "expires_at":x.expires_at.isoformat() if x.expires_at else None,
         "revoked_at":x.revoked_at.isoformat() if x.revoked_at else None} for x in rows]
@@ -309,6 +310,9 @@ def record_consent(patient_id:int,payload:dict,m=Depends(active_membership),u:Us
     decision=payload.get("decision")
     if consent_type not in CONSENT_TYPES or decision not in {"granted","denied","withdrawn"}:
         raise HTTPException(422,"Valid consent_type and decision required")
+    evidence=str(payload.get("evidence_reference","")).strip()
+    if decision=="granted" and not evidence:
+        raise HTTPException(422,"Evidence reference is required for granted consent")
     expires=None
     if payload.get("expires_at"):
         try:
@@ -318,7 +322,7 @@ def record_consent(patient_id:int,payload:dict,m=Depends(active_membership),u:Us
     row=HealthcareConsent(organization_id=m.organization_id,patient_id=p.id,
         consent_type=consent_type,decision=decision,recorded_by=u.id,
         notes=str(payload.get("notes",""))[:500],
-        evidence_reference=str(payload.get("evidence_reference",""))[:180],expires_at=expires)
+        evidence_reference=evidence[:180],expires_at=expires)
     db.add(row);_audit(db,m,u,p,"consent.recorded",f"{consent_type}:{decision}");db.commit()
     return {"consent_id":row.id,"consent_type":consent_type,"decision":decision}
 
