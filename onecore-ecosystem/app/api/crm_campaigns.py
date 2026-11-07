@@ -31,6 +31,8 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
     rows=db.query(CRMCampaignRecipient).filter_by(organization_id=membership.organization_id,campaign_id=c.id).filter(
         CRMCampaignRecipient.status.in_(["prepared","failed"])).order_by(CRMCampaignRecipient.id).limit(batch_size).with_for_update().all()
     processed=accepted=failed=suppressed=0
+    # Claim recipients before releasing row locks so concurrent dispatch batches skip them.
+    for recipient in rows: recipient.status="sending"
     c.status="sending"; db.commit()
     for r in rows:
         processed+=1; consent=latest_consent(db,r,c); now=datetime.now(timezone.utc)
@@ -38,7 +40,7 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
             r.status="suppressed"; db.add(CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,
                 attempt_number=0,status="suppressed",error_message="Consent revoked or expired")); db.commit(); suppressed+=1; continue
         attempts=db.query(func.count(CRMCampaignDelivery.id)).filter_by(recipient_id=r.id).scalar() or 0
-        if attempts>=5: r.status="failed"; db.commit(); failed+=1; continue
+        if attempts>=5: r.status="exhausted"; db.commit(); failed+=1; continue
         token=secrets.token_urlsafe(32); digest=hashlib.sha256(token.encode()).hexdigest()
         d=CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,attempt_number=attempts+1,
             status="sending",unsubscribe_token_hash=digest); db.add(d); r.status="sending"; db.commit()
@@ -88,7 +90,7 @@ def campaign_report(campaign_id:int,membership=Depends(active_membership),db:Ses
     return {"campaign_id":c.id,"status":c.status,"recipient_count":sum(counts.values()),
         "statuses":counts,"attempt_count":attempts,"delivered":counts.get("delivered",0),
         "accepted":counts.get("sent",0)+counts.get("delivered",0),"failed":counts.get("failed",0),
-        "suppressed":counts.get("suppressed",0)}
+        "suppressed":counts.get("suppressed",0),"exhausted":counts.get("exhausted",0)}
 
 @router.get("/unsubscribe/{token}")
 @router.post("/unsubscribe/{token}")
