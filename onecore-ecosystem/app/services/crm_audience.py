@@ -33,8 +33,10 @@ def validate_segment_definition(definition):
             raise ValueError(f"Unsupported segment operator: {op}")
         if op == "in" and (not isinstance(value, list) or not 1 <= len(value) <= 100):
             raise ValueError("in operator requires an array of 1 to 100 values")
-        if op == "contains" and (not isinstance(value, str) or len(value) > 180):
-            raise ValueError("contains requires a short text value")
+        if isinstance(value, str) and len(value) > 500:
+            raise ValueError("Criterion text values cannot exceed 500 characters")
+        if op == "contains" and not isinstance(value, str):
+            raise ValueError("contains requires a text value")
         if op in {"eq", "neq", "gte", "lte"} and isinstance(value, (dict, list)):
             raise ValueError("Criterion values must be scalar")
     return definition
@@ -87,3 +89,12 @@ def render_template_text(text, contact):
             raise ValueError(f"Unsupported template variable: {key}")
         return values[key]
     return token.sub(replace, text or "")
+
+def validate_template_text(text):
+    import re
+    allowed = {"first_name", "full_name", "company", "email", "phone"}
+    token = re.compile(r"{{\\s*([a-z_]+)\\s*}}")
+    for match in token.finditer(text or ""):
+        if match.group(1) not in allowed:
+            raise ValueError(f"Unsupported template variable: {match.group(1)}")
+    return text
