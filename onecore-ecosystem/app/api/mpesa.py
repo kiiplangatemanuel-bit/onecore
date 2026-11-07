@@ -220,6 +220,10 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         raise HTTPException(502, intent.result_description)
     intent.merchant_request_id = str(response.get("MerchantRequestID") or "")[:100]
     response_checkout_id = str(response["CheckoutRequestID"])
+    if intent.status == "success" and intent.checkout_request_id:
+        return {"intent_id": intent.id, "status": "success",
+                "checkout_request_id": intent.checkout_request_id,
+                "message": "Payment was confirmed by the provider callback"}
     if intent.checkout_request_id and intent.checkout_request_id != response_checkout_id:
         intent.status = "exception"
         intent.result_description = "Daraja initiation response does not match the callback-bound checkout request"
@@ -450,8 +454,12 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
         db.commit()
         raise HTTPException(502, intent.result_description)
-    response_conversation = str(response.get("ConversationID") or "")
-    response_originator = str(response.get("OriginatorConversationID") or "")
+    response_conversation = str(response.get("ConversationID") or intent.conversation_id or "")
+    response_originator = str(response.get("OriginatorConversationID") or intent.originator_conversation_id or "")
+    if intent.status == "success" and intent.conversation_id:
+        return {"intent_id": intent.id, "status": "success",
+                "conversation_id": intent.conversation_id,
+                "message": "Refund was confirmed by the provider callback"}
     if not response_conversation or not response_originator:
         intent.status = "unknown"
         intent.result_description = "Daraja accepted B2C request without correlation IDs; reconcile before retrying"
