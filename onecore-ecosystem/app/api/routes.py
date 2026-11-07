@@ -17,7 +17,7 @@ from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
 from app.services.pos import money, validate_payment_total, canonical_request_hash
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
