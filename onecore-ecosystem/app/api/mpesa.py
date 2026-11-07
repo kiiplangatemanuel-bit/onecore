@@ -207,8 +207,10 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         raise HTTPException(502, intent.result_description)
     intent.merchant_request_id = str(response.get("MerchantRequestID") or "")[:100]
     intent.checkout_request_id = str(response["CheckoutRequestID"])[:100]
-    intent.status = "pending"
-    payment.status = "unsettled"
+    if intent.status == "initiating":
+        intent.status = "pending"
+    if intent.status != "success":
+        payment.status = "unsettled"
     _audit(db, membership.organization_id, user.id, "mpesa.stk.initiated",
            "pos_payment", payment.id, f"intent:{intent.id};amount:{amount};phone:{phone[-4:]}")
     db.commit()
@@ -224,7 +226,14 @@ def _stk_callback(db: Session, token: str, body: dict):
         return False
     callback = (body.get("Body") or {}).get("stkCallback") or {}
     checkout_id = str(callback.get("CheckoutRequestID") or "")
-    if checkout_id != str(intent.checkout_request_id or ""):
+    if not checkout_id:
+        return False
+    if not intent.checkout_request_id and intent.status in {"initiating", "unknown"}:
+        # The provider may accept the prompt while the initiation HTTP response is lost.
+        # The one-time callback URL token securely binds the first provider callback.
+        intent.checkout_request_id = checkout_id[:100]
+        intent.merchant_request_id = str(callback.get("MerchantRequestID") or "")[:100]
+    elif checkout_id != str(intent.checkout_request_id or ""):
         return False
     if intent.status == "success":
         return True
@@ -239,7 +248,11 @@ def _stk_callback(db: Session, token: str, body: dict):
         except Exception:
             return False
         callback_phone = metadata.get("PhoneNumber")
-        if callback_phone is None or normalize_phone(str(callback_phone)) != intent.phone_number:
+        try:
+            phone_matches = callback_phone is not None and normalize_phone(str(callback_phone)) == intent.phone_number
+        except ValueError:
+            phone_matches = False
+        if not phone_matches:
             intent.status = "exception"
             intent.result_description = "Callback phone number does not match the requested payer"
             db.commit()
@@ -403,10 +416,14 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         intent.result_description = "Daraja accepted B2C request without correlation IDs; reconcile before retrying"
         db.commit()
         raise HTTPException(502, intent.result_description)
-    intent.conversation_id = conversation_id[:100]
-    intent.originator_conversation_id = originator_id[:100]
-    intent.status = "pending"
-    refund.status = "pending"
+    if not intent.conversation_id:
+        intent.conversation_id = conversation_id[:100]
+    if not intent.originator_conversation_id:
+        intent.originator_conversation_id = originator_id[:100]
+    if intent.status == "initiating":
+        intent.status = "pending"
+    if intent.status != "success":
+        refund.status = "pending"
     _audit(db, membership.organization_id, user.id, "mpesa.b2c.initiated",
            "pos_refund", refund.id, f"intent:{intent.id};amount:{amount};phone:{phone[-4:]}")
     db.commit()
@@ -424,7 +441,13 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         return True
     result = body.get("Result") or body
     callback_conversation = str(result.get("ConversationID") or "")
-    if not intent.conversation_id or callback_conversation != intent.conversation_id:
+    if not callback_conversation:
+        return False
+    if not intent.conversation_id and intent.status == "initiating":
+        # Callback can arrive before Daraja's initiation response is committed.
+        intent.conversation_id = callback_conversation[:100]
+        intent.originator_conversation_id = str(result.get("OriginatorConversationID") or "")[:100]
+    elif not intent.conversation_id or callback_conversation != intent.conversation_id:
         return False
     code = result.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
