@@ -140,3 +140,15 @@ before enabling real campaigns.
   campaign state or send messages. Preparation remains a separate manager action.
 - Consent must still be rechecked immediately before any future provider dispatch;
   a preview is an estimate, not authorization to send.
+
+
+## Sales funnel and quote performance analytics
+
+- Added read-only `GET /api/v1/crm/analytics` for tenant- and branch-scoped
+  funnel metrics, open pipeline value, fixed-probability weighted open value,
+  won/lost values, closed-deal win rate and quote lifecycle counts.
+- Monetary values are grouped by currency and calculated with decimal arithmetic;
+  currencies are never combined.
+- Metrics are descriptive snapshots of recorded CRM data. The fixed stage
+  probabilities are transparent assumptions, not statistical predictions.
+- Requires CRM read permission and applies the active membership branch scope.

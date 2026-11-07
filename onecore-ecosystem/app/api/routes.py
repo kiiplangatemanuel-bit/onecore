@@ -5156,6 +5156,22 @@ def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depen
         "method":"Fixed stage probability assumptions; not a statistical prediction"}
 
 
+@router.get("/crm/analytics")
+def crm_pipeline_analytics(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    """Return tenant- and branch-scoped sales funnel and quote performance metrics."""
+    from app.services.crm import build_pipeline_analytics
+    require_permission(membership, "read")
+    leads_query = db.query(CRMLead).filter_by(organization_id=membership.organization_id)
+    quotes_query = db.query(CRMQuote).filter_by(organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return build_pipeline_analytics([], [])
+        leads_query = leads_query.filter(CRMLead.branch_id.in_(allowed))
+        quotes_query = quotes_query.filter(CRMQuote.branch_id.in_(allowed))
+    return build_pipeline_analytics(leads_query.all(), quotes_query.all())
+
+
 @router.post("/school/attendance", status_code=200)
 def record_school_attendance(payload: SchoolAttendanceIn,
     membership=Depends(active_membership), user: User=Depends(current_user),

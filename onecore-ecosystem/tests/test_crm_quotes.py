@@ -120,3 +120,31 @@ def test_hr_attendance_contracts_and_duration():
     assert "/api/v1/hr/attendance/clock-out" in paths
     assert "/api/v1/hr/my-attendance" in paths
     assert "/api/v1/hr/attendance" in paths
+
+
+def test_crm_pipeline_analytics_calculates_currency_safe_funnel_metrics():
+    from types import SimpleNamespace
+    from app.services.crm import build_pipeline_analytics
+
+    leads = [
+        SimpleNamespace(stage="proposal", estimated_value=Decimal("1000.00"), currency="KES"),
+        SimpleNamespace(stage="won", estimated_value=Decimal("500.00"), currency="KES"),
+        SimpleNamespace(stage="lost", estimated_value=Decimal("250.00"), currency="USD"),
+    ]
+    quotes = [
+        SimpleNamespace(currency="KES", status="accepted", total=Decimal("1160.00")),
+        SimpleNamespace(currency="KES", status="issued", total=Decimal("500.00")),
+    ]
+    result = build_pipeline_analytics(leads, quotes)
+    assert result["lead_summary"] == {
+        "total": 3, "open": 1, "won": 1, "lost": 1, "closed": 2,
+        "win_rate_percent": "50.00",
+    }
+    kes = next(row for row in result["pipeline_by_currency"] if row["currency"] == "KES")
+    assert kes["open_pipeline_value"] == "1000.00"
+    assert kes["weighted_open_value"] == "500.00"
+    assert next(row for row in result["quotes_by_currency"] if row["currency"] == "KES")["accepted_value"] == "1160.00"
+
+
+def test_crm_pipeline_analytics_route_is_registered():
+    assert "/api/v1/crm/analytics" in app.openapi()["paths"]
