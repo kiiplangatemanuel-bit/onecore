@@ -116,11 +116,12 @@ class StatementMatchIn(BaseModel):
     invoice_id: int | None = Field(default=None, gt=0)
     payment_id: int | None = Field(default=None, gt=0)
     credit_note_id: int | None = Field(default=None, gt=0)
+    settlement_id: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def one_target(self):
-        if sum(bool(x) for x in (self.invoice_id, self.payment_id, self.credit_note_id)) != 1:
-            raise ValueError("Choose exactly one invoice, payment or credit note")
+        if sum(bool(x) for x in (self.invoice_id, self.payment_id, self.credit_note_id, self.settlement_id)) != 1:
+            raise ValueError("Choose exactly one invoice, payment, credit note or settlement")
         return self
 
 
@@ -1063,7 +1064,8 @@ def get_supplier_statement(statement_id: int, membership=Depends(active_membersh
             "lines": [{"id": x.id, "line_number": x.line_number, "date": x.transaction_date.date().isoformat(),
                        "description": x.description, "reference": x.reference, "amount": str(x.amount),
                        "matched_invoice_id": x.matched_invoice_id, "matched_payment_id": x.matched_payment_id,
-                       "matched_credit_note_id": x.matched_credit_note_id}
+                       "matched_credit_note_id": x.matched_credit_note_id,
+                       "matched_settlement_id": x.matched_settlement_id}
                       for x in lines]}
 
 
@@ -1094,7 +1096,7 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
             ProcurementSupplierStatementLine.matched_invoice_id == payload.invoice_id,
             ProcurementSupplierStatementLine.id != line.id,
         ).first()
-        if (not target or Decimal(target.total) != abs(Decimal(line.amount))
+        if (not target or Decimal(target.subtotal + target.tax_total) != abs(Decimal(line.amount))
                 or Decimal(line.amount) <= 0
                 or target.issue_date.date() < statement.start_date.date()
                 or target.issue_date.date() > statement.end_date.date()
@@ -1120,7 +1122,7 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
                 or duplicate_target):
             raise HTTPException(422, "Payment supplier, period, sign or amount does not match the statement line")
         line.matched_payment_id = target.id
-    if payload.credit_note_id:
+    elif payload.credit_note_id:
         target = db.query(AccountingCreditNote).join(
             AccountingInvoice, AccountingInvoice.id == AccountingCreditNote.invoice_id
         ).filter(AccountingCreditNote.id == payload.credit_note_id,
@@ -1139,6 +1141,23 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
                 or duplicate_target):
             raise HTTPException(422, "Credit note supplier, period, sign or amount does not match the statement line")
         line.matched_credit_note_id = target.id
+    elif payload.settlement_id:
+        target = db.query(ProcurementSettlement).filter_by(
+            id=payload.settlement_id, organization_id=membership.organization_id,
+            supplier_id=statement.supplier_id, status="settled",
+        ).first()
+        duplicate_target = db.query(ProcurementSupplierStatementLine).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSupplierStatementLine.matched_settlement_id == payload.settlement_id,
+            ProcurementSupplierStatementLine.id != line.id,
+        ).first()
+        if (not target or Decimal(target.amount) != abs(Decimal(line.amount))
+                or Decimal(line.amount) >= 0
+                or target.payment_date.date() < statement.start_date.date()
+                or target.payment_date.date() > statement.end_date.date()
+                or duplicate_target):
+            raise HTTPException(422, "Settlement supplier, period, sign or amount does not match the statement line")
+        line.matched_settlement_id = target.id
     line.matched_by = user.id
     line.matched_at = datetime.now(timezone.utc)
     db.commit()
@@ -1161,7 +1180,8 @@ def reconcile_supplier_statement(statement_id: int, membership=Depends(active_me
     lines = db.query(ProcurementSupplierStatementLine).filter_by(
         statement_id=row.id, organization_id=membership.organization_id
     ).all()
-    unmatched = [x.id for x in lines if not x.matched_invoice_id and not x.matched_payment_id and not x.matched_credit_note_id]
+    unmatched = [x.id for x in lines if not x.matched_invoice_id and not x.matched_payment_id
+                 and not x.matched_credit_note_id and not x.matched_settlement_id]
     calculated = Decimal(row.opening_balance) + sum((Decimal(x.amount) for x in lines), Decimal("0.00"))
     if unmatched:
         raise HTTPException(409, {"message": "All supplier statement lines must be matched", "unmatched_line_ids": unmatched})
