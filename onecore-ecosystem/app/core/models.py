@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, date
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, Date, ForeignKey, JSON, Text, Index, Numeric
+from sqlalchemy import String, Boolean, DateTime, Date, ForeignKey, JSON, Text, Index, Numeric, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
