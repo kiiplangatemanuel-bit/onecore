@@ -198,9 +198,11 @@ def create_patient(payload:dict,m=Depends(active_membership),u:User=Depends(curr
 
 
 @router.get("/patients")
-def list_patients(q:str="",limit:int=Query(100,ge=1,le=500),m=Depends(active_membership),
+def list_patients(q:str="",reason:str="",limit:int=Query(100,ge=1,le=500),m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
-    _require(db,m,u,"patient.read",allow_unscoped=True)
+    _,list_roles=_require(db,m,u,"patient.read",allow_unscoped=True)
+    if "clinical_auditor" in list_roles and not reason.strip():
+        raise HTTPException(422,"Audit reason required for patient directory access")
     query=db.query(HealthcarePatient).filter_by(organization_id=m.organization_id)
     allowed=(m.branch_scope or "").strip()
     if allowed!="*":
@@ -209,12 +211,14 @@ def list_patients(q:str="",limit:int=Query(100,ge=1,le=500),m=Depends(active_mem
     rows=query.order_by(HealthcarePatient.id.desc()).limit(limit).all()
     out=[]
     for p in rows:
-        emergency,_=_require(db,m,u,"patient.read",p.branch_id,p.id,True)
+        emergency,patient_roles=_require(db,m,u,"patient.read",p.branch_id,p.id,True)
+        if "clinical_auditor" in patient_roles and not reason.strip():
+            raise HTTPException(422,"Audit reason required for patient directory access")
         profile=decrypt(p.encrypted_profile)
         if q and q.casefold() not in (p.medical_record_number+" "+json.dumps(profile,ensure_ascii=False)).casefold():continue
         out.append({"id":p.id,"medical_record_number":p.medical_record_number,"status":p.status,
             "branch_id":p.branch_id,"profile":profile})
-        _audit(db,m,u,p,"patient.listed",emergency=emergency)
+        _audit(db,m,u,p,"patient.listed",reason,emergency)
     if out:db.commit()
     return out
 
