@@ -258,7 +258,7 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
     p=_patient(db,patient_id,m);_require(db,m,u,"access.manage",p.branch_id)
     uid=int(payload.get("user_id",0));level=payload.get("access_level","read")
     reason=str(payload.get("reason","")).strip()
-    if uid<=0 or level not in {"read","write"} or len(reason)<5:raise HTTPException(422,"Valid user_id, access_level and reason required")
+    if uid<=0 or level not in {"read","write"} or not 5<=len(reason)<=500:raise HTTPException(422,"Valid user_id, access_level and a 5–500 character reason are required")
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=uid,is_active=True).first()
     if not member:raise HTTPException(404,"Active organization member not found")
     allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
@@ -342,7 +342,7 @@ def open_break_glass(patient_id:int,payload:dict,m=Depends(active_membership),u:
     if not roles.intersection({"healthcare_admin","clinician","nurse"}):
         raise HTTPException(403,"Only clinical staff may request emergency access")
     reason=str(payload.get("justification","")).strip()
-    if len(reason)<15:raise HTTPException(422,"A clinical emergency justification of at least 15 characters is required")
+    if not 15<=len(reason)<=1000:raise HTTPException(422,"A clinical emergency justification of 15–1000 characters is required")
     active=_active_breakglass(db,m.organization_id,u.id,p.id)
     if active:return {"id":active.id,"expires_at":active.expires_at.isoformat(),"already_active":True}
     now=datetime.now(timezone.utc)
