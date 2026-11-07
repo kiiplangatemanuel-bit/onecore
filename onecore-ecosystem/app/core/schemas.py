@@ -778,6 +778,12 @@ class HealthcarePatientIn(BaseModel):
             raise ValueError("Patient name is required")
         return value
 
+    @model_validator(mode="after")
+    def valid_date_of_birth(self):
+        if self.date_of_birth and self.date_of_birth > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return self
+
 
 class HealthcareAppointmentIn(BaseModel):
     patient_id: int = Field(gt=0)
