@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingYearEndCloseIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SaccoLoanGuarantor, SaccoLoanCollateral, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingYearEndCloseIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, SchoolBulkPromotionIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn, SaccoLoanGuarantorIn, SaccoLoanCollateralIn, SaccoLoanGuarantorReviewIn, SaccoLoanCollateralReviewIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -6098,3 +6098,181 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
         "publication_basis": "Published assessments only",
         **report, "attendance": attendance,
     }
+
+
+
+@router.post("/sacco/loans/{loan_id}/guarantors", status_code=201)
+def add_sacco_loan_guarantor(loan_id: int, payload: SaccoLoanGuarantorIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id, status="active"
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Active loan not found")
+    member = db.query(SaccoMember).filter_by(
+        id=payload.member_id, organization_id=membership.organization_id,
+        status="active", kyc_status="verified"
+    ).first()
+    if not member or not can_access_branch(membership, member.branch_id):
+        raise HTTPException(404, "Verified active guarantor member not found")
+    if member.id == loan.member_id:
+        raise HTTPException(422, "A borrower cannot guarantee their own loan")
+    if member.branch_id != loan.branch_id:
+        raise HTTPException(422, "Guarantor and loan must belong to the same branch")
+    existing = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id, member_id=member.id
+    ).first()
+    if existing:
+        raise HTTPException(409, "This member is already registered as a guarantor for the loan")
+    row = SaccoLoanGuarantor(
+        organization_id=membership.organization_id, loan_id=loan.id, member_id=member.id,
+        guaranteed_amount=payload.guaranteed_amount,
+        consent_reference=payload.consent_reference.strip(),
+        status="pending", created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Guarantor registration conflicts with an existing record")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "sacco.loan.guarantor.created",
+          "sacco_loan_guarantor", row.id, f"loan:{loan.id};member:{member.id}")
+    return {"id": row.id, "loan_id": loan.id, "member_id": row.member_id,
+            "guaranteed_amount": str(row.guaranteed_amount), "status": row.status}
+
+
+@router.get("/sacco/loans/{loan_id}/guarantors")
+def list_sacco_loan_guarantors(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Loan not found")
+    rows = db.query(SaccoLoanGuarantor, SaccoMember).join(
+        SaccoMember, SaccoMember.id == SaccoLoanGuarantor.member_id
+    ).filter(SaccoLoanGuarantor.organization_id == membership.organization_id,
+             SaccoLoanGuarantor.loan_id == loan.id).order_by(SaccoLoanGuarantor.id).all()
+    return [{"id": row.id, "member_id": member.id, "member_number": member.member_number,
+             "full_name": member.full_name, "guaranteed_amount": str(row.guaranteed_amount),
+             "consent_reference": row.consent_reference, "status": row.status,
+             "review_note": row.review_note, "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None}
+            for row, member in rows]
+
+
+@router.post("/sacco/loans/{loan_id}/guarantors/{guarantor_id}/review")
+def review_sacco_loan_guarantor(loan_id: int, guarantor_id: int,
+    payload: SaccoLoanGuarantorReviewIn, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Loan not found")
+    row = db.query(SaccoLoanGuarantor).filter_by(
+        id=guarantor_id, organization_id=membership.organization_id, loan_id=loan.id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Guarantor record not found")
+    if row.created_by == user.id:
+        raise HTTPException(403, "A guarantor registrar cannot review their own record")
+    allowed = {"pending": {"approved", "rejected"}, "approved": {"released"}}
+    if payload.decision not in allowed.get(row.status, set()):
+        raise HTTPException(409, "Guarantor record cannot make that status transition")
+    row.status = payload.decision
+    row.review_note = payload.note.strip()
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "sacco.loan.guarantor.reviewed",
+          "sacco_loan_guarantor", row.id, f"{row.status}:{row.review_note}")
+    return {"id": row.id, "status": row.status, "reviewed_at": row.reviewed_at.isoformat()}
+
+
+@router.post("/sacco/loans/{loan_id}/collateral", status_code=201)
+def add_sacco_loan_collateral(loan_id: int, payload: SaccoLoanCollateralIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id, status="active"
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Active loan not found")
+    row = SaccoLoanCollateral(
+        organization_id=membership.organization_id, loan_id=loan.id,
+        collateral_type=payload.collateral_type.strip().lower(),
+        description=payload.description.strip(), owner_name=payload.owner_name.strip(),
+        identifier=payload.identifier.strip(), estimated_value=payload.estimated_value,
+        status="pending", created_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "sacco.loan.collateral.created",
+          "sacco_loan_collateral", row.id, f"loan:{loan.id};type:{row.collateral_type}")
+    return {"id": row.id, "loan_id": loan.id, "collateral_type": row.collateral_type,
+            "estimated_value": str(row.estimated_value), "status": row.status}
+
+
+@router.get("/sacco/loans/{loan_id}/collateral")
+def list_sacco_loan_collateral(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Loan not found")
+    rows = db.query(SaccoLoanCollateral).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanCollateral.id).all()
+    return [{"id": x.id, "collateral_type": x.collateral_type, "description": x.description,
+             "owner_name": x.owner_name, "identifier": x.identifier,
+             "estimated_value": str(x.estimated_value),
+             "assessed_value": str(x.assessed_value) if x.assessed_value is not None else None,
+             "valuation_reference": x.valuation_reference,
+             "valuation_date": x.valuation_date.isoformat() if x.valuation_date else None,
+             "status": x.status, "review_note": x.review_note}
+            for x in rows]
+
+
+@router.post("/sacco/loans/{loan_id}/collateral/{collateral_id}/review")
+def review_sacco_loan_collateral(loan_id: int, collateral_id: int,
+    payload: SaccoLoanCollateralReviewIn, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).first()
+    if not loan or not can_access_branch(membership, loan.branch_id):
+        raise HTTPException(404, "Loan not found")
+    row = db.query(SaccoLoanCollateral).filter_by(
+        id=collateral_id, organization_id=membership.organization_id, loan_id=loan.id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Collateral record not found")
+    if row.created_by == user.id:
+        raise HTTPException(403, "A collateral registrar cannot review their own record")
+    allowed = {"pending": {"accepted", "rejected"}, "accepted": {"released"}}
+    if payload.decision not in allowed.get(row.status, set()):
+        raise HTTPException(409, "Collateral record cannot make that status transition")
+    if payload.decision == "accepted":
+        row.assessed_value = payload.assessed_value
+        row.valuation_reference = payload.valuation_reference.strip()
+        row.valuation_date = payload.valuation_date
+    row.status = payload.decision
+    row.review_note = payload.note.strip()
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "sacco.loan.collateral.reviewed",
+          "sacco_loan_collateral", row.id, f"{row.status}:{row.review_note}")
+    return {"id": row.id, "status": row.status, "reviewed_at": row.reviewed_at.isoformat()}
+
