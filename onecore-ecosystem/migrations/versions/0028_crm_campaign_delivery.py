@@ -21,7 +21,7 @@ def upgrade():
         sa.Column("created_at",sa.DateTime(timezone=True),nullable=False))
     op.create_index("ix_crm_campaign_deliveries_org","crm_campaign_deliveries",["organization_id"])
     op.create_index("ix_crm_campaign_deliveries_recipient","crm_campaign_deliveries",["recipient_id"])
-    op.create_index("ix_crm_campaign_delivery_provider_id","crm_campaign_deliveries",["provider_message_id"],unique=True)
+    op.create_index("ix_crm_campaign_delivery_provider_id","crm_campaign_deliveries",["provider_message_id"])
     op.create_index("ix_crm_campaign_delivery_unsubscribe","crm_campaign_deliveries",["unsubscribe_token_hash"],unique=True)
 
 def downgrade():
