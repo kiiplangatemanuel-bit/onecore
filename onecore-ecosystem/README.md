@@ -21,6 +21,8 @@ docker compose up --build
 ```
 API: http://localhost:8000  
 Interactive API docs: http://localhost:8000/docs  
+CRM automation: http://localhost:8000/crm/automation  
+Healthcare privacy workspace: http://localhost:8000/healthcare  
 Health: http://localhost:8000/health  
 Public site: http://localhost:8000/
 
@@ -53,6 +55,13 @@ The application starts with adapters disabled. No real payment, tax, health, mes
 - `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)
 - `/api/v1/operations` — audit events and operational overview
 - `/health` — liveness/readiness information
+
+## CRM campaign automation and healthcare privacy
+
+- CRM supports versioned email/SMS/WhatsApp templates, nested audience segmentation, campaign schedules (once/daily/weekly), recipient-level rendered personalization and consent-aware scheduled dispatch.
+- Docker Compose runs the independent `crm-scheduler` worker beside the API. For non-Docker deployments run `python -m app.workers.crm_scheduler` from `onecore-ecosystem`.
+- Healthcare patient identity and clinical encounter content are Fernet-encrypted at application level. Configure a separately managed `HEALTHCARE_ENCRYPTION_KEY`; see `docs/HEALTHCARE_PRIVACY.md` for roles, patient grants, consent, emergency access and audit controls.
+- Production use still requires key management/rotation, TLS, MFA, retention governance, security review, provider UAT and clinical/legal approval.
 
 ## Architecture and extension points
 See `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, `docs/MODULE_DELIVERY.md`, and `docs/SPEC_TRACEABILITY.md`.
