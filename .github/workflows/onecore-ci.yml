@@ -34,4 +34,5 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests
       - name: Run tests
-        run: python -m pytest -q onecore-ecosystem/tests
+        working-directory: onecore-ecosystem
+        run: python -m pytest -q tests
