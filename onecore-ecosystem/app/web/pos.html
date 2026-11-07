@@ -25,7 +25,7 @@
 <h2>POS supervisor operations</h2>
 <p class="muted">Trusted terminal approvals, offline conflict queue, synchronization health and multi-store totals. Requires supervisor permissions for changes.</p>
 <div class="row"><button type="button" id="refreshAdvanced" disabled>Refresh operations</button><span id="advancedUpdated" class="muted" aria-live="polite"></span></div>
-<h3>Registered terminals</h3><pre id="advancedDevices" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view terminals.</pre>
+<h3>Registered terminals</h3><div id="advancedDevices" style="display:grid;gap:8px">Sign in to view terminals.</div>
 <h3>Offline synchronization health</h3><pre id="advancedSync" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view sync status.</pre>
 <h3>Open offline conflicts</h3><pre id="advancedConflicts" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view conflicts.</pre>
 <form id="conflictResolutionForm">
@@ -123,7 +123,16 @@ async function loadAdvanced(){
   const [devices,conflicts,sync,report]=await Promise.all([
    api('/pos/advanced/devices'),api('/pos/advanced/conflicts'),api('/pos/advanced/sync-dashboard'),api('/pos/advanced/operations-report')
   ]);
-  $('advancedDevices').textContent=devices.length?devices.map(d=>'#'+d.id+' · '+d.name+' · '+d.branch_id+' · '+d.status+(d.last_seen_at?' · last seen '+d.last_seen_at:'')).join('\\n'):'No terminals registered.';
+  const deviceBox=$('advancedDevices');deviceBox.replaceChildren();
+  if(!devices.length){deviceBox.textContent='No terminals registered.';}
+  devices.forEach(d=>{
+   const row=document.createElement('div');row.className='row';
+   const label=document.createElement('span');label.textContent='#'+d.id+' · '+d.name+' · '+d.branch_id+' · '+d.status+(d.last_seen_at?' · last seen '+d.last_seen_at:'');row.append(label);
+   const action=(name,labelText)=>{const button=document.createElement('button');button.type='button';button.dataset.deviceId=d.id;button.dataset.action=name;button.textContent=labelText;row.append(button);};
+   if(d.status==='pending'){action('approve','Approve');action('reject','Reject');}
+   if(d.status==='trusted')action('revoke','Revoke');
+   deviceBox.append(row);
+  });
   $('advancedConflicts').textContent=conflicts.length?conflicts.map(x=>'#'+x.id+' · '+x.conflict_type+' · '+x.client_transaction_id+' · '+x.status+' · branch '+x.branch_id).join('\\n'):'No open conflicts.';
   $('advancedSync').textContent=JSON.stringify(sync.counts,null,2)+'\\nLast event: '+(sync.last_event_at||'none')+'\\n'+(sync.events||[]).slice(0,20).map(x=>x.state+' · '+x.transaction_id+' · attempt '+x.attempt+' · '+x.error_message).join('\\n');
   $('advancedReport').textContent=JSON.stringify(report,null,2);
@@ -133,7 +142,15 @@ async function loadAdvanced(){
  finally{$('refreshAdvanced').disabled=false;}
 }
 $('refreshAdvanced').addEventListener('click',loadAdvanced);
-$('advancedDevices').addEventListener('click',async()=>{});
+$('advancedDevices').addEventListener('click',async e=>{
+ const button=e.target.closest('button[data-action]');if(!button)return;
+ const id=Number(button.dataset.deviceId),action=button.dataset.action;
+ try{
+  if(action==='revoke')await api('/pos/advanced/devices/'+id+'/revoke',{method:'POST'});
+  else await api('/pos/advanced/devices/'+id+'/decision',{method:'POST',body:JSON.stringify({decision:action})});
+  status('Terminal #'+id+' updated: '+action+'.');await loadAdvanced();
+ }catch(err){status('Terminal action failed: '+err.message);}
+});
 $('conflictResolutionForm').addEventListener('submit',async e=>{
  e.preventDefault();const data=Object.fromEntries(new FormData(e.currentTarget));const id=Number(data.conflict_id);delete data.conflict_id;
  try{await api('/pos/advanced/conflicts/'+id+'/resolve',{method:'POST',body:JSON.stringify(data)});status('Conflict #'+id+' resolved.');e.currentTarget.reset();await loadAdvanced();}
