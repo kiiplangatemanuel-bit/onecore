@@ -1255,7 +1255,7 @@ class CRMCommunicationTemplate(Base):
     __tablename__ = "crm_communication_templates"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
-    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id", name="fk_crm_template_branch"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(180))
     version: Mapped[int] = mapped_column(default=1)
     channel: Mapped[str] = mapped_column(String(16))
@@ -1273,7 +1273,7 @@ class CRMAudienceSegment(Base):
     __tablename__ = "crm_audience_segments"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
-    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id", name="fk_crm_segment_branch"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(180))
     description: Mapped[str] = mapped_column(String(500), default="")
     rules: Mapped[dict] = mapped_column(JSON, default=dict)
