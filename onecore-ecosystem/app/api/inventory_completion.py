@@ -154,6 +154,10 @@ class ReorderRuleIn(BaseModel):
         return self
 
 
+class CostPriceIn(BaseModel):
+    cost_price: Decimal = Field(ge=0, le=Decimal("99999999999999.9999"))
+
+
 class BatchStatusIn(BaseModel):
     status: str = Field(pattern=r"^(damaged|expired|quarantined)$")
     reason: str = Field(min_length=3, max_length=300)
@@ -664,6 +668,19 @@ def list_price_lists(branch_id:str|None=None,membership=Depends(active_membershi
         q=q.filter((InventoryPriceList.branch_id==None)|(InventoryPriceList.branch_id.in_(allowed))) if allowed else q.filter(InventoryPriceList.branch_id==None)
     return [{"id":p.id,"name":p.name,"currency":p.currency,"branch_id":p.branch_id,"starts_at":p.starts_at.isoformat() if p.starts_at else None,
         "ends_at":p.ends_at.isoformat() if p.ends_at else None} for p in q.all()]
+
+
+@router.patch("/products/{product_id}/cost-price")
+def update_product_cost_price(product_id:int,payload:CostPriceIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    product=db.query(InventoryProduct).filter_by(id=product_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
+    if not product: raise HTTPException(404,"Product not found")
+    previous=dec(product.cost_price)
+    product.cost_price=payload.cost_price.quantize(Decimal("0.0001"),rounding=ROUND_HALF_UP)
+    audit(db,user,membership.organization_id,"inventory.product.cost_price.updated","inventory_product",product.id,
+        f"previous:{previous};new:{product.cost_price}")
+    db.commit()
+    return {"id":product.id,"sku":product.sku,"cost_price":str(product.cost_price)}
 
 
 @router.get("/warehouses/{warehouse_id}/stock")
