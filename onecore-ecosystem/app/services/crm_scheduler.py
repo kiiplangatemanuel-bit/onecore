@@ -28,12 +28,15 @@ def render_message(template,contact,campaign_name):
     return re.sub(r"{{\s*([a-z_]+)\s*}}",replace,template or "")
 
 
-def _next_occurrence(value,recurrence,now):
+def _next_occurrence(value,recurrence,now,tz_name):
     if recurrence=="once":return None
+    from zoneinfo import ZoneInfo
+    zone=ZoneInfo(tz_name)
     step=timedelta(days=1 if recurrence=="daily" else 7)
-    nxt=value+step
-    while nxt<=now:nxt+=step
-    return nxt
+    nxt=value.astimezone(zone)+step
+    local_now=now.astimezone(zone)
+    while nxt<=local_now:nxt+=step
+    return nxt.astimezone(timezone.utc)
 
 
 def _execute_schedule(db,schedule_id,now):
@@ -108,7 +111,7 @@ def _execute_schedule(db,schedule_id,now):
     schedule.last_run_at=now
     schedule.last_run_campaign_id=child.id
     schedule.run_count=run_number
-    next_run=_next_occurrence(schedule.next_run_at or schedule.scheduled_at,schedule.recurrence,now)
+    next_run=_next_occurrence(schedule.next_run_at or schedule.scheduled_at,schedule.recurrence,now,schedule.timezone)
     if next_run is None:
         schedule.status="completed"
         schedule.next_run_at=None
