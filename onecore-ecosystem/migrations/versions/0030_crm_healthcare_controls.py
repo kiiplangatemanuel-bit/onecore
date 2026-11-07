@@ -24,8 +24,8 @@ def upgrade():
 def downgrade():
     op.drop_column("crm_campaigns","subject")
     op.drop_index("ix_healthcare_audit_patient",table_name="healthcare_access_audits")
-    for t in ["healthcare_access_audits","healthcare_consents","healthcare_patient_access","healthcare_encounters"]: op.drop_table(t)
     op.drop_index("ix_health_access_patient_user",table_name="healthcare_patient_access")
+    for t in ["healthcare_access_audits","healthcare_consents","healthcare_patient_access","healthcare_encounters"]: op.drop_table(t)
     op.drop_index("ix_health_patient_org_mrn",table_name="healthcare_patients"); op.drop_table("healthcare_patients")
     op.drop_index("ix_crm_campaign_schedules_scheduled_at",table_name="crm_campaign_schedules"); op.drop_table("crm_campaign_schedules")
     op.drop_index("ix_crm_segment_org_name",table_name="crm_audience_segments"); op.drop_table("crm_audience_segments")
