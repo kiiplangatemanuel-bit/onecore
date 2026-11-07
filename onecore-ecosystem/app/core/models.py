@@ -1081,3 +1081,38 @@ class ProcurementSupplierReturnLine(Base):
     receipt_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_goods_receipt_lines.id"), index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AccountingRefund(Base):
+    """Cash refund against a posted credit note; immutable after posting."""
+    __tablename__ = "accounting_refunds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    credit_note_id: Mapped[int] = mapped_column(ForeignKey("accounting_credit_notes.id"), index=True)
+    payment_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    refund_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_refund_org_key", "organization_id", "idempotency_key", unique=True),
+    )
+
+
+class AccountingProcurementLink(Base):
+    """Idempotent bridge from a three-way-matched procurement bill to the AP ledger."""
+    __tablename__ = "accounting_procurement_links"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    procurement_invoice_id: Mapped[int] = mapped_column(ForeignKey("procurement_supplier_invoices.id"), index=True)
+    accounting_invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_procurement_link_org_source", "organization_id", "procurement_invoice_id", unique=True),
+        Index("ix_accounting_procurement_link_org_ledger", "organization_id", "accounting_invoice_id", unique=True),
+    )
