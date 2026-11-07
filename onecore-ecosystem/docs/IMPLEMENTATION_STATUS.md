@@ -848,3 +848,51 @@ Rebased on the current CRM automation and privacy-hardening base. Adds configura
 Added migration `0033_procurement_workflows`, supplier settlement and allocation records, Daraja B2C supplier disbursement initiation/callback correlation, maker-verified AP settlement journals, remittance advice, supplier return-to-AP credit-note posting, time-bounded delegated PO approvals, supplier portal access tokens and RFQ/PO/invoice/delivery workflows, supplier statement matching/reconciliation, invoice discrepancy tracking and procurement/AP/bank reconciliation diagnostics. Added route/schema/migration contract tests.
 
 Verification is pending latest GitHub Actions results. Production M-Pesa B2C credentials/entitlement, public HTTPS callback configuration, bank API integration, PostgreSQL race testing, provider UAT and end-to-end finance acceptance remain release gates. Bank-transfer instructions require independent manager verification; no direct bank API initiation is claimed. Supplier delivery updates are supplier-reported rather than carrier tracking. Discrepancy resolution remains auditable and manager-controlled; no silent invoice mutation is performed.
+
+
+## Hospital and Healthcare operations increment (November 2026)
+
+Implemented on `feature/healthcare-hospital-operations` with migration
+`0033_healthcare_hospital_operations`:
+
+- Ward, room and bed inventory with branch ownership, bed status and occupancy dashboard.
+- Inpatient admission, discharge and bed transfer with patient/bed row locks,
+  one-active-admission guard, idempotency handling and append-only patient movement events.
+- Encrypted clinical observations with bounded vital-sign inputs; nursing care plans
+  and tasks; clinician doctor orders and treatment plans.
+- Patient invoices with decimal line calculations and capped, idempotent payment
+  allocation; insurance eligibility evidence, preauthorization decisions, claims and
+  capped settlement records.
+- Durable pharmacy/laboratory integration job queue and authorized result capture.
+- Emergency triage and visit state transitions; theatre inventory and conflict-checked
+  procedure scheduling/completion.
+- Encrypted clinical document storage with MIME allowlist, size limit and SHA-256
+  content verification.
+- Privacy/break-glass monitoring, branch-level retention policy configuration and
+  recorded recovery-drill evidence.
+- Hospital dashboard, ward/admission/bed APIs, API workspace and regression tests.
+- Healthcare role permissions expanded for ward clerks, billing/insurance officers,
+  pharmacy, lab and theatre workflows.
+
+Security and verification boundary:
+- Patient-linked payloads are encrypted with the existing healthcare Fernet key;
+  PHI reads/writes continue to require branch scope, patient access grants and
+  treatment consent where the action constitutes care. Existing emergency
+  break-glass sessions can authorize emergency clinical write access and are audited.
+- Bed/admission transitions use database row locks. PostgreSQL concurrency/load
+  testing remains a production acceptance requirement.
+- Pharmacy/lab requests are queued for an external adapter. This code does not
+  claim a live pharmacy, laboratory, insurer eligibility API, payer preauthorization
+  or settlement connection. Provider credentials, adapters, callbacks and UAT remain.
+- Insurance eligibility is recorded as verified/manual evidence; no insurer network
+  lookup is fabricated. Settlement records reconcile recorded claim values only.
+- Clinical document bytes are encrypted in the relational store. External object
+  storage, malware scanning, DICOM viewer/interoperability and retention-based
+  purge scheduling are not included.
+- Retention policy is configured and audited; no automated deletion is run. The
+  recovery endpoint records operator-performed backup restore drills; it does not
+  itself create backups or execute disaster recovery.
+- This increment is not a HIPAA, ISO 27001, Kenya ODPC or health-sector compliance
+  certification. Legal retention periods, clinical governance, privacy review,
+  encryption key custody/rotation, MFA, penetration testing, backup/PITR restoration,
+  disaster-recovery drills and clinical pilot acceptance remain deployment gates.
