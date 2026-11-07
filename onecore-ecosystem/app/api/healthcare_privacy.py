@@ -262,6 +262,8 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=uid,is_active=True).first()
     if not member:raise HTTPException(404,"Active organization member not found")
     allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
+    if p.branch_id is None and "*" not in allowed:
+        raise HTTPException(403,"Organization-wide patient access requires an organization-wide member")
     if p.branch_id and "*" not in allowed and p.branch_id not in allowed:
         raise HTTPException(403,"Target user is outside the patient branch")
     expires=None
@@ -373,6 +375,8 @@ def create_appointment(patient_id:int,payload:dict,m=Depends(active_membership),
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=provider_id,is_active=True).first()
     if not member:raise HTTPException(404,"Active provider membership not found")
     allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
+    if p.branch_id is None and "*" not in allowed:
+        raise HTTPException(403,"Organization-wide appointments require an organization-wide provider")
     if p.branch_id and "*" not in allowed and p.branch_id not in allowed:
         raise HTTPException(403,"Provider is outside the patient branch")
     provider_user=db.query(User).filter_by(id=provider_id,is_active=True).first()
