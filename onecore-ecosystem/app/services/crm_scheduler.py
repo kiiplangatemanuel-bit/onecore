@@ -105,8 +105,12 @@ def _execute_schedule(db,schedule_id,now):
     # Dispatch through the same permission, consent, retry, callback and provider path
     # used by a manager-triggered batch. Each recipient has a stable idempotency key.
     if child.status!="sent":
-        for _ in range(50):
-            result=dispatch_campaign(child.id,batch_size=500,membership=membership,user=user,db=db)
+        # Small bounded batches keep each lease-renewal interval below the ten-minute
+        # recovery lease even when a provider responds slowly.
+        for _ in range(1000):
+            schedule.lease_until=datetime.now(timezone.utc)+timedelta(minutes=10)
+            db.commit()
+            result=dispatch_campaign(child.id,batch_size=25,membership=membership,user=user,db=db)
             if result.get("remaining",0)<=0 or result.get("processed",0)<=0:
                 break
     db.refresh(child)
