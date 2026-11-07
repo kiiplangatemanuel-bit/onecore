@@ -178,7 +178,7 @@ def _money(value):
         amount = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         raise HTTPException(422, "A valid monetary amount is required")
-    if not amount.is_finite() or amount <= 0 or amount.quantize(Decimal("0.01")) != amount:
+    if not amount.is_finite() or amount <= 0 or amount > Decimal("9999999999999999.99") or amount.quantize(Decimal("0.01")) != amount:
         raise HTTPException(422, "Amount must be positive with at most two decimal places")
     return amount
 
@@ -300,8 +300,8 @@ def list_admissions(branch_id: str, status: str="admitted", limit: int=Query(100
     result=[]
     for row in rows:
         patient=_patient(db,row.patient_id,m)
-        _require(db,m,u,"patient.read",patient.branch_id,patient.id,True)
-        _audit(db,m,u,patient,"admission.listed")
+        emergency,_ = _require(db,m,u,"patient.read",patient.branch_id,patient.id,True)
+        _audit(db,m,u,patient,"admission.listed","",emergency)
         result.append(_view(row))
     if result: db.commit()
     return result
@@ -482,7 +482,10 @@ def create_nursing_task(patient_id: int, payload: dict, m=Depends(active_members
     patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.write", write=True)
     _need(db, m, u, "nursing.manage", patient.branch_id)
     due = payload.get("due_at")
-    if not due: raise HTTPException(422, "due_at is required")
+    try:
+        due_dt=datetime.fromisoformat(str(due).replace("Z","+00:00"))
+        if due_dt.tzinfo is None or due_dt.utcoffset() is None: raise ValueError()
+    except Exception: raise HTTPException(422,"due_at must be a timezone-aware ISO timestamp")
     row = _create(db, m, u, "nursing_task", {"task": _required_text(payload, "task", 1000),
         "due_at": due, "assigned_to": payload.get("assigned_to"), "completed_at": None,
         "completion_note": ""}, patient.branch_id, patient.id, status="pending",
@@ -510,6 +513,8 @@ def create_doctor_order(patient_id: int, payload: dict, m=Depends(active_members
     order_type = payload.get("order_type")
     if order_type not in {"medication", "laboratory", "imaging", "procedure", "nursing", "diet", "other"}:
         raise HTTPException(422, "Unsupported doctor order type")
+    if payload.get("priority","routine") not in {"routine","urgent","stat"}:
+        raise HTTPException(422,"Priority must be routine, urgent or stat")
     row = _create(db, m, u, "doctor_order", {"order_type": order_type,
         "description": _required_text(payload, "description", 2000), "instructions": str(payload.get("instructions", ""))[:4000],
         "ordered_by": u.id, "ordered_at": NOW().isoformat(), "priority": payload.get("priority", "routine")},
@@ -784,7 +789,7 @@ def emergency_triage(patient_id: int, payload: dict, m=Depends(active_membership
     patient, emergency, _ = _patient_access(db,m,u,patient_id,"patient.read",write=False)
     _need(db,m,u,"emergency.manage",patient.branch_id)
     acuity=payload.get("acuity")
-    if acuity not in {1,2,3,4,5}: raise HTTPException(422,"Acuity must be 1 (highest) to 5 (lowest)")
+    if type(acuity) is not int or acuity not in {1,2,3,4,5}: raise HTTPException(422,"Acuity must be 1 (highest) to 5 (lowest)")
     row=_create(db,m,u,"emergency_visit",{"arrived_at":NOW().isoformat(),"acuity":acuity,
         "chief_complaint":_required_text(payload,"chief_complaint",1000),
         "triage_observations":payload.get("observations",{}),"triaged_by":u.id},
@@ -811,8 +816,11 @@ def update_emergency(visit_id: int, payload: dict, m=Depends(active_membership),
 @router.post("/theatres", status_code=201)
 def create_theatre(payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     branch=payload.get("branch_id");_need(db,m,u,"theatre.manage",branch)
+    try: capacity=int(payload.get("capacity",1))
+    except (TypeError,ValueError): raise HTTPException(422,"Theatre capacity must be a positive integer")
+    if capacity<1 or capacity>20: raise HTTPException(422,"Theatre capacity must be between 1 and 20")
     row=_create(db,m,u,"theatre",{"name":_required_text(payload,"name"),
-        "code":_required_text(payload,"code",40),"capacity":int(payload.get("capacity",1))},
+        "code":_required_text(payload,"code",40),"capacity":capacity},
         branch,status="available",external_key=f"{branch}:{payload['code']}")
     db.commit();return _view(row)
 
@@ -932,7 +940,8 @@ def set_retention_policy(payload: dict, branch_id: str, m=Depends(active_members
 @router.post("/recovery/drills", status_code=201)
 def record_recovery_drill(payload: dict, branch_id: str, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     _need(db,m,u,"recovery.manage",branch_id)
-    rpo=int(payload.get("rpo_minutes",-1));rto=int(payload.get("rto_minutes",-1))
+    try: rpo=int(payload.get("rpo_minutes",-1));rto=int(payload.get("rto_minutes",-1))
+    except (TypeError,ValueError): raise HTTPException(422,"RPO/RTO must be integer minutes")
     if not 0<=rpo<=10080 or not 0<=rto<=10080:raise HTTPException(422,"RPO/RTO must be between 0 and 10080 minutes")
     status=payload.get("status")
     if status not in {"passed","failed","partial"}:raise HTTPException(422,"Recovery drill status must be passed, failed or partial")
@@ -954,7 +963,7 @@ def hospital_dashboard(branch_id: str, m=Depends(active_membership), u: User=Dep
         "active_admissions":count("admission","admitted"),"pending_nursing_tasks":count("nursing_task","pending"),
         "pending_doctor_orders":count("doctor_order","pending"),"emergency_waiting":count("emergency_visit","waiting"),
         "pending_lab_jobs":count("laboratory_job","queued"),"pending_pharmacy_jobs":count("pharmacy_job","queued"),
-        "unpaid_invoices":count("invoice","issued")}
+        "unpaid_invoices":count("invoice","issued")+count("invoice","partially_paid")}
 
 
 @router.get("/patients/{patient_id}/resources")
