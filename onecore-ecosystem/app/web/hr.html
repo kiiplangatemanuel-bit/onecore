@@ -58,12 +58,14 @@ async function loadPayrollRun(runId){
  box.append(table);
 }
 async function loadMyPayslips(){
- const rows=await api('/hr/payroll/my-payslips'),box=$('myPayslips');box.replaceChildren();
+ const rows=await api('/hr/payroll/my-history'),box=$('myPayslips');box.replaceChildren();
  if(!rows.length){box.textContent='No approved payslips are available for this employee account.';return;}
  rows.forEach(run=>{const panel=document.createElement('div');panel.className='panel';
  const title=document.createElement('h4');title.textContent=run.run_number+' · '+run.period_start+' – '+run.period_end;panel.append(title);
- const summary=document.createElement('p');summary.textContent='Gross '+run.currency+' '+run.gross_pay+' · Deductions '+run.deductions_total+' · Net '+run.net_pay;panel.append(summary);
- const items=document.createElement('p');items.textContent=run.items.map(x=>x.item_type+' '+x.description+' '+x.amount).join(' | ')||'No variable items';panel.append(items);box.append(panel);});
+ const c=run.calculation;
+ const summary=document.createElement('p');summary.textContent='Gross '+(run.currency||'KES')+' '+c.gross_pay+' · PAYE '+c.paye+' · NSSF '+c.nssf_employee+' · SHIF '+c.shif_employee+' · Housing Levy '+c.housing_levy_employee+' · Net '+c.net_pay;panel.append(summary);
+ const components=document.createElement('p');components.textContent='Overtime '+(run.pay_components?.overtime_pay||'0.00')+' · Shift allowance '+(run.pay_components?.shift_allowance||'0.00')+' · Benefits '+(run.pay_components?.taxable_benefits||'0.00');panel.append(components);
+ const rules=document.createElement('p');rules.className='muted';rules.textContent='Statutory rules '+run.rule_version+' · Snapshot '+run.sha256;panel.append(rules);box.append(panel);});
 }
 $('payrollProfile').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const data={employee_id:Number(f.get('employee_id')),currency:f.get('currency').toUpperCase(),base_period_pay:f.get('base_period_pay'),effective_from:f.get('effective_from'),effective_to:f.get('effective_to')||null};await api('/hr/payroll/profiles',{method:'POST',body:JSON.stringify(data)});status('Effective-dated pay profile created.');e.currentTarget.reset();e.currentTarget.elements.currency.value='KES';await refreshPayroll();}catch(error){status(error.message);}});
 $('payrollRun').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const data={period_start:f.get('period_start'),period_end:f.get('period_end'),pay_date:f.get('pay_date')};const run=await api('/hr/payroll/runs',{method:'POST',body:JSON.stringify(data)});status('Draft payroll '+run.run_number+' created for '+run.employee_count+' employees.');e.currentTarget.reset();await refreshPayroll();await loadPayrollRun(run.id);}catch(error){status(error.message);}});
