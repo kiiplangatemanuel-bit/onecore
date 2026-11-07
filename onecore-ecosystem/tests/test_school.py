@@ -74,3 +74,36 @@ def test_school_workspace_exposes_daily_attendance_controls():
     assert 'id="attendanceSave"' in html
     assert "/school/attendance" in html
     assert all(status in html for status in ("present", "absent", "late", "excused"))
+
+
+
+def test_school_learner_placement_schema_and_routes():
+    from app.core.models import SchoolEnrollmentHistory
+    from app.core.schemas import SchoolLearnerPlacementIn
+
+    promotion = SchoolLearnerPlacementIn(
+        target_class_id=22, effective_date="2027-01-01",
+        change_type="promotion", reason="Completed the previous academic year")
+    assert promotion.target_class_id == 22
+    assert promotion.reason == "Completed the previous academic year"
+    transfer = SchoolLearnerPlacementIn(
+        target_class_id=23, effective_date="2026-11-08",
+        change_type="transfer", reason="Family moved to another school branch")
+    assert transfer.change_type == "transfer"
+    with pytest.raises(ValidationError):
+        SchoolLearnerPlacementIn(
+            target_class_id=0, effective_date="2027-01-01",
+            change_type="promotion", reason="Valid reason")
+    with pytest.raises(ValidationError):
+        SchoolLearnerPlacementIn(
+            target_class_id=23, effective_date="2027-01-01",
+            change_type="graduation", reason="Invalid change type")
+    with pytest.raises(ValidationError):
+        SchoolLearnerPlacementIn(
+            target_class_id=23, effective_date="2027-01-01",
+            change_type="transfer", reason="    ")
+    assert SchoolEnrollmentHistory.__tablename__ == "school_enrollment_history"
+    paths = app.openapi()["paths"]
+    assert "/api/v1/school/learners/{learner_id}/placements" in paths
+    assert "post" in paths["/api/v1/school/learners/{learner_id}/placements"]
+    assert "get" in paths["/api/v1/school/learners/{learner_id}/placements"]
