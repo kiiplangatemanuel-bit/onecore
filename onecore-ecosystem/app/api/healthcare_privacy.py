@@ -136,9 +136,14 @@ def assign_role(payload:dict,m=Depends(active_membership),u:User=Depends(current
         raise HTTPException(403,"Branch admins may assign only branch-scoped operational healthcare roles")
     _branch(db,m,branch_id)
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=uid,is_active=True).first()
-    if not member:raise HTTPException(404,"Active organization member not found")
-    if branch_id and (member.branch_scope or "*")!="*" and branch_id not in (member.branch_scope or "").split(","):
+    target_user=db.query(User).filter_by(id=uid,is_active=True).first()
+    if not member or not target_user:raise HTTPException(404,"Active organization member not found")
+    allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
+    if branch_id and "*" not in allowed and branch_id not in allowed:
         raise HTTPException(403,"Target user is not assigned to this branch")
+    duplicate=db.query(HealthcareRoleAssignment.id).filter_by(
+        organization_id=m.organization_id,user_id=uid,branch_id=branch_id,role=role,is_active=True).first()
+    if duplicate:raise HTTPException(409,"An active healthcare role assignment already exists")
     row=HealthcareRoleAssignment(organization_id=m.organization_id,user_id=uid,branch_id=branch_id,
         role=role,assigned_by=u.id,is_active=True)
     db.add(row)
@@ -155,8 +160,10 @@ def assign_role(payload:dict,m=Depends(active_membership),u:User=Depends(current
 def list_roles(m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     if m.role not in {"org_admin","branch_admin"}:raise HTTPException(403,"Only organization or branch admins may view healthcare roles")
     rows=db.query(HealthcareRoleAssignment).filter_by(organization_id=m.organization_id,is_active=True).all()
+    if m.role=="branch_admin":
+        rows=[x for x in rows if x.branch_id is not None and can_access_branch(m,x.branch_id)]
     return [{"id":x.id,"user_id":x.user_id,"branch_id":x.branch_id,"role":x.role}
-        for x in rows if x.branch_id is None or can_access_branch(m,x.branch_id)]
+        for x in rows if m.role=="org_admin" or can_access_branch(m,x.branch_id)]
 
 
 @router.post("/access/roles/{role_id}/revoke")
@@ -254,7 +261,8 @@ def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User
     if uid<=0 or level not in {"read","write"} or len(reason)<5:raise HTTPException(422,"Valid user_id, access_level and reason required")
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=uid,is_active=True).first()
     if not member:raise HTTPException(404,"Active organization member not found")
-    if p.branch_id and (member.branch_scope or "*")!="*" and p.branch_id not in (member.branch_scope or "").split(","):
+    allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
+    if p.branch_id and "*" not in allowed and p.branch_id not in allowed:
         raise HTTPException(403,"Target user is outside the patient branch")
     expires=None
     if payload.get("expires_at"):
@@ -364,7 +372,8 @@ def create_appointment(patient_id:int,payload:dict,m=Depends(active_membership),
     if provider_id<=0 or ends<=starts or starts<=datetime.now(timezone.utc):raise HTTPException(422,"Valid provider and future appointment window required")
     member=db.query(Membership).filter_by(organization_id=m.organization_id,user_id=provider_id,is_active=True).first()
     if not member:raise HTTPException(404,"Active provider membership not found")
-    if p.branch_id and (member.branch_scope or "*")!="*" and p.branch_id not in (member.branch_scope or "").split(","):
+    allowed={x.strip() for x in (member.branch_scope or "*").split(",") if x.strip()}
+    if p.branch_id and "*" not in allowed and p.branch_id not in allowed:
         raise HTTPException(403,"Provider is outside the patient branch")
     provider_user=db.query(User).filter_by(id=provider_id,is_active=True).first()
     if not provider_user:raise HTTPException(404,"Active provider user not found")
