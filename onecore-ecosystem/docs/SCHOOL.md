@@ -111,3 +111,65 @@ bulk promotion, promotion eligibility rules, transcript migration, fee carry-for
 or notifications. Effective dates are recorded as administrative history; the API
 does not backdate historical attendance or assessment membership. Review the school's
 approved promotion policy and safeguarding procedures before production use.
+
+
+## Advanced School workflow increment — 8 November 2026
+
+The advanced workflow API is registered from `app/api/school_advanced.py` and is
+available under `/api/v1/school`. It reuses the existing tenant-owned Record store
+for configurable workflow documents and the existing School learner, class,
+assessment, mark and enrollment-history tables for core academic entities.
+
+Delivered in this increment:
+
+- Ranking configuration by academic year, optional class and subject, grouping,
+  tie method and tie-breaker settings; weighted published-assessment ranking output.
+- Draft examination timetables, date/time sessions, publish transition and seating
+  plans with duplicate seat/learner rejection and active class-roster validation.
+- Assessment moderation decisions with moderator identity and mark references.
+- CBC curriculum nodes covering grade, learning area, strand, sub-strand, outcome
+  code, outcome description and indicators; learner competency evidence and level.
+- Bulk promotion/transfer with active source-class membership checks, year-direction
+  rules, explicit skip-ineligible behavior and append-only canonical enrollment history.
+- Fee charges, payment receipt with idempotency key, guarded allocation against
+  outstanding learner charges, learner statements, arrears and reconciliation totals.
+- Guardian-user links with explicit per-learner academic/fees/attendance/communications
+  permissions; guardian portal responses include only linked learners and permitted data.
+- Teacher and staff portals based on linked staff profiles and assigned classes.
+- Report-card draft, submit, approve/reject and publish states.
+- Downloadable JSON transcripts with SHA-256 digest in the response header.
+- In-app guardian notification queue and school dashboard/reconciliation summaries.
+- Narrow teacher and guardian organization roles; guardian portal access additionally
+  requires an explicit guardian-to-learner link.
+
+New endpoints include:
+
+- `GET/PUT /api/v1/school/advanced/ranking-config`; `GET /api/v1/school/rankings`
+- `GET/POST /api/v1/school/exam-timetables`; `POST /api/v1/school/exam-sessions`
+- `POST /api/v1/school/exam-timetables/{id}/publish`; seating plan under
+  `/api/v1/school/exam-timetables/{id}/sessions/{index}/seating`
+- `POST /api/v1/school/assessments/{id}/moderation`
+- `GET/POST /api/v1/school/curriculum/nodes`; `POST /api/v1/school/competencies`
+- `POST /api/v1/school/promotions/bulk`
+- `POST /api/v1/school/fees/charges`; `POST /api/v1/school/fees/payments`;
+  `POST /api/v1/school/fees/payments/{id}/allocate`;
+  `GET /api/v1/school/fees/learners/{id}/statement`
+- `POST /api/v1/school/guardians/links`; `GET /api/v1/school/guardian/portal`
+- `POST /api/v1/school/staff/profiles`; `GET /api/v1/school/teacher/portal`;
+  `GET /api/v1/school/staff/portal`
+- `POST /api/v1/school/report-cards`; submit and decision endpoints;
+  `GET /api/v1/school/transcripts/{learner_id}`
+- `POST /api/v1/school/notifications`; `GET /api/v1/school/dashboard`;
+  `GET /api/v1/school/reconciliation`
+
+Verification boundary: the PR adds schema and OpenAPI regression tests and triggers the
+repository CI workflow. It must not be called complete or production-ready until the
+latest PR-head checks pass and the review closes any security findings.
+
+Known follow-up integration work: notification records are queued in-app; external
+SMS/WhatsApp/email delivery requires configured adapters. The transcript is a
+downloadable JSON export with integrity digest, not a digitally signed PDF. Fees are
+tracked and reconciled inside the School ledger; automated posting to the general
+ledger, M-Pesa provider callbacks/refunds, bursaries and bank reconciliation are
+separate integrations. Full browser workflows, safeguarding review, PostgreSQL
+concurrency tests and school pilot UAT remain required before production use.
