@@ -43,6 +43,13 @@ class SettlementAllocationIn(BaseModel):
     amount: Decimal = Field(gt=0, multiple_of=CENT, le=Decimal("9999999999999999"))
 
 
+class AutoAPIntegrationIn(BaseModel):
+    due_date: date
+    payable_control_account_id: int = Field(gt=0)
+    expense_account_id: int = Field(gt=0)
+    tax_account_id: int | None = Field(default=None, gt=0)
+
+
 class SettlementCreateIn(BaseModel):
     supplier_id: int = Field(gt=0)
     payment_account_id: int = Field(gt=0)
@@ -1125,6 +1132,50 @@ def reconcile_supplier_statement(statement_id: int, membership=Depends(active_me
             "closing_balance": str(calculated)}
 
 
+
+
+
+
+@router.post("/supplier-invoices/{supplier_invoice_id}/integrate-to-ap", status_code=201)
+def auto_integrate_supplier_invoice_to_ap(supplier_invoice_id: int, payload: AutoAPIntegrationIn,
+                                          membership=Depends(active_membership), user: User = Depends(current_user),
+                                          db: Session = Depends(get_db)):
+    """Map every matched supplier invoice line to a configured default expense/asset account and submit AP for maker-checker approval."""
+    require_permission(membership, "manage")
+    source = db.query(ProcurementSupplierInvoice).filter_by(
+        id=supplier_invoice_id, organization_id=membership.organization_id
+    ).first()
+    if not source:
+        raise HTTPException(404, "Matched supplier invoice not found")
+    if source.status == "accounted":
+        from app.core.models import AccountingProcurementLink
+        link = db.query(AccountingProcurementLink).filter_by(
+            organization_id=membership.organization_id, procurement_invoice_id=source.id
+        ).first()
+        if link:
+            return {"procurement_invoice_id": source.id, "accounting_invoice_id": link.accounting_invoice_id,
+                    "status": "already_integrated"}
+    if source.status != "matched":
+        raise HTTPException(409, "Only a three-way-matched supplier invoice can be integrated")
+    source_lines = db.query(ProcurementSupplierInvoiceLine).filter_by(
+        organization_id=membership.organization_id, invoice_id=source.id
+    ).order_by(ProcurementSupplierInvoiceLine.id).all()
+    if not source_lines:
+        raise HTTPException(409, "Matched supplier invoice has no invoice lines")
+    from app.api.accounting_completion import ProcurementAPIntegrationIn, ProcurementAPLineMapping, integrate_procurement_invoice_to_ap
+    integration = ProcurementAPIntegrationIn(
+        due_date=payload.due_date,
+        payable_control_account_id=payload.payable_control_account_id,
+        tax_account_id=payload.tax_account_id,
+        lines=[ProcurementAPLineMapping(
+            supplier_invoice_line_id=line.id, expense_account_id=payload.expense_account_id
+        ) for line in source_lines],
+    )
+    result = integrate_procurement_invoice_to_ap(
+        supplier_invoice_id, integration, membership, user, db
+    )
+    return {**result, "mapping_mode": "organization_selected_default_expense_account",
+            "maker_checker": "pending_approval"}
 
 
 @router.post("/supplier-returns/{return_id}/post-credit-note", status_code=201)
