@@ -813,3 +813,28 @@ escalation and UAT remain outstanding. Current clinical data permissions use the
 coarse `manage` permission; granular roles, field-level encryption, consent,
 retention governance and formal privacy/security review remain mandatory before
 live clinical use.
+
+
+## SACCO member savings and loan origination increment (7 November 2026)
+
+Implemented on `feature/sacco-members-savings-loans`, stacked on the pharmacy/lab
+workflow branch:
+
+- Added tenant-unique member registration and manager-reviewed KYC decisions.
+  Members must be verified before account opening or loan application.
+- Added savings, shares and contributions accounts, transaction ledger and
+  balance derivation. Savings withdrawals require manager permission and cannot
+  exceed available balance; shares/contributions are non-withdrawable in this API.
+- Added tenant-unique transaction idempotency with canonical request hashes and
+  conflict detection.
+- Added configurable loan products, application limit/term validation and
+  manager review with applicant self-approval prevention.
+- Added `0027_sacco_foundation`, SACCO API routes, validation tests and the
+  `/sacco` member-finance workspace.
+- No external payment integration is claimed. Ledger rows are internal records.
+
+Boundaries: loan approval does not disburse funds. Loan accounts, amortization,
+repayment allocation, arrears, guarantors, collateral, interest accrual, accounting
+journals, member statements, regulatory reports, payment rails, granular roles,
+AML/KYC document verification and UAT remain outstanding. Products requiring a
+guarantor are blocked from application until guarantor capture is implemented.
