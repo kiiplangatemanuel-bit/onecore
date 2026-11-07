@@ -621,3 +621,9 @@ class SupplierReturnIn(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Return receipt lines must be unique")
         return self
+
+
+
+class CRMQuoteConvertIn(BaseModel):
+    order_number: str | None = Field(default=None, min_length=2, max_length=60,
+                                      pattern=r"^[A-Za-z0-9._/-]+$")
