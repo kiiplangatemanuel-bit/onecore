@@ -68,6 +68,10 @@ def _authorize(db,membership,user,permission,branch_id=None,patient_id=None,allo
     if branch_id is None and (membership.branch_scope or "").strip()!="*" and not allow_unscoped:
         raise HTTPException(403,"A branch must be selected for branch-scoped healthcare access")
     roles=_roles(db,membership,user,branch_id)
+    if branch_id is None and not allow_unscoped:
+        org_roles=db.query(HealthcareRoleAssignment).filter_by(
+            organization_id=membership.organization_id,user_id=user.id,is_active=True,branch_id=None).all()
+        roles={x.role for x in org_roles}
     if not roles:
         raise HTTPException(403,"No active healthcare role assigned for this branch")
     if not any(permission in ROLE_PERMISSIONS.get(role,set()) for role in roles):
