@@ -16,7 +16,7 @@ from app.services.crm_scheduler import render_template, next_occurrence
 def test_crm_automation_and_healthcare_routes_registered():
     paths=set(app.openapi()["paths"])
     expected=[
-        "/api/v1/crm/templates","/api/v1/crm/templates/{template_id}",
+        "/api/v1/crm/templates","/api/v1/crm/templates/{template_id}","/api/v1/crm/templates/{template_id}/versions",
         "/api/v1/crm/segments","/api/v1/crm/segments/{segment_id}",
         "/api/v1/crm/segments/{segment_id}/deactivate",
         "/api/v1/crm/segments/{segment_id}/preview",
@@ -70,6 +70,7 @@ def test_nested_segment_rules_are_validated_and_compiled():
     nested={"all":[{"field":"company","op":"eq","value":"x"}]}
     for _ in range(5):nested={"any":[nested]}
     with pytest.raises(HTTPException):compile_rules(nested)
+    with pytest.raises(HTTPException):compile_rules({"all":[]})
 
 
 def test_template_variables_are_allowlisted_and_personalized():
