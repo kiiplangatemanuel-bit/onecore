@@ -642,3 +642,19 @@ and tax allocation and accounting journal integration remain outstanding. The UI
 receipt/return workflow is being added in this increment and must be verified before
 the slice is called complete. CI must pass migration upgrade, downgrade/re-upgrade,
 compilation and pytest before merge.
+
+
+## School learner promotion and transfer history increment
+
+- Added append-only learner placement history and controlled promotion/transfer API.
+- Promotion must advance to a later academic year; transfer may move to a parallel
+  class or later year but cannot move backwards.
+- Requires organization manage permission and access to both source and target
+  branches; learner update, history record and audit event are committed together.
+- Added history retrieval with tenant and branch checks, schema/model/OpenAPI tests,
+  and School documentation.
+- Migration: `0019_school_learner_placements`.
+- Branch: `feature/school-learner-promotions`.
+- Pending CI: migration upgrade/downgrade/re-upgrade, compilation and pytest.
+- Not included: bulk promotion, capacity/waitlists, guardian consent, eligibility
+  rules, fee carry-forward, transcript migration or guardian notifications.
