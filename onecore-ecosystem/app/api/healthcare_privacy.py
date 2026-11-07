@@ -139,6 +139,25 @@ def list_healthcare_roles(membership=Depends(active_membership),db:Session=Depen
         for x in rows if can_access_branch(membership,x.branch_id)]
 
 
+@router.post("/access/roles/{role_id}/revoke")
+def revoke_healthcare_role(role_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if membership.role not in {"org_admin","branch_admin"}:
+        raise HTTPException(403,"Only organization or branch administrators may revoke healthcare roles")
+    row=db.query(HealthcareRoleAssignment).filter_by(
+        id=role_id,organization_id=membership.organization_id,is_active=True).first()
+    if not row or not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404,"Active healthcare role assignment not found")
+    if membership.role=="branch_admin" and (row.branch_id is None or row.role in {"healthcare_admin","privacy_officer"}):
+        raise HTTPException(403,"Branch administrators cannot revoke organization-wide or privileged roles")
+    row.is_active=False
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="healthcare.role.revoked",resource_type="healthcare_role_assignment",
+        resource_id=str(row.id),detail=f"user:{row.user_id};role:{row.role}"))
+    db.commit()
+    return {"id":row.id,"status":"revoked"}
+
+
 @router.post("/patients",status_code=201)
 def register_patient(payload:HealthcarePatientIn,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
