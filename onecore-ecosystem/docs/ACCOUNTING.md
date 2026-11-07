@@ -285,3 +285,13 @@ The fiscal-period close checklist now also blocks while a matched procurement su
 ### Boundaries
 
 These additions improve the accounting workflow but do not establish statutory compliance or production readiness. Remaining work includes jurisdiction-specific tax determination and KRA eTIMS certification, external payment execution, PostgreSQL production rehearsal, concurrency testing, finance/audit review, formal sign-off and user acceptance testing. Cash-flow classifications are heuristic based on general-ledger account types, and no future cash-flow forecasting model is included.
+
+
+### Reviewed fiscal year-end close
+
+- `GET /api/v1/accounting/fiscal-periods/{period_id}/year-end-close-preview?retained_earnings_account_id={id}`
+- `POST /api/v1/accounting/fiscal-periods/{period_id}/year-end-close`
+- Preview derives revenue and expense balances from posted general-ledger lines inside the selected open period and calculates a balanced nominal-account closing journal to an active equity retained-earnings account.
+- The preview includes the full fiscal-period close checklist. The close action refuses unresolved blockers, requires organization-wide branch access, requires the exact period code as confirmation, and posts the closing journal and closes the period in one database transaction.
+- A stable period-specific journal reference prevents duplicate closing journals. A period with no nominal-account activity can be closed without creating an empty journal.
+- This is an operational accounting close control. It does not calculate tax provisions, statutory reserves, dividends, foreign-exchange translation, consolidation, prior-period restatements or auditor certification. Finance/audit approval and statutory review remain required.
