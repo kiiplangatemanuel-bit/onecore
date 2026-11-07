@@ -246,6 +246,7 @@ class CRMLead(Base):
     expected_close_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     probability_override: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     actual_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    actual_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
