@@ -140,15 +140,17 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     extra = extra or {}
     cfg = rule["parameters"]
     nssf_cfg = cfg["nssf"]
-    nssf_base = min(gross, D(str(nssf_cfg["upper_earnings_limit"])))
+    nssf_pensionable_base = money(extra.get("nssf_pensionable_base", gross))
+    nssf_base = min(nssf_pensionable_base, D(str(nssf_cfg["upper_earnings_limit"])))
     tier1 = min(nssf_base, D(str(nssf_cfg["lower_earnings_limit"])))
     tier2 = max(ZERO, nssf_base - D(str(nssf_cfg["lower_earnings_limit"])))
     nssf = money((tier1 + tier2) * D(str(nssf_cfg["rate"])))
     shif_base = money(extra.get("shif_contribution_base", gross))
     shif = max(D(str(cfg["shif"]["minimum"])), money(shif_base * D(str(cfg["shif"]["rate"])))) if shif_base > 0 else ZERO
-    ahl = money(gross * D(str(cfg["housing_levy"]["employee_rate"])))
+    ahl_base = money(extra.get("housing_levy_contribution_base", gross))
+    ahl = money(ahl_base * D(str(cfg["housing_levy"]["employee_rate"])))
     employer_nssf = nssf
-    employer_ahl = money(gross * D(str(cfg["housing_levy"]["employer_rate"])))
+    employer_ahl = money(ahl_base * D(str(cfg["housing_levy"]["employer_rate"])))
 
     pension_limit = D(str(cfg["paye"]["pension_monthly_limit"]))
     pension = min(money(extra.get("employee_pension", 0)), max(ZERO, pension_limit - nssf))
@@ -212,6 +214,7 @@ KENYA_2026_RULES = {
         {"authority": "KRA", "url": "https://www.kra.go.ke/individual/filing-paying/types-of-taxes/paye", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2157-amendments-to-paye-computation-pursuant-to-the-tax-laws-amendment-act%2C-2024", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
+        {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/1979-affordable-housing-levy-ahl", "verified_on": "2026-11-08"},
         {"authority": "NSSF", "url": "https://www.nssf.or.ke/notice-to-employers-year-4-2026-nssf-contribution-rates", "verified_on": "2026-11-08"},
         {"authority": "Kenya Law / SHA", "url": "https://new.kenyalaw.org/akn/ke/act/ln/2024/49/eng%402024-03-08/source.pdf", "verified_on": "2026-11-08"}
     ],
@@ -323,6 +326,8 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
     rule_end = date.fromisoformat(rule.data["effective_to"]) if rule.data.get("effective_to") else date.max
     if rule_start > run.period_start or rule_end < run.period_end:
         raise HTTPException(409, "Payroll period crosses a statutory rule effective-date boundary; split the period before calculation")
+    if run.period_start.day != 1 or (run.period_end + __import__("datetime").timedelta(days=1)).day != 1 or run.period_start.month != run.period_end.month or run.period_start.year != run.period_end.year:
+        raise HTTPException(422, "Kenya monthly statutory bands and minimums require a complete calendar-month payroll period")
     lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run.id).all()
     if not lines:
         raise HTTPException(409, "Payroll run has no employees")
@@ -356,6 +361,15 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         taxable_benefits = money(extras.get("taxable_benefits", 0))
         meal_benefit = money(extras.get("meal_benefit", 0))
         gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + meal_benefit)
+        regular_allowances = money(extras.get("regular_cash_allowances", 0))
+        statutory_base = money(prorated_base + regular_allowances)
+        extras = {**extras,
+            "nssf_pensionable_base": extras.get("nssf_pensionable_base", statutory_base),
+            "shif_contribution_base": extras.get("shif_contribution_base", statutory_base),
+            "housing_levy_contribution_base": extras.get("housing_levy_contribution_base", statutory_base)}
+        for base_name in ("nssf_pensionable_base", "shif_contribution_base", "housing_levy_contribution_base"):
+            if money(extras[base_name]) > gross:
+                raise HTTPException(422, f"{base_name} cannot exceed cash gross pay")
         result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
         snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
                     "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
@@ -363,7 +377,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
-                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit)}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit), "regular_cash_allowances": str(regular_allowances)}, "statutory_contribution_bases": {"nssf": extras["nssf_pensionable_base"], "shif": extras["shif_contribution_base"], "housing_levy": extras["housing_levy_contribution_base"]}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
