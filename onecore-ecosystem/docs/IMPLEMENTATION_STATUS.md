@@ -243,3 +243,33 @@ accessibility and UAT.
 
 CI must verify migration upgrade/downgrade/re-upgrade, compile and full pytest before
 this CRM increment is considered verified.
+
+
+## Procurement vertical slice (7 November 2026)
+
+Implemented on `main`:
+
+- Tenant-owned supplier directory.
+- Purchase orders with supplier, branch, currency, product lines, quantities and
+  decimal unit costs.
+- Draft -> approved -> partially_received/received lifecycle. Approval requires
+  organization manage permission.
+- Goods receipt validates approved state, tenant-owned PO lines, branch scope,
+  positive quantities and remaining order quantity.
+- Receipt writes append-only inventory receipt movements with per-tenant idempotency;
+  duplicate replay does not add stock a second time.
+- Audit events for supplier creation, PO creation/approval and goods receipt.
+- APIs: GET/POST `/api/v1/procurement/suppliers`, GET/POST
+  `/api/v1/procurement/orders`, POST `/api/v1/procurement/orders/{id}/approve`
+  and POST `/api/v1/procurement/orders/{id}/receive`.
+- Migration `0005_procurement`; tests in `tests/test_procurement.py`; domain
+  documentation in `docs/PROCUREMENT.md`.
+- Key commits: `bfa6a4d` (models), `8246918` (schemas), `c90d9bf` (API),
+  `10f90c6` (migration), `183c658` (tests), `ce2315f` (documentation).
+
+Procurement gaps: supplier edit/archive, requisitions, RFQ and quote comparison,
+configurable multi-level approval matrix, PO editing/cancellation/dispatch, GRN
+inspection and returns, supplier invoice matching, landed-cost allocation, AP
+integration, procurement UI/reporting, PostgreSQL concurrent receipt tests,
+security/accessibility and UAT.
+
