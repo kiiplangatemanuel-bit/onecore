@@ -839,3 +839,27 @@ def receive_purchase_order(order_id: int, payload: PurchaseOrderReceiptIn,
           "purchase_order", order.id, f"new_receipt_lines:{received_now}")
     return {"id": order.id, "order_number": order.order_number,
             "status": order.status, "new_receipt_lines": received_now}
+
+
+@router.get("/procurement/orders/{order_id}")
+def get_purchase_order(order_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    q = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        q = q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id == -1)
+    order = q.first()
+    if not order:
+        raise HTTPException(404, "Purchase order not found")
+    lines = db.query(ProcurementPurchaseOrderLine).filter_by(
+        purchase_order_id=order.id, organization_id=membership.organization_id
+    ).order_by(ProcurementPurchaseOrderLine.id).all()
+    return {"id": order.id, "order_number": order.order_number, "supplier_id": order.supplier_id,
+            "branch_id": order.branch_id, "status": order.status, "currency": order.currency,
+            "lines": [{"id": x.id, "product_id": x.product_id,
+                       "quantity_ordered": str(x.quantity_ordered),
+                       "quantity_received": str(x.quantity_received),
+                       "outstanding": str(x.quantity_ordered - x.quantity_received),
+                       "unit_cost": str(x.unit_cost)} for x in lines]}
