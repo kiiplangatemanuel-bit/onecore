@@ -551,6 +551,19 @@ class AccountingCreditNote(Base):
     )
 
 
+class AccountingCreditNoteLine(Base):
+    __tablename__ = "accounting_credit_note_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    credit_note_id: Mapped[int] = mapped_column(ForeignKey("accounting_credit_notes.id"), index=True)
+    invoice_line_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoice_lines.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class AccountingFiscalPeriod(Base):
     __tablename__ = "accounting_fiscal_periods"
     id: Mapped[int] = mapped_column(primary_key=True)
