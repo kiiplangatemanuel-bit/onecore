@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     s3_region: str = ""
 
 
-@model_validator(mode="after")
+    @model_validator(mode="after")
     def validate_production_security(self):
         production = self.app_env.strip().lower() in {"production", "prod"}
         if production:
