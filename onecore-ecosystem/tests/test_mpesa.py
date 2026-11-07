@@ -320,7 +320,7 @@ def test_b2c_success_callback_requires_amount_receipt_and_matching_conversation(
     assert refund.status == "pending"
     assert refund.provider_reference == ""
     assert intent.status == "exception"
-    assert "amount is missing" in intent.result_description
+    assert "missing a valid transaction amount" in intent.result_description
     db.close()
 
 
