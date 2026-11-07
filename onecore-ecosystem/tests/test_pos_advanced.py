@@ -78,3 +78,14 @@ def test_device_secret_is_submitted_as_body_not_url_parameter():
     operation = app.openapi()["paths"]["/api/v1/pos/advanced/devices/{device_id}/session"]["post"]
     assert "requestBody" in operation
     assert all(parameter["name"] != "device_secret" for parameter in operation.get("parameters", []))
+
+
+def test_customer_ref_is_part_of_offline_sale_idempotency_hash():
+    from app.core.schemas import POSSaleSyncIn
+    from app.services.pos import canonical_request_hash
+    base = dict(client_transaction_id="offline-sale-0001", shift_id=1,
+                branch_id="branch-001", lines=[{"product_id":2,"quantity":"1"}],
+                payments=[{"method":"cash","amount":"10.00"}])
+    first = POSSaleSyncIn(**base, customer_ref="member-001")
+    second = POSSaleSyncIn(**base, customer_ref="member-002")
+    assert canonical_request_hash(first) != canonical_request_hash(second)
