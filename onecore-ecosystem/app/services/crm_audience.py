@@ -73,3 +73,17 @@ def apply_segment(query, definition):
     if all_clauses: query = query.filter(and_(*all_clauses))
     if any_clauses: query = query.filter(or_(*any_clauses))
     return query.distinct()
+
+def render_template_text(text, contact):
+    import re
+    values = {"full_name": contact.full_name or "",
+              "first_name": (contact.full_name or "").split(" ")[0],
+              "company": contact.company or "", "email": contact.email or "",
+              "phone": contact.phone or ""}
+    token = re.compile(r"{{\s*([a-z_]+)\s*}}")
+    def replace(match):
+        key = match.group(1)
+        if key not in values:
+            raise ValueError(f"Unsupported template variable: {key}")
+        return values[key]
+    return token.sub(replace, text or "")
