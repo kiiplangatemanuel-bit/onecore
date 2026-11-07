@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1046,3 +1046,186 @@ def current_pos_shift(branch_id: str, membership=Depends(active_membership),
         return None
     return {"id": shift.id, "branch_id": shift.branch_id, "status": shift.status,
             "opening_cash": str(shift.opening_cash), "opened_at": shift.opened_at.isoformat()}
+
+
+# School foundation: admissions, CBC subject catalogue, assessments, grading and publication.
+@router.get("/school/classes")
+def school_classes(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    rows=db.query(SchoolClass).filter_by(organization_id=membership.organization_id,is_active=True).all()
+    return [{"id":x.id,"name":x.name,"stream":x.stream,"academic_year":x.academic_year,"branch_id":x.branch_id} for x in rows if can_access_branch(membership,x.branch_id)]
+
+
+@router.post("/school/classes",status_code=201)
+def create_school_class(payload:SchoolClassIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    if not can_access_branch(membership,payload.branch_id):
+        raise HTTPException(403,"Branch access denied")
+    _crm_branch_check(db,membership,payload.branch_id)
+    row=SchoolClass(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        name=payload.name.strip(),stream=payload.stream.strip(),academic_year=payload.academic_year,created_by=user.id)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Class and stream already exist for this academic year")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"school.class.created","school_class",row.id)
+    return {"id":row.id,"name":row.name,"stream":row.stream,"academic_year":row.academic_year}
+
+
+@router.get("/school/learners")
+def school_learners(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(SchoolLearner).filter_by(organization_id=membership.organization_id).order_by(SchoolLearner.admission_number).all()
+    return [{"id":x.id,"admission_number":x.admission_number,"first_name":x.first_name,"last_name":x.last_name,
+        "class_id":x.class_id,"branch_id":x.branch_id,"status":x.status} for x in rows if can_access_branch(membership,x.branch_id)]
+
+
+@router.post("/school/admissions",status_code=201)
+def create_school_admission(payload:SchoolLearnerIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    if not can_access_branch(membership,payload.branch_id): raise HTTPException(403,"Branch access denied")
+    _crm_branch_check(db,membership,payload.branch_id)
+    if payload.class_id:
+        cls=db.query(SchoolClass).filter_by(id=payload.class_id,organization_id=membership.organization_id,is_active=True).first()
+        if not cls or cls.branch_id != payload.branch_id: raise HTTPException(404,"Class not found in this branch")
+    row=SchoolLearner(organization_id=membership.organization_id,branch_id=payload.branch_id,class_id=payload.class_id,
+        admission_number=payload.admission_number.strip().upper(),first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),guardian_name=payload.guardian_name,guardian_phone=payload.guardian_phone,
+        status="applicant",created_by=user.id)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Admission number already exists")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"school.admission.created","school_learner",row.id)
+    return {"id":row.id,"admission_number":row.admission_number,"status":row.status}
+
+
+@router.post("/school/learners/{learner_id}/admit")
+def admit_school_learner(learner_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(SchoolLearner).filter_by(id=learner_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Learner not found")
+    if row.status!="applicant": raise HTTPException(409,"Only applicants can be admitted")
+    row.status="active";row.admitted_at=datetime.now(timezone.utc);db.commit()
+    audit(db,user.id,membership.organization_id,"school.learner.admitted","school_learner",row.id)
+    return {"id":row.id,"status":row.status}
+
+
+@router.get("/school/subjects")
+def school_subjects(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(SchoolSubject).filter_by(organization_id=membership.organization_id,is_active=True).order_by(SchoolSubject.name).all()
+    return [{"id":x.id,"code":x.code,"name":x.name} for x in rows]
+
+
+@router.post("/school/subjects",status_code=201)
+def create_school_subject(payload:SchoolSubjectIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    row=SchoolSubject(organization_id=membership.organization_id,code=payload.code.upper(),name=payload.name.strip(),created_by=user.id)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Subject code already exists")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"school.subject.created","school_subject",row.id)
+    return {"id":row.id,"code":row.code,"name":row.name}
+
+
+@router.post("/school/assessments",status_code=201)
+def create_school_assessment(payload:SchoolAssessmentIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    cls=db.query(SchoolClass).filter_by(id=payload.class_id,organization_id=membership.organization_id,is_active=True).first()
+    subject=db.query(SchoolSubject).filter_by(id=payload.subject_id,organization_id=membership.organization_id,is_active=True).first()
+    if not cls or not subject: raise HTTPException(404,"Class or subject not found")
+    if not can_access_branch(membership,cls.branch_id): raise HTTPException(403,"Branch access denied")
+    row=SchoolAssessment(organization_id=membership.organization_id,class_id=cls.id,subject_id=subject.id,
+        title=payload.title,academic_year=payload.academic_year,term=payload.term,
+        maximum_score=payload.maximum_score,weight=payload.weight,created_by=user.id)
+    db.add(row);db.commit();db.refresh(row)
+    audit(db,user.id,membership.organization_id,"school.assessment.created","school_assessment",row.id)
+    return {"id":row.id,"status":row.status,"maximum_score":str(row.maximum_score)}
+
+
+@router.put("/school/assessments/{assessment_id}/marks")
+def enter_school_marks(assessment_id:int,payload:SchoolMarksIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"update")
+    assessment=db.query(SchoolAssessment).filter_by(id=assessment_id,organization_id=membership.organization_id).with_for_update().first()
+    if not assessment: raise HTTPException(404,"Assessment not found")
+    if assessment.status!="draft": raise HTTPException(409,"Published assessment marks are locked")
+    cls=db.query(SchoolClass).filter_by(id=assessment.class_id,organization_id=membership.organization_id).first()
+    if not cls or not can_access_branch(membership,cls.branch_id): raise HTTPException(404,"Assessment not found")
+    learner_ids=[x.learner_id for x in payload.marks]
+    if len(set(learner_ids))!=len(learner_ids): raise HTTPException(422,"A learner may appear only once in a mark submission")
+    learners=db.query(SchoolLearner).filter(SchoolLearner.organization_id==membership.organization_id,
+        SchoolLearner.class_id==cls.id,SchoolLearner.id.in_(learner_ids),SchoolLearner.status=="active").all()
+    learner_map={x.id:x for x in learners}
+    if set(learner_map)!=set(learner_ids): raise HTTPException(422,"All learners must be active members of this class")
+    if any(x.score>assessment.maximum_score for x in payload.marks): raise HTTPException(422,"A mark exceeds the assessment maximum")
+    for item in payload.marks:
+        row=db.query(SchoolMark).filter_by(organization_id=membership.organization_id,assessment_id=assessment.id,learner_id=item.learner_id).first()
+        if row: row.score=item.score;row.entered_by=user.id
+        else: db.add(SchoolMark(organization_id=membership.organization_id,assessment_id=assessment.id,
+            learner_id=item.learner_id,score=item.score,entered_by=user.id))
+    db.commit();audit(db,user.id,membership.organization_id,"school.marks.saved","school_assessment",assessment.id,f"count:{len(payload.marks)}")
+    return {"assessment_id":assessment.id,"saved":len(payload.marks)}
+
+
+@router.post("/school/grade-bands",status_code=201)
+def create_school_grade_band(payload:SchoolGradeBandIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if payload.minimum_percent>=payload.maximum_percent: raise HTTPException(422,"Grade minimum must be below maximum")
+    overlaps=db.query(SchoolGradeBand).filter(SchoolGradeBand.organization_id==membership.organization_id,
+        SchoolGradeBand.scale_name==payload.scale_name,
+        SchoolGradeBand.minimum_percent < payload.maximum_percent,
+        SchoolGradeBand.maximum_percent > payload.minimum_percent).first()
+    if overlaps: raise HTTPException(409,"Grade bands in a scale cannot overlap")
+    row=SchoolGradeBand(organization_id=membership.organization_id,scale_name=payload.scale_name,
+        grade=payload.grade,minimum_percent=payload.minimum_percent,maximum_percent=payload.maximum_percent,points=payload.points)
+    db.add(row)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Grade already exists in this scale")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"school.grade_band.created","school_grade_band",row.id)
+    return {"id":row.id,"grade":row.grade,"scale_name":row.scale_name}
+
+
+@router.post("/school/assessments/{assessment_id}/publish")
+def publish_school_assessment(assessment_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    assessment=db.query(SchoolAssessment).filter_by(id=assessment_id,organization_id=membership.organization_id).with_for_update().first()
+    if not assessment: raise HTTPException(404,"Assessment not found")
+    if assessment.status!="draft": raise HTTPException(409,"Assessment is already published")
+    cls=db.query(SchoolClass).filter_by(id=assessment.class_id,organization_id=membership.organization_id).first()
+    if not cls or not can_access_branch(membership,cls.branch_id): raise HTTPException(404,"Assessment not found")
+    count=db.query(SchoolMark).filter_by(organization_id=membership.organization_id,assessment_id=assessment.id).count()
+    if count==0: raise HTTPException(409,"An assessment without marks cannot be published")
+    assessment.status="published";assessment.published_by=user.id;assessment.published_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"school.assessment.published","school_assessment",assessment.id)
+    return {"id":assessment.id,"status":assessment.status,"published_at":assessment.published_at.isoformat()}
+
+
+@router.get("/school/assessments/{assessment_id}/results")
+def school_assessment_results(assessment_id:int,scale_name:str="default",membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    assessment=db.query(SchoolAssessment).filter_by(id=assessment_id,organization_id=membership.organization_id,status="published").first()
+    if not assessment: raise HTTPException(404,"Published assessment not found")
+    cls=db.query(SchoolClass).filter_by(id=assessment.class_id,organization_id=membership.organization_id).first()
+    if not cls or not can_access_branch(membership,cls.branch_id): raise HTTPException(404,"Published assessment not found")
+    rows=db.query(SchoolLearner,SchoolMark).join(SchoolMark,SchoolMark.learner_id==SchoolLearner.id).filter(
+        SchoolMark.organization_id==membership.organization_id,SchoolMark.assessment_id==assessment.id,
+        SchoolLearner.organization_id==membership.organization_id).all()
+    bands=db.query(SchoolGradeBand).filter_by(organization_id=membership.organization_id,scale_name=scale_name).all()
+    results=[]
+    for learner,mark in rows:
+        percent=(Decimal(mark.score)/Decimal(assessment.maximum_score))*Decimal("100")
+        band=next((b for b in bands if b.minimum_percent<=percent<=b.maximum_percent),None)
+        results.append({"learner_id":learner.id,"admission_number":learner.admission_number,
+            "learner":learner.first_name+" "+learner.last_name,"score":str(mark.score),
+            "maximum_score":str(assessment.maximum_score),"percentage":str(percent.quantize(Decimal("0.01"))),
+            "grade":band.grade if band else None,"points":str(band.points) if band else None})
+    results.sort(key=lambda x:(-Decimal(x["percentage"]),x["admission_number"]))
+    previous=None;rank=0
+    for index,item in enumerate(results,1):
+        score=Decimal(item["percentage"])
+        if score!=previous: rank=index
+        item["rank"]=rank;previous=score
+    return {"assessment_id":assessment.id,"status":"published","results":results}
