@@ -644,7 +644,7 @@ def refill_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(acti
 def cancel_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     rx=_get(db,m,prescription_id,"pharmacy_prescription",lock=True)
-    roles=_need(db,m,u,"pharmacy.manage",rx.branch_id)
+    roles=_need(db,m,u,"orders.manage",rx.branch_id)
     data=_payload(rx)
     if rx.status not in {"active","partially_dispensed"}:
         raise HTTPException(409,"Prescription cannot be cancelled from its current state")
@@ -839,6 +839,20 @@ def convert_pharmacy_replenishment(request_id:int,m=Depends(active_membership),
 
 # ---------------- Laboratory catalogue, panels and orders ----------------
 
+def _critical_result(line, result, requested=False):
+    if requested:
+        return True
+    try:
+        value=Decimal(str(result).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return False
+    low=line.get("critical_low");high=line.get("critical_high")
+    return ((low is not None and value<=Decimal(str(low))) or
+            (high is not None and value>=Decimal(str(high))))
+
+
+
+
 @router.post("/lab/tests",status_code=201)
 def create_laboratory_test(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),
     db:Session=Depends(get_db)):
@@ -846,8 +860,14 @@ def create_laboratory_test(payload:dict,m=Depends(active_membership),u:User=Depe
     code=_required_text(payload,"code",40).upper()
     existing=_resource_list(db,m,"lab_test",limit=1000)
     if any(_payload(x).get("code")==code for x in existing):raise HTTPException(409,"Test code already exists")
+    critical_low=_decimal(payload["critical_low"],"critical_low") if payload.get("critical_low") is not None else None
+    critical_high=_decimal(payload["critical_high"],"critical_high") if payload.get("critical_high") is not None else None
+    if critical_low is not None and critical_high is not None and critical_low>=critical_high:
+        raise HTTPException(422,"Critical low threshold must be below critical high threshold")
     data={"code":code,"name":_required_text(payload,"name"),"specimen_type":_required_text(payload,"specimen_type",80).lower(),
         "unit":str(payload.get("unit",""))[:40],"reference_range":str(payload.get("reference_range",""))[:180],
+        "critical_low":str(critical_low) if critical_low is not None else None,
+        "critical_high":str(critical_high) if critical_high is not None else None,
         "turnaround_hours":int(payload.get("turnaround_hours",24)),
         "price":str(_decimal(payload.get("price","0"),"price",places=2)),"is_active":True}
     if not 1<=data["turnaround_hours"]<=720:raise HTTPException(422,"Turnaround hours must be 1 to 720")
@@ -875,6 +895,9 @@ def create_laboratory_panel(payload:dict,m=Depends(active_membership),u:User=Dep
     for tid in ids:
         row,data=_get_test(db,m,int(tid));tests.append({"test_id":row.id,"code":data["code"],
             "name":data["name"],"specimen_type":data["specimen_type"]})
+    specimen_types={x["specimen_type"] for x in tests}
+    if len(specimen_types)!=1:
+        raise HTTPException(422,"A laboratory panel must contain tests using the same specimen type")
     code=_required_text(payload,"code",40).upper()
     row=_create(db,m,u,"lab_panel",{"code":code,"name":_required_text(payload,"name"),
         "description":str(payload.get("description",""))[:500],"tests":tests},
@@ -979,6 +1002,39 @@ def collect_laboratory_sample(order_id:int,payload:dict,m=Depends(active_members
     return {"id":sample.id,"accession_number":accession,"barcode_value":accession,"status":sample.status}
 
 
+@router.post("/lab/samples/{sample_id}/custody")
+def record_laboratory_sample_custody(sample_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    sample=_get(db,m,sample_id,"lab_sample",lock=True)
+    _need(db,m,u,"lab.manage",sample.branch_id)
+    data=_payload(sample)
+    if data.get("status") not in {"collected","in_transit","received"}:
+        raise HTTPException(409,"Sample is not in a transferable custody state")
+    action=str(payload.get("action",""))
+    if action not in {"handoff","received"}:
+        raise HTTPException(422,"Custody action must be handoff or received")
+    recipient_id=int(payload.get("recipient_user_id",0))
+    recipient=db.query(User).filter_by(id=recipient_id,is_active=True).first()
+    recipient_membership=db.query(Membership).filter_by(
+        organization_id=m.organization_id,user_id=recipient_id,is_active=True).first()
+    if not recipient or not recipient_membership:
+        raise HTTPException(422,"Custody recipient must be an active organization member")
+    from app.api.healthcare_hospital import _roles
+    if not _roles(db,m,recipient,sample.branch_id).intersection(LAB_ROLES):
+        raise HTTPException(403,"Custody recipient must have laboratory access at this branch")
+    location=_required_text(payload,"location",160)
+    data.setdefault("chain",[]).append({"action":action,"actor_id":u.id,
+        "recipient_user_id":recipient_id,"location":location,"at":NOW().isoformat(),
+        "seal_number":str(payload.get("seal_number",""))[:100]})
+    data["status"]="in_transit" if action=="handoff" else "received"
+    _update(sample,data,u,status=data["status"])
+    patient=_patient(db,sample.patient_id,m)
+    _patient_event(db,m,u,patient,"lab.sample.custody."+action,
+        {"sample_id":sample.id,"recipient_user_id":recipient_id,"location":location},sample.id)
+    db.commit()
+    return {"sample_id":sample.id,"status":sample.status,"custody_events":len(data["chain"])}
+
+
 @router.post("/lab/samples/{sample_id}/decision")
 def decide_laboratory_sample(sample_id:int,payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -987,7 +1043,7 @@ def decide_laboratory_sample(sample_id:int,payload:dict,m=Depends(active_members
     data=_payload(sample);decision=str(payload.get("decision",""))
     reason=_required_text(payload,"reason",500)
     if decision not in {"accepted","rejected"}:raise HTTPException(422,"Decision must be accepted or rejected")
-    if data["status"] not in {"collected","accepted"}:raise HTTPException(409,"Sample cannot transition from current state")
+    if data["status"] not in {"collected","received"}:raise HTTPException(409,"Sample cannot transition from current state")
     data["status"]=decision;data["chain"].append({"action":decision,"actor_id":u.id,
         "reason":reason,"at":NOW().isoformat()})
     _update(sample,data,u,status=decision)
@@ -1023,7 +1079,10 @@ def enter_laboratory_result(order_id:int,payload:dict,m=Depends(active_membershi
     od["lines"][idx]=line
     od["status"]="results_entered" if all(x["status"]=="entered" for x in od["lines"]) else "processing"
     _update(order,od,u,status=od["status"])
-    if bool(payload.get("is_critical")):
+    critical=_critical_result(line,result,bool(payload.get("is_critical")))
+    line["is_critical"]=critical;od["lines"][idx]=line
+    _update(order,od,u,status=od["status"])
+    if critical:
         alert=_create(db,m,u,"lab_critical_alert",{"order_id":order.id,"line_index":idx,
             "patient_id":patient.id,"test_code":line["test_code"],"result_value":result,
             "status":"queued","escalation_required":True},order.branch_id,patient.id,
