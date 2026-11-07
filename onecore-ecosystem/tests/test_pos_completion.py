@@ -43,7 +43,7 @@ def test_pos_device_credentials_are_not_stored_as_plaintext():
 def test_pos_device_headers_are_allowed_by_cors():
     from app.main import app
     cors = next(m for m in app.user_middleware if m.cls.__name__ == "CORSMiddleware")
-    allowed = {header.lower() for header in cors.options["allow_headers"]}
+    allowed = {header.lower() for header in cors.kwargs["allow_headers"]}
     assert "x-organization-id" in allowed
     assert "x-pos-device-token" in allowed
 
@@ -54,7 +54,7 @@ def test_pos_service_worker_uses_safe_background_sync():
     assert 'event.tag === "onecore-pos-sync"' in worker
     assert '"/api/v1/pos/sync"' in worker
     assert 'response.status === 409' in worker
-    assert "never auto-discard or replay it" in worker
+    assert "Preserve FIFO order until a supervisor resolves this transaction" in worker
     assert 'payment.method === "mpesa"' in worker
 
 def test_pos_database_guards_prevent_duplicate_open_device_and_customer_phone():
