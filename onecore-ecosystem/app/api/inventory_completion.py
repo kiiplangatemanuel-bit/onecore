@@ -423,6 +423,12 @@ def quarantine_batch(batch_id:int,reason:str=Query(min_length=3,max_length=300),
     row=db.query(InventoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Batch not found")
     if row.status!="available": raise HTTPException(409,"Only available batches can be quarantined")
+    wh=get_warehouse(db,membership.organization_id,row.warehouse_id,membership)
+    if dec(row.quantity_on_hand)>0:
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=row.product_id,
+            branch_id=wh.branch_id,warehouse_id=wh.id,quantity_delta=-dec(row.quantity_on_hand),
+            movement_type="batch_disposition",reference=f"batch:{row.id}:quarantined",
+            idempotency_key=f"batch-{row.id}-disposition",created_by=user.id))
     row.status="quarantined";audit(db,user,membership.organization_id,"inventory.batch.quarantined","inventory_batch",row.id,reason);db.commit()
     return {"id":row.id,"status":row.status}
 
