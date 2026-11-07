@@ -62,6 +62,9 @@ class Settings(BaseSettings):
 
     crm_public_base_url: str = ""
     crm_delivery_callback_secret: str = ""
+    crm_scheduler_secret: str = ""
+
+    healthcare_data_encryption_key: str = ""
 
     integration_ai_enabled: bool = False
     ai_base_url: str = ""
