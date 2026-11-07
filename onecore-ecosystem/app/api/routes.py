@@ -207,7 +207,7 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
 @router.post("/inventory/products", status_code=201)
 def create_inventory_product(payload: InventoryProductIn, membership=Depends(active_membership),
                              user: User = Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "manage" if payload.tax_rate > 0 else "create")
+    require_permission(membership, "manage" if payload.tax_rate > 0 or payload.cost_price > 0 else "create")
     sku = payload.sku.strip().upper()
     if db.query(InventoryProduct).filter_by(organization_id=membership.organization_id, sku=sku).first():
         raise HTTPException(409, "SKU already exists in this organization")
