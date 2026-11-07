@@ -137,6 +137,7 @@ class InventoryProduct(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     unit: Mapped[str] = mapped_column(String(24), default="unit")
     sale_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    cost_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"))
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
