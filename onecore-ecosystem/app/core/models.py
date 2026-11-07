@@ -327,6 +327,7 @@ class POSSale(Base):
     shift_id: Mapped[int] = mapped_column(ForeignKey("pos_shifts.id"), index=True)
     cashier_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     client_transaction_id: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(String(3), default="KES")
     status: Mapped[str] = mapped_column(String(16), default="posted")
