@@ -1990,6 +1990,7 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
             if loyalty_customer:
                 loyalty_customer.points_balance-=points_to_reverse
+                loyalty_customer.lifetime_spend=max(Decimal("0"),Decimal(loyalty_customer.lifetime_spend or 0)-total)
                 db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
                     sale_id=sale.id,entry_type="reversal",points_delta=-points_to_reverse,
                     idempotency_key=f"return:{result.id}:loyalty-reversal",
