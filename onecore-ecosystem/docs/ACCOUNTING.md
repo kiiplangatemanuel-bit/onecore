@@ -92,3 +92,47 @@ periods, period close/lock, reversals, financial statements, cash-flow reporting
 multi-currency, tax compliance or statutory filing. Tenant tax rates are data
 provided by the operator; they are not a determination of statutory tax treatment.
 No live payment gateway, M-Pesa or KRA eTIMS integration is included.
+
+
+## Fiscal periods, budgets, fixed assets and statements
+
+A further increment adds:
+- Tenant fiscal period records with unique codes, non-overlapping date ranges and
+  open/closed status. Closing requires all draft invoices dated in the period to be
+  posted or otherwise resolved. New journals and invoice/payment/asset/depreciation
+  journals are rejected when their accounting date is in a closed period.
+- Period budgets with revenue/expense account allocations, approval and actual-vs-
+  budget reporting. Budgets are tenant-owned; branch-level budget lines are supported.
+- Fixed asset acquisition records with asset, accumulated depreciation, depreciation
+  expense and payment ledger accounts. Acquisition creates a balanced journal.
+- Monthly straight-line depreciation with per-asset/per-month uniqueness, an
+  idempotency key and a journal entry. Depreciation stops at salvage value.
+- A period profit-and-loss and as-at balance-sheet report derived from posted journal
+  lines. It reports whether the balance sheet equation balances.
+
+### Additional API
+
+- GET/POST /api/v1/accounting/fiscal-periods
+- POST /api/v1/accounting/fiscal-periods/{id}/close
+- POST /api/v1/accounting/budgets
+- POST /api/v1/accounting/budgets/{id}/approve
+- GET /api/v1/accounting/budgets/{id}/performance
+- GET/POST /api/v1/accounting/fixed-assets
+- POST /api/v1/accounting/fixed-assets/{id}/depreciation
+- GET /api/v1/accounting/financial-statements?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+### Limitations and operational controls
+
+- Period enforcement applies to dates covered by configured, closed periods. An
+  organization that has not configured fiscal periods has no fiscal-period boundary
+  enforcement; configure periods before relying on period-close controls.
+- Budgeting is period-level, not monthly/departmental forecasting; cost centres,
+  commitments and purchase-order encumbrances are not implemented.
+- Fixed assets use straight-line monthly depreciation only. Disposal, revaluation,
+  impairment, component accounting, asset transfers and tax depreciation are not
+  implemented.
+- Financial statements are basic ledger-derived summaries. Opening balances,
+  retained-earnings close journals, cash-flow statement, statutory presentation,
+  consolidation, audit sign-off and export formats remain outstanding.
+- The financial statement and budget reports require PostgreSQL scale/performance
+  testing and finance-team reconciliation before operational use.
