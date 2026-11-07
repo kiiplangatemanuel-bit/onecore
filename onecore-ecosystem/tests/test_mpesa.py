@@ -259,3 +259,25 @@ def test_successful_b2c_callback_requires_transaction_amount():
     assert "missing a valid transaction amount" in intent.result_description
     assert refund.status == "pending"
     db.close()
+
+
+
+def test_pos_mpesa_tenders_are_unsettled_until_callback_and_receipt_shows_status():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    routes = (root / "app" / "api" / "routes.py").read_text(encoding="utf-8")
+    accounting = (root / "app" / "api" / "accounting_pos.py").read_text(encoding="utf-8")
+    workspace = (root / "app" / "web" / "pos.html").read_text(encoding="utf-8")
+    assert 'status="unsettled" if payment.method in {"credit", "mpesa"} else "recorded"' in routes
+    assert 'if payment.status == "unsettled" and payment.method != "credit":' in accounting
+    assert "'/integrations/mpesa/pos/sales/'+saleId+'/payments'" in workspace
+    assert "M-Pesa collection status" in workspace
+
+
+def test_idempotent_return_response_includes_original_refund_ids():
+    from pathlib import Path
+    routes = (Path(__file__).resolve().parents[1] / "app" / "api" / "routes.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'existing_refunds = db.query(POSRefund)' in routes
+    assert '"refunds": [{"id": item.id, "method": item.method' in routes
