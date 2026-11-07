@@ -346,6 +346,9 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
     if intent.status == "success":
         return True
     result = body.get("Result") or body
+    callback_conversation = str(result.get("ConversationID") or "")
+    if intent.conversation_id and callback_conversation != intent.conversation_id:
+        return False
     code = result.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
     intent.result_description = str(result.get("ResultDesc") or ("Provider timeout" if timeout else ""))[:500]
