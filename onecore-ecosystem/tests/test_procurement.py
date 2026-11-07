@@ -211,3 +211,11 @@ def test_procurement_workspace_has_completion_workflow_controls():
     assert "supplier-invoices" in html
     assert "/returns" in html
     assert "supplier-performance" in html
+
+def test_accounted_supplier_invoice_quantities_remain_reserved_against_double_billing():
+    """AP-integrated invoices must still consume their accepted GRN quantities."""
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / "app" / "api" / "routes.py"
+    code = source.read_text(encoding="utf-8")
+    assert 'ProcurementSupplierInvoice.status.in_(["pending_match","matched","accounted"])' in code
+
