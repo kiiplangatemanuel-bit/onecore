@@ -586,3 +586,42 @@ class AccountingDepreciationEntry(Base):
         Index("ix_accounting_depreciation_org_key", "organization_id", "idempotency_key", unique=True),
         Index("ix_accounting_depreciation_asset_period", "organization_id", "asset_id", "period_date", unique=True),
     )
+
+
+class AccountingBankStatement(Base):
+    __tablename__ = "accounting_bank_statements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    bank_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    statement_reference: Mapped[str] = mapped_column(String(80))
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    opening_balance: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    closing_balance: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    reconciled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_bank_statement_org_ref", "organization_id", "statement_reference", unique=True),)
+
+
+class AccountingBankStatementLine(Base):
+    __tablename__ = "accounting_bank_statement_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    statement_id: Mapped[int] = mapped_column(ForeignKey("accounting_bank_statements.id"), index=True)
+    line_number: Mapped[int] = mapped_column()
+    transaction_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    description: Mapped[str] = mapped_column(String(240))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    matched_journal_line_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journal_lines.id"), nullable=True)
+    matched_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_bank_statement_line_number", "statement_id", "line_number", unique=True),
+        Index("ix_accounting_bank_match_org_journal", "organization_id", "matched_journal_line_id", unique=True),
+    )
