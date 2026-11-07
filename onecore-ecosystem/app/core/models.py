@@ -1298,6 +1298,7 @@ class CRMCampaignSchedule(Base):
     last_run_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id"), nullable=True)
     run_count: Mapped[int] = mapped_column(default=0)
     status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
