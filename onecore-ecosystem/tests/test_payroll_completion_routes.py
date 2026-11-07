@@ -9,5 +9,6 @@ def test_kenya_payroll_routes_are_registered():
     assert "/api/v1/hr/payroll/runs/{run_id}/approve-calculation" in paths
     assert "/api/v1/hr/payroll/runs/{run_id}/post-journal" in paths
     assert "/api/v1/hr/payroll/payment-batches/{batch_id}/bank-reconcile" in paths
+    assert "/api/v1/hr/payroll/payment-batches/{batch_id}/post-settlement-journal" in paths
     assert "/api/v1/hr/payroll/my-history" in paths
     assert any(getattr(route, "path", None) == "/health" for route in app.routes)
