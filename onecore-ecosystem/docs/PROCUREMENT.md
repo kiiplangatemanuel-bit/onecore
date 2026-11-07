@@ -172,6 +172,7 @@ Branch: `feature/procurement-settlement-governance`; migration `0033_procurement
 - `GET /accounting-reconciliation` compares procurement source invoices with their AP bridge records and reports missing integrations, total mismatches, settled payments and unmatched bank statement lines.
 
 ### API routes added
+- `POST /supplier-invoices/{id}/integrate-to-ap`
 - `POST/GET /supplier-settlements`
 - `POST /supplier-settlements/{id}/verify`
 - `GET /supplier-settlements/{id}/remittance`
