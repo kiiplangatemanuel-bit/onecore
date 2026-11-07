@@ -179,8 +179,24 @@ def _verifier(db, m, verifier_id, branch_id):
     return target
 
 
-def _check_drug_safety(db, m, patient_id, medicine_ids):
+def _active_patient_medicine_ids(db,m,patient_id):
+    current=set()
+    for rx in _resource_list(db,m,"pharmacy_prescription",patient_id=patient_id,limit=1000):
+        if rx.status not in {"active","partially_dispensed"}:
+            continue
+        data=_payload(rx)
+        if _date(data.get("valid_until"),"valid_until")<date.today():
+            continue
+        for line in data.get("lines",[]):
+            authorized=Decimal(line["quantity_prescribed"])*(1+int(line.get("refills_allowed",0)))
+            if Decimal(line.get("quantity_dispensed","0"))<authorized:
+                current.add(int(line["medicine_id"]))
+    return current
+
+
+def _check_drug_safety(db, m, patient_id, medicine_ids, concurrent_ids=None):
     warnings, blockers = [], []
+    new_ids=set(medicine_ids);concurrent_ids=set(concurrent_ids or set())
     allergies = _resource_list(db, m, "pharmacy_allergy", patient_id=patient_id, limit=1000)
     for allergy in allergies:
         data = _payload(allergy)
@@ -202,8 +218,11 @@ def _check_drug_safety(db, m, patient_id, medicine_ids):
         if data.get("is_active", True) is not True:
             continue
         a, b = data.get("medicine_a_id"), data.get("medicine_b_id")
-        hit = (data.get("rule_type") == "allergy" and a in medicine_ids) or (
-            data.get("rule_type") == "interaction" and a in medicine_ids and b in medicine_ids)
+        hit = (data.get("rule_type") == "allergy" and a in new_ids) or (
+            data.get("rule_type") == "interaction" and
+            ((a in new_ids and b in new_ids) or
+             (a in new_ids and b in concurrent_ids) or
+             (b in new_ids and a in concurrent_ids)))
         if hit:
             item = {"type": data.get("rule_type"), "medicine_ids": [a, b],
                     "description": data.get("description"), "severity": data.get("severity", "warning")}
@@ -494,7 +513,8 @@ def create_pharmacy_prescription(payload:dict,m=Depends(active_membership),u:Use
             "quantity_prescribed":str(quantity),"quantity_dispensed":"0",
             "refills_allowed":refills,"refills_used":0,"status":"pending"})
     if len(set(medicine_ids))!=len(medicine_ids):raise HTTPException(422,"Duplicate medicines in prescription")
-    warnings=_check_drug_safety(db,m,patient.id,medicine_ids)
+    warnings=_check_drug_safety(db,m,patient.id,medicine_ids,
+        _active_patient_medicine_ids(db,m,patient.id))
     data={"prescription_number":prescription_no,"patient_id":patient.id,
         "encounter_id":encounter.id,"prescriber_id":u.id,"valid_until":valid_until.isoformat(),
         "lines":normalized,"status":"active","issued_at":NOW().isoformat(),"safety_warnings":warnings}
@@ -561,6 +581,8 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
             raise HTTPException(409,"Dispense idempotency key conflicts with another request")
         return {"id":prior.id,"status":"already_recorded","quantity":str(qty)}
     medicine_id=int(line["medicine_id"]);medrow,med=_medicine(db,m,medicine_id)
+    safety_warnings=_check_drug_safety(db,m,patient.id,[medicine_id],
+        _active_patient_medicine_ids(db,m,patient.id))
     requested_batch=int(payload["batch_id"]) if payload.get("batch_id") else None
     batches=_resource_list(db,m,"pharmacy_batch",branch_id=rx.branch_id,limit=1000)
     candidates=[]
@@ -620,7 +642,7 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     db.commit()
     return {"id":disp.id,"status":"dispensed","quantity":str(qty),
         "allocations":allocations,"amount":str(amount),"invoice_id":invoice.id,
-        "prescription_status":rx.status}
+        "safety_warnings":safety_warnings,"prescription_status":rx.status}
 
 
 @router.post("/pharmacy/prescriptions/{prescription_id}/refill",status_code=201)
@@ -969,8 +991,10 @@ def create_laboratory_order(payload:dict,m=Depends(active_membership),u:User=Dep
 def list_laboratory_orders(status:str|None=None,patient_id:int|None=None,branch_id:str|None=None,
     m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db),
     limit:int=Query(200,ge=1,le=500)):
+    if patient_id:
+        patient,_,_=_patient_read(db,m,u,patient_id)
+        branch_id=branch_id or patient.branch_id
     _need(db,m,u,"lab.manage",branch_id)
-    if patient_id:_patient_read(db,m,u,patient_id)
     rows=_resource_list(db,m,"lab_order",branch_id=branch_id,patient_id=patient_id,status=status,limit=limit)
     return [{"id":x.id,"patient_id":x.patient_id,"branch_id":x.branch_id,"status":x.status,
         "encounter_id":_payload(x).get("encounter_id"),"created_at":x.created_at.isoformat()} for x in rows]
