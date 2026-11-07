@@ -318,6 +318,10 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
     if run.status != "draft":
         raise HTTPException(409, "Only draft payroll runs can be calculated")
     rule = _active_rule(db, membership.organization_id, run.period_end)
+    rule_start = date.fromisoformat(rule.data["effective_from"])
+    rule_end = date.fromisoformat(rule.data["effective_to"]) if rule.data.get("effective_to") else date.max
+    if rule_start > run.period_start or rule_end < run.period_end:
+        raise HTTPException(409, "Payroll period crosses a statutory rule effective-date boundary; split the period before calculation")
     lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run.id).all()
     if not lines:
         raise HTTPException(409, "Payroll run has no employees")
@@ -354,7 +358,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
         snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
                     "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
-                    "period_start": run.period_start.isoformat(), "period_end": run.period_end.isoformat(),
+                    "period_start": run.period_start.isoformat(), "period_end": run.period_end.isoformat(), "currency": run.currency,
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
