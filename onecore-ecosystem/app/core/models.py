@@ -205,3 +205,58 @@ class AccountingJournalLine(Base):
     debit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     credit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class CRMContact(Base):
+    """Organization-owned customer/prospect contact."""
+    __tablename__ = "crm_contacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(180))
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    company: Mapped[str] = mapped_column(String(180), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_crm_contact_org_email", "organization_id", "email"),
+        Index("ix_crm_contact_org_phone", "organization_id", "phone"),
+    )
+
+
+class CRMLead(Base):
+    """Tenant-owned lead and sales pipeline opportunity."""
+    __tablename__ = "crm_leads"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    source: Mapped[str] = mapped_column(String(60), default="other")
+    stage: Mapped[str] = mapped_column(String(24), default="new")
+    estimated_value: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    next_step: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_crm_lead_org_stage", "organization_id", "stage"),)
+
+
+class CRMActivity(Base):
+    """Auditable sales activity linked to a tenant contact or lead."""
+    __tablename__ = "crm_activities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True, index=True)
+    activity_type: Mapped[str] = mapped_column(String(24))
+    subject: Mapped[str] = mapped_column(String(180))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
