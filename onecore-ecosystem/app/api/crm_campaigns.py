@@ -83,7 +83,7 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
         db.add(d)
         db.commit()
         try:
-            result=send_campaign_message(c.channel,r.address_snapshot,c.name,c.message,
+            result=send_campaign_message(c.channel,r.address_snapshot,r.subject_snapshot or c.name,r.message_snapshot or c.message,
                 f"onecore-crm-{c.id}-{r.id}",unsubscribe_url)
             d.status="accepted"
             d.provider_message_id=result["provider_message_id"]
