@@ -5869,6 +5869,86 @@ def get_sacco_loan_schedule(loan_id: int,
             "status": row.status} for row in rows]}
 
 
+@router.get("/sacco/loans/arrears")
+def list_sacco_loan_arrears(as_of: date | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    """Read-only overdue installment ageing; does not accrue penalties or alter balances."""
+    require_permission(membership, "read")
+    cutoff = as_of or datetime.now(timezone.utc).date()
+    rows = db.query(SaccoLoan, SaccoLoanSchedule).join(
+        SaccoLoanSchedule,
+        and_(
+            SaccoLoanSchedule.loan_id == SaccoLoan.id,
+            SaccoLoanSchedule.organization_id == SaccoLoan.organization_id,
+        ),
+    ).filter(
+        SaccoLoan.organization_id == membership.organization_id,
+        SaccoLoan.status == "active",
+        SaccoLoanSchedule.organization_id == membership.organization_id,
+        SaccoLoanSchedule.due_date < cutoff,
+        SaccoLoanSchedule.status != "paid",
+    ).order_by(SaccoLoan.loan_number, SaccoLoanSchedule.due_date).all()
+
+    buckets = {
+        "1_30_days": Decimal("0.00"),
+        "31_60_days": Decimal("0.00"),
+        "61_90_days": Decimal("0.00"),
+        "over_90_days": Decimal("0.00"),
+    }
+    loan_totals = {}
+    total_overdue = Decimal("0.00")
+    for loan, installment in rows:
+        if loan.branch_id and not can_access_branch(membership, loan.branch_id):
+            continue
+        principal_due = max(
+            Decimal("0.00"), Decimal(installment.principal_due) - Decimal(installment.principal_paid)
+        )
+        interest_due = max(
+            Decimal("0.00"), Decimal(installment.interest_due) - Decimal(installment.interest_paid)
+        )
+        overdue = principal_due + interest_due
+        if overdue <= 0:
+            continue
+        days = (cutoff - installment.due_date).days
+        bucket = "1_30_days" if days <= 30 else "31_60_days" if days <= 60 else "61_90_days" if days <= 90 else "over_90_days"
+        buckets[bucket] += overdue
+        total_overdue += overdue
+        item = loan_totals.setdefault(loan.id, {
+            "loan_id": loan.id, "loan_number": loan.loan_number,
+            "member_id": loan.member_id, "branch_id": loan.branch_id,
+            "currency": "KES", "overdue_principal": Decimal("0.00"),
+            "overdue_interest": Decimal("0.00"), "total_overdue": Decimal("0.00"),
+            "oldest_due_date": installment.due_date,
+            "oldest_days_past_due": days, "overdue_installments": 0,
+        })
+        item["overdue_principal"] += principal_due
+        item["overdue_interest"] += interest_due
+        item["total_overdue"] += overdue
+        item["overdue_installments"] += 1
+        if installment.due_date < item["oldest_due_date"]:
+            item["oldest_due_date"] = installment.due_date
+            item["oldest_days_past_due"] = days
+
+    money = lambda value: str(value.quantize(Decimal("0.01")))
+    loans = []
+    for item in loan_totals.values():
+        item["oldest_due_date"] = item["oldest_due_date"].isoformat()
+        for key in ("overdue_principal", "overdue_interest", "total_overdue"):
+            item[key] = money(item[key])
+        loans.append(item)
+    return {
+        "as_of": cutoff.isoformat(),
+        "basis": "unpaid_scheduled_installments_past_due",
+        "currency": "KES",
+        "loan_count": len(loans),
+        "overdue_installment_count": sum(item["overdue_installments"] for item in loans),
+        "total_overdue": money(total_overdue),
+        "ageing": {key: money(value) for key, value in buckets.items()},
+        "loans": loans,
+        "penalties_accrued": False,
+    }
+
+
 @router.post("/sacco/loans/{loan_id}/repayments", status_code=201)
 def record_sacco_loan_repayment(loan_id: int, payload: SaccoLoanRepaymentIn,
     membership=Depends(active_membership), user: User=Depends(current_user),
