@@ -65,3 +65,29 @@ Do not expose a module as production-ready merely because it exists in the catal
 Keep specialist modules disabled until their own acceptance evidence is complete.
 Do not use the generic JSON record API as a substitute for accounting, clinical,
 tax, payroll, school grading, lending or offline-POS domain logic.
+
+
+## Database migration foundation (added 7 November 2026)
+
+- Added Alembic configuration and an explicit initial revision, `0001_initial`,
+  covering the existing shared-platform tables (users, organizations, memberships,
+  branches, records, audit events, custom domains, notices, dismissals and invitations).
+- Added migration environment with SQLAlchemy metadata registration and configured
+  database URL from application settings.
+- Removed implicit `Base.metadata.create_all()` from API startup; schema evolution
+  now uses reviewed, versioned migrations.
+- Docker startup runs `alembic upgrade head` before launching Uvicorn.
+- CI installs Alembic, applies the migration, tests downgrade to base and re-upgrade,
+  then runs compilation and pytest.
+- Operator instructions: `onecore-ecosystem/docs/DATABASE_MIGRATIONS.md`.
+- CI runs for the migration changes were still running at the time this tracker was
+  updated. Do not treat migration verification as passed until the Actions runs
+  attached to the commits below finish successfully.
+- Commits: `28acbc5` (config), `37cc3c6` (environment), `f7284fa` (initial
+  migration), `163f46f` (dependency), `399e339` (startup), `2682f76` (CI),
+  `14db2f3` (container startup), `26afe65` (operator documentation).
+
+Remaining database work: production PostgreSQL migration rehearsal, data backup and
+restore/PITR procedures, migration lock/concurrency strategy, monitoring and a
+reviewed upgrade/rollback runbook. The initial migration establishes the current
+shared schema only; specialist product schemas and domain migrations remain unbuilt.
