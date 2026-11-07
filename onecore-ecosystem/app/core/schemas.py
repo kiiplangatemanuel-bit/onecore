@@ -627,3 +627,37 @@ class SupplierReturnIn(BaseModel):
 class CRMQuoteConvertIn(BaseModel):
     order_number: str | None = Field(default=None, min_length=2, max_length=60,
                                       pattern=r"^[A-Za-z0-9._/-]+$")
+
+
+
+class CRMContactConsentIn(BaseModel):
+    channel: str = Field(pattern=r"^(email|sms|whatsapp)$")
+    purpose: str = Field(default="marketing", pattern=r"^marketing$")
+    decision: str = Field(pattern=r"^(granted|revoked)$")
+    source: str = Field(min_length=2, max_length=80)
+    expires_at: datetime | None = None
+
+    @field_validator("source")
+    @classmethod
+    def source_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Consent source must be provided")
+        return value
+
+
+class CRMCampaignIn(BaseModel):
+    campaign_number: str = Field(min_length=2, max_length=60,
+                                 pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    branch_id: str | None = Field(default=None, max_length=36)
+    channel: str = Field(pattern=r"^(email|sms|whatsapp)$")
+    message: str = Field(min_length=2, max_length=5000)
+
+    @field_validator("name", "message")
+    @classmethod
+    def nonblank_campaign_fields(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Campaign name and message must not be blank")
+        return value
