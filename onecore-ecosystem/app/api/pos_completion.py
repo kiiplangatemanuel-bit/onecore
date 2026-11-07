@@ -194,11 +194,19 @@ def sync_monitor(membership=Depends(active_membership),db:Session=Depends(get_db
 @router.post("/customers",status_code=201)
 def create_customer(payload:CustomerIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if payload.branch_id:_tenant_branch(db,membership,payload.branch_id)
-    if payload.phone and db.query(POSCustomer).filter_by(organization_id=membership.organization_id,phone=payload.phone).first():
+    phone=payload.phone.strip()
+    if phone and db.query(POSCustomer).filter_by(organization_id=membership.organization_id,phone=phone).first():
         raise HTTPException(409,"Customer phone already exists in this organization")
     row=POSCustomer(organization_id=membership.organization_id,branch_id=payload.branch_id,customer_number="C"+secrets.token_hex(6).upper(),
-        full_name=payload.full_name.strip(),phone=payload.phone.strip(),email=payload.email.strip().lower())
-    db.add(row); db.flush(); _audit(db,user,membership.organization_id,"pos.customer.created","pos_customer",row.id); db.commit()
+        full_name=payload.full_name.strip(),phone=phone,email=payload.email.strip().lower())
+    db.add(row)
+    try:
+        db.flush()
+        _audit(db,user,membership.organization_id,"pos.customer.created","pos_customer",row.id)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Customer phone or membership number already exists in this organization")
     return {"id":row.id,"customer_number":row.customer_number,"full_name":row.full_name,"phone":row.phone,"points_balance":row.points_balance}
 
 @router.get("/customers")
@@ -216,6 +224,10 @@ def link_customer_sale(customer_id:int,payload:CustomerSaleIn,membership=Depends
     sale=db.query(POSSale).filter_by(id=payload.sale_id,organization_id=membership.organization_id,status="posted").first()
     if not customer or not sale:raise HTTPException(404,"Customer or posted sale not found")
     _branch(membership,sale.branch_id)
+    if customer.branch_id:
+        _branch(membership,customer.branch_id)
+        if customer.branch_id != sale.branch_id:
+            raise HTTPException(404,"Branch-specific customer cannot be linked to a sale from another branch")
     if db.query(POSCustomerSale).filter_by(organization_id=membership.organization_id,sale_id=sale.id).first():raise HTTPException(409,"Sale already linked to a customer")
     db.add(POSCustomerSale(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id))
     customer.lifetime_spend=Decimal(customer.lifetime_spend or 0)+Decimal(sale.total_amount)
