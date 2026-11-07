@@ -318,5 +318,6 @@ API:
 - GET/PUT `/api/v1/accounting/pos-mapping`
 - GET `/api/v1/accounting/pos-integrations`
 - POST `/api/v1/accounting/pos-integrations/post-pending`
+- POST `/api/v1/accounting/pos-integrations/backfill`
 
 This integration does not execute external refunds or settle payment-provider clearing accounts; those remain separate payment-provider and reconciliation workflows. Account types, base-currency consistency and tax treatment require finance configuration and review.
