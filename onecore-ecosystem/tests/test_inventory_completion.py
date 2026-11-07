@@ -19,7 +19,7 @@ def test_inventory_completion_models_are_registered():
         "inventory_warehouses", "inventory_transfers", "inventory_transfer_lines",
         "inventory_reservations", "inventory_batches", "inventory_stocktakes",
         "inventory_stocktake_lines", "inventory_reorder_rules", "inventory_price_lists",
-        "inventory_prices",
+        "inventory_prices", "inventory_replenishment_runs",
     }
     from app.core.database import Base
     assert expected <= set(Base.metadata.tables)
