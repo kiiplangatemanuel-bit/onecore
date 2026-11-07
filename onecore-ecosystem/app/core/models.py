@@ -507,7 +507,7 @@ class LaboratorySample(Base):
     collected_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     __table_args__ = (
         Index("ix_lab_sample_org_accession", "organization_id", "accession_number", unique=True),
-        Index("ix_lab_sample_org_order", "organization_id", "order_id", unique=True),
+        Index("ix_lab_sample_org_order", "organization_id", "order_id"),
     )
 
 
