@@ -34,6 +34,16 @@
 <label>Supervisor note<input name="note" minlength="5" maxlength="500" required></label>
 <button>Resolve conflict</button>
 </form>
+<h3>Customer membership</h3>
+<form id="customerMembershipForm">
+<label>Customer reference<input name="customer_ref" minlength="1" maxlength="100" required></label>
+<label>Full name<input name="full_name" minlength="2" maxlength="160" required></label>
+<label>Phone<input name="phone" maxlength="32"></label>
+<label>Email<input name="email" type="email" maxlength="254"></label>
+<button>Create / update membership</button>
+</form><p id="customerMembershipStatus" aria-live="polite"></p>
+<form id="customerHistoryForm"><label>Customer record ID<input name="customer_id" type="number" min="1" required></label><button>Load customer history</button></form>
+<pre id="customerHistory" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
 <h3>Multi-store POS summary</h3><pre id="advancedReport" style="white-space:pre-wrap;overflow-wrap:anywhere">Sign in to view store totals.</pre>
 </section>
 </main><footer>Powered by OneCore Technologies Ltd</footer>
@@ -116,6 +126,19 @@ $('returnForm').addEventListener('submit',async e=>{
 async function updateQueue(){const items=await queueRecords();$('queueCount').textContent=items.length+' transactions waiting to sync.';$('queueList').replaceChildren();items.forEach(x=>{const li=document.createElement('li');li.textContent=x.id; $('queueList').append(li);});}
 async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
 let cart=[];
+$('customerMembershipForm').addEventListener('submit',async e=>{
+ e.preventDefault();const data=Object.fromEntries(new FormData(e.currentTarget));
+ try{const result=await api('/pos/advanced/customers',{method:'POST',body:JSON.stringify(data)});
+  $('customerMembershipStatus').textContent='Membership saved. Record #'+result.id+' · membership '+result.membership_number+' · points '+result.points_balance+'. Use customer reference '+result.customer_ref+' at checkout.';
+  e.currentTarget.reset();
+ }catch(err){status('Customer membership: '+err.message);}
+});
+$('customerHistoryForm').addEventListener('submit',async e=>{
+ e.preventDefault();const id=Number(new FormData(e.currentTarget).get('customer_id'));
+ try{$('customerHistory').textContent=JSON.stringify(await api('/pos/advanced/customers/'+id+'/history'),null,2);}
+ catch(err){status('Customer history: '+err.message);}
+});
+
 async function loadAdvanced(){
  if(!token)return;
  $('refreshAdvanced').disabled=true;
