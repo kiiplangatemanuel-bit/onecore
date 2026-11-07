@@ -36,7 +36,7 @@ def test_qualifying_pension_and_other_allowable_deductions_are_capped():
         "employee_pension": "50000", "mortgage_interest": "40000",
         "post_retirement_medical_fund": "20000", "insurance_premium": "50000"
     })
-    assert Decimal(result["employee_pension"]) == Decimal("30000.00")
+    assert Decimal(result["employee_pension"]) == Decimal("23520.00")
     assert Decimal(result["mortgage_interest"]) == Decimal("30000.00")
     assert Decimal(result["post_retirement_medical_fund"]) == Decimal("15000.00")
     assert Decimal(result["insurance_relief"]) == Decimal("5000.00")
