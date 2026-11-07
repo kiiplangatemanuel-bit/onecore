@@ -1162,3 +1162,42 @@ class POSAccountingLink(Base):
         Index("ix_pos_accounting_source", "organization_id", "source_type", "source_id", unique=True),
         Index("ix_pos_accounting_pending", "organization_id", "status"),
     )
+
+
+
+class MpesaPaymentIntent(Base):
+    __tablename__ = "mpesa_payment_intents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("pos_payments.id"), unique=True)
+    phone_number: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    checkout_request_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    merchant_request_id: Mapped[str] = mapped_column(String(100), default="")
+    callback_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="initiating")
+    result_code: Mapped[str] = mapped_column(String(40), default="")
+    result_description: Mapped[str] = mapped_column(String(500), default="")
+    mpesa_receipt_number: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MpesaRefundIntent(Base):
+    __tablename__ = "mpesa_refund_intents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    refund_id: Mapped[int] = mapped_column(ForeignKey("pos_refunds.id"), unique=True, index=True)
+    phone_number: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    conversation_id: Mapped[str] = mapped_column(String(100), default="")
+    originator_conversation_id: Mapped[str] = mapped_column(String(100), default="")
+    callback_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="initiating")
+    result_code: Mapped[str] = mapped_column(String(40), default="")
+    result_description: Mapped[str] = mapped_column(String(500), default="")
+    mpesa_receipt_number: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

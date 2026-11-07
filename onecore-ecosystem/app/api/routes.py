@@ -1489,8 +1489,13 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     if existing:
         if existing.request_hash != request_hash:
             raise HTTPException(409, "Client transaction ID was already used for different sale data")
+        existing_payments = db.query(POSPayment).filter_by(
+            organization_id=membership.organization_id, sale_id=existing.id
+        ).order_by(POSPayment.id).all()
         return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
-                "status": "already_synced", "total_amount": str(existing.total_amount)}
+                "status": "already_synced", "total_amount": str(existing.total_amount),
+                "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                             for p in existing_payments]}
     shift = db.query(POSShift).filter_by(
         id=payload.shift_id, organization_id=membership.organization_id,
         branch_id=payload.branch_id, cashier_user_id=user.id, status="open"
@@ -1569,7 +1574,7 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             organization_id=membership.organization_id, sale_id=sale.id,
             method=payment.method, amount=money(payment.amount),
             provider_reference=payment.provider_reference,
-            status="unsettled" if payment.method == "credit" else "recorded"
+            status="unsettled" if payment.method in {"credit", "mpesa"} else "recorded"
         ))
     # Auto-post the source and journal in the same transaction. Missing mappings
     # create a durable pending bridge item without blocking checkout.
@@ -1586,14 +1591,24 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             client_transaction_id=payload.client_transaction_id
         ).first()
         if existing and existing.request_hash == request_hash:
+            existing_payments = db.query(POSPayment).filter_by(
+                organization_id=membership.organization_id, sale_id=existing.id
+            ).order_by(POSPayment.id).all()
             return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
-                    "status": "already_synced", "total_amount": str(existing.total_amount)}
+                    "status": "already_synced", "total_amount": str(existing.total_amount),
+                    "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                                 for p in existing_payments]}
         raise HTTPException(409, "POS transaction conflicts with an existing synchronization")
     db.refresh(sale)
     audit(db, user.id, membership.organization_id, "pos.sale.synced",
           "pos_sale", sale.id, payload.client_transaction_id)
+    sale_payments = db.query(POSPayment).filter_by(
+        organization_id=membership.organization_id, sale_id=sale.id
+    ).order_by(POSPayment.id).all()
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
             "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency,
+            "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                         for p in sale_payments],
             "accounting_status": accounting_link.status, "accounting_journal_id": accounting_link.journal_id}
 
 
@@ -1646,7 +1661,7 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
             "tax_rate": str(line.tax_rate), "tax_amount": str(line.tax_amount),
             "line_total": str(line.line_total),
         } for line, name, sku in lines],
-        "payments": [{"method": p.method, "amount": str(p.amount), "status": p.status,
+        "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status,
                       "provider_reference": p.provider_reference} for p in payments],
     }
 
@@ -1754,7 +1769,7 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
     for item in payload.refunds:
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
-            status="recorded"))
+            status="pending" if item.method == "mpesa" else "recorded"))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
@@ -1777,7 +1792,11 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             "refund_total": str(result.refund_total), "currency": sale.currency,
             "stock_reintegrated": True, "refunds_executed": False,
             "accounting_status": accounting_link.status,
-            "accounting_journal_id": accounting_link.journal_id}
+            "accounting_journal_id": accounting_link.journal_id,
+            "refunds": [{"id": item.id, "method": item.method, "amount": str(item.amount), "status": item.status}
+                        for item in db.query(POSRefund).filter_by(
+                            organization_id=membership.organization_id, return_id=result.id
+                        ).order_by(POSRefund.id).all()]}
 
 
 @router.get("/pos/shifts/current")

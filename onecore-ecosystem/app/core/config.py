@@ -19,7 +19,12 @@ class Settings(BaseSettings):
     mpesa_consumer_secret: str = ""
     mpesa_shortcode: str = ""
     mpesa_passkey: str = ""
+    mpesa_transaction_type: str = "CustomerPayBillOnline"
     mpesa_callback_url: str = ""
+    mpesa_initiator_name: str = ""
+    mpesa_security_credential: str = ""
+    mpesa_b2c_result_url: str = ""
+    mpesa_b2c_timeout_url: str = ""
 
     integration_etims_enabled: bool = False
     etims_base_url: str = ""

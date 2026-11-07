@@ -183,7 +183,7 @@ class POSSaleLineIn(BaseModel):
 
 
 class POSPaymentIn(BaseModel):
-    method: str = Field(pattern=r"^(cash|card|bank|credit)$")
+    method: str = Field(pattern=r"^(cash|card|bank|credit|mpesa)$")
     amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     provider_reference: str = Field(default="", max_length=120)
 
@@ -204,7 +204,7 @@ class POSReturnLineIn(BaseModel):
 
 
 class POSRefundIn(BaseModel):
-    method: str = Field(pattern=r"^(cash|card|bank)$")
+    method: str = Field(pattern=r"^(cash|card|bank|mpesa)$")
     amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     provider_reference: str = Field(default="", max_length=120)
 

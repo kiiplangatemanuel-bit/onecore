@@ -7,11 +7,11 @@
 <section class="panel"><h1>Point of sale</h1><p class="muted">Online shift opening, local encrypted transaction queue and idempotent server synchronization.</p>
 <form id="login"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><label>Organization ID<input name="org" inputmode="numeric" required></label><label>Branch ID<input name="branch" required maxlength="36"></label><button>Sign in</button></form>
 <div class="row"><button type="button" id="openShift" disabled>Open cashier shift</button><button type="button" id="sync" disabled>Sync queued sales</button><span id="shift" class="muted">No active shift.</span></div></section>
-<section class="panel"><h2>Checkout</h2><form id="sale"><label>Product<select name="product_id" required><option value="">Load catalogue after sign in</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" value="1" required></label><button type="button" id="addToCart" disabled>Add product to cart</button><label>Manager discount (%)<input name="discount_percent" type="number" min="0" max="100" step="0.01" value="0" required></label><label>Payment method<select name="method"><option>cash</option><option>card</option><option>bank</option><option>credit</option></select></label><label>Cart total<input id="total" readonly aria-readonly="true" value="0.00"></label><button id="checkout" disabled>Save sale locally / sync</button></form><div id="cartList" aria-live="polite" class="muted">Cart is empty.</div><p class="muted">Add multiple products before checkout. Prices and totals are recomputed from the server catalogue when synchronized. Credit is recorded as unsettled. Card and bank entries are tender records only; no gateway is connected.</p></section>
+<section class="panel"><h2>Checkout</h2><form id="sale"><label>Product<select name="product_id" required><option value="">Load catalogue after sign in</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" value="1" required></label><button type="button" id="addToCart" disabled>Add product to cart</button><label>Manager discount (%)<input name="discount_percent" type="number" min="0" max="100" step="0.01" value="0" required></label><label>Payment method<select name="method"><option>cash</option><option>card</option><option>bank</option><option>credit</option><option>mpesa</option></select></label><label id="mpesaPhoneLabel" hidden>M-Pesa phone number<input name="mpesa_phone" inputmode="tel" placeholder="07XXXXXXXX"></label><label>Cart total<input id="total" readonly aria-readonly="true" value="0.00"></label><button id="checkout" disabled>Save sale locally / sync</button></form><div id="cartList" aria-live="polite" class="muted">Cart is empty.</div><p class="muted">Add multiple products before checkout. Prices and totals are recomputed from the server catalogue when synchronized. Credit is recorded as unsettled. Card and bank entries are tender records only. M-Pesa requires an online STK Push after sale synchronization.</p></section>
 <section class="panel"><h2>Receipts and returns</h2>
 <form id="receiptLookup"><label>Sale ID<input name="sale_id" type="number" min="1" required></label><button>Load receipt</button></form>
-<div id="receiptOutput"></div><div class="row"><button type="button" id="printReceipt" disabled>Print receipt</button></div>
-<form id="returnForm" hidden><h3>Supervisor return</h3><label>Reason<input name="reason" minlength="5" maxlength="500" required></label><label>Refund method<select name="refund_method"><option value="cash">Cash</option><option value="card">Card (record only)</option><option value="bank">Bank (record only)</option></select></label><button>Record return and restock</button><p class="muted">Requires manage permission. This records the refund; it does not send money through a payment provider.</p></form></section>
+<div id="receiptOutput"></div><div id="mpesaRefundRetry" hidden><p id="mpesaRefundRetryStatus"></p><label>Refund recipient phone<input id="mpesaRefundRetryPhone" inputmode="tel" placeholder="07XXXXXXXX"></label><button type="button" id="retryMpesaRefund">Retry M-Pesa payout</button></div><div class="row"><button type="button" id="printReceipt" disabled>Print receipt</button></div>
+<form id="returnForm" hidden><h3>Supervisor return</h3><label>Reason<input name="reason" minlength="5" maxlength="500" required></label><label>Refund method<select name="refund_method"><option value="cash">Cash</option><option value="card">Card (record only)</option><option value="bank">Bank (record only)</option><option value="mpesa">M-Pesa B2C</option></select></label><label id="refundPhoneLabel" hidden>M-Pesa refund phone<input name="refund_phone" inputmode="tel" placeholder="07XXXXXXXX"></label><button>Record return and restock</button><p class="muted">Requires manage permission. This records the refund; it does not send money through a payment provider.</p></form></section>
 <section class="panel"><h2>Offline queue</h2><p id="queueCount" aria-live="polite">0 transactions waiting.</p><ul id="queueList"></ul><p class="muted">Queued transactions are encrypted with Web Crypto before storage in this browser's IndexedDB. Keep this browser profile and device safe. A still-active signed-in session and open shift are required to create offline sales; offline sign-in after a reload is not yet supported.</p></section>
 <p id="status" role="status" aria-live="polite"></p>
 </main><footer>Powered by OneCore Technologies Ltd</footer>
@@ -30,7 +30,7 @@ async function decrypt(record){const plain=await crypto.subtle.decrypt({name:'AE
 async function saveCache(){const encrypted=await encrypt(catalog);await reqStore('cache','readwrite',s=>s.put({id:'catalog',...encrypted}));}
 async function loadCache(){const r=await reqStore('cache','readonly',s=>s.get('catalog'));if(r)catalog=await decrypt(r);}
 async function queueRecords(){return await reqStore('queue','readonly',s=>s.getAll());}
-let currentReceipt=null;
+let currentReceipt=null,pendingMpesaRefund=null;
 async function loadReceipt(saleId){
  const data=await api('/pos/sales/'+encodeURIComponent(saleId));
  currentReceipt=data;
@@ -44,6 +44,17 @@ async function loadReceipt(saleId){
   const td=document.createElement('td'),input=document.createElement('input');input.type='number';input.min='0';input.max=line.returnable_quantity;input.step='0.001';input.value='0';input.dataset.saleLineId=String(line.id);input.dataset.unitPrice=String(line.unit_price);input.dataset.lineTotal=String(line.line_total);input.dataset.originalQuantity=String(line.quantity);input.dataset.returnableValue=String(line.returnable_value);input.dataset.returnableQuantity=String(line.returnable_quantity);input.className='return-qty';input.setAttribute('aria-label','Return quantity for '+line.name);td.append(input);tr.append(td);table.append(tr);
  });out.append(table);
  const tenders=document.createElement('p');tenders.textContent='Tenders: '+data.payments.map(p=>p.method+' '+p.amount+' ('+p.status+')').join(' · ');out.append(tenders);
+ const mpesaRefunds=await api('/integrations/mpesa/pos/sales/'+saleId+'/refunds');
+ const pendingRefund=mpesaRefunds.find(item=>item.refund_status==='pending');
+ if(pendingRefund){
+  pendingMpesaRefund={returnId:pendingRefund.return_id,refundId:pendingRefund.refund_id};
+  $('mpesaRefundRetry').hidden=false;
+  const uncertain=['unknown','timeout','exception'].includes(pendingRefund.intent_status);
+  $('retryMpesaRefund').disabled=uncertain;
+  $('mpesaRefundRetryStatus').textContent='M-Pesa refund '+pendingRefund.refund_id+' status: '+(pendingRefund.intent_status||'not initiated')+'. '+(uncertain?'Outcome is uncertain; reconcile with Safaricom before retrying.':'Use Check / retry after Safaricom responds.');
+ }else{
+  pendingMpesaRefund=null;$('mpesaRefundRetry').hidden=true;$('retryMpesaRefund').disabled=false;
+ }
  $('returnForm').hidden=data.status!=='posted';$('printReceipt').disabled=false;
 }
 $('receiptLookup').addEventListener('submit',async e=>{e.preventDefault();try{await loadReceipt(e.currentTarget.elements.sale_id.value);status('Receipt loaded.');}catch(err){status(err.message);}});
@@ -54,10 +65,23 @@ $('returnForm').addEventListener('submit',async e=>{
  if(!lines.length)return status('Enter at least one return quantity.');
  const total=lines.reduce((sum,line)=>{const input=document.querySelector('[data-sale-line-id="'+line.sale_line_id+'"]');const quantity=Number(line.quantity),remaining=Number(input.dataset.returnableQuantity);const amount=quantity===remaining?Number(input.dataset.returnableValue):(Number(input.dataset.lineTotal)/Number(input.dataset.originalQuantity))*quantity;return sum+Math.round(amount*100)/100;},0);
  if(!(total>0))return status('Return value must be greater than zero.');
+ const refundMethod=form.elements.refund_method.value;
+ if(refundMethod==='mpesa' && !form.elements.refund_phone.value.trim())return status('Enter the M-Pesa refund recipient phone number.');
  const body={client_return_id:crypto.randomUUID(),reason:form.elements.reason.value.trim(),lines,
-  refunds:[{method:form.elements.refund_method.value,amount:(Math.round(total*100)/100).toFixed(2)}]};
+  refunds:[{method:refundMethod,amount:(Math.round(total*100)/100).toFixed(2)}]};
  try{const result=await api('/pos/sales/'+currentReceipt.id+'/returns',{method:'POST',body:JSON.stringify(body)});
-  status('Return '+result.id+' recorded. Stock was returned; payment execution is not automated.');
+  if(refundMethod==='mpesa' && result.refunds?.[0]?.id){
+   pendingMpesaRefund={returnId:result.id,refundId:result.refunds[0].id};
+   $('mpesaRefundRetry').hidden=false;
+   $('mpesaRefundRetryPhone').value=form.elements.refund_phone.value;
+   try{
+    const payout=await api('/integrations/mpesa/pos/returns/'+result.id+'/refunds/'+result.refunds[0].id+'/b2c',{method:'POST',body:JSON.stringify({phone_number:form.elements.refund_phone.value})});
+    $('mpesaRefundRetryStatus').textContent='Return '+result.id+' saved. M-Pesa B2C payout status: '+payout.status+'. Use Check / retry after Safaricom responds.';
+    status('Return recorded. M-Pesa B2C payout '+payout.status+'; awaiting provider confirmation.');
+   }catch(payoutError){
+    $('mpesaRefundRetryStatus').textContent='Return '+result.id+' is saved. Payout initiation failed: '+payoutError.message+'. Retry the same refund; do not create another return.';
+   }
+  }else status('Return '+result.id+' recorded and restocked. Refund payout remains subject to its payment provider.');
   await loadReceipt(currentReceipt.id);form.reset();
  }catch(err){status(err.message);}
 });
@@ -65,6 +89,8 @@ $('returnForm').addEventListener('submit',async e=>{
 async function updateQueue(){const items=await queueRecords();$('queueCount').textContent=items.length+' transactions waiting to sync.';$('queueList').replaceChildren();items.forEach(x=>{const li=document.createElement('li');li.textContent=x.id; $('queueList').append(li);});}
 async function api(path,opts={}){const headers={Authorization:'Bearer '+token,'X-Organization-ID':org,...(opts.body?{'Content-Type':'application/json'}:{})};const r=await fetch('/api/v1'+path,{...opts,headers});const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.detail||'Request failed '+r.status);return d;}
 let cart=[];
+$('sale').elements.method.addEventListener('change',()=>{$('mpesaPhoneLabel').hidden=$('sale').elements.method.value!=='mpesa';});
+$('returnForm').elements.refund_method.addEventListener('change',()=>{$('refundPhoneLabel').hidden=$('returnForm').elements.refund_method.value!=='mpesa';});
 function cartLineTotal(item){const subtotal=Math.round(Number(item.product.sale_price)*Number(item.quantity)*100)/100,discount=Math.round(subtotal*Number(item.discount_percent||0))/100,taxable=subtotal-discount,tax=Math.round(taxable*Number(item.product.tax_rate||0))/100;return Math.round((taxable+tax)*100)/100;}
 function renderCart(){
  const box=$('cartList');box.replaceChildren();
@@ -90,10 +116,19 @@ $('openShift').addEventListener('click',async()=>{try{shift=await api('/pos/shif
 $('sale').elements.product_id.addEventListener('change',amount);$('sale').elements.quantity.addEventListener('input',amount);$('sale').elements.discount_percent.addEventListener('input',renderCart);
 $('addToCart').addEventListener('click',()=>{const {p,qty}=amount();if(!p||qty<=0)return status('Select a product and valid quantity.');const discountPercent=Number($('sale').elements.discount_percent.value||0);if(!Number.isFinite(discountPercent)||discountPercent<0||discountPercent>100)return status('Discount must be between 0 and 100 percent.');const existing=cart.find(item=>item.product.id===p.id);const next=qty+(existing?Number(existing.quantity):0);if(next>Number(p.available_quantity))return status('Cart quantity exceeds the last synchronized stock snapshot.');if(existing){existing.quantity=next;existing.discount_percent=discountPercent;}else cart.push({product:p,quantity:qty,discount_percent:discountPercent});$('sale').elements.quantity.value='1';renderCart();amount();status(p.name+' added to cart.');});
 $('sale').addEventListener('submit',async e=>{e.preventDefault();if(!token||!shift)return status('Sign in and open a shift before checkout.');if(!cart.length)return status('Add at least one product to the cart.');for(const item of cart){if(Number(item.quantity)>Number(item.product.available_quantity))return status('Cart quantity exceeds stock for '+item.product.name+'.');}
-const total=cart.reduce((sum,item)=>sum+cartLineTotal(item),0);if(total<=0)return status('Sale total must be greater than zero.');
-const sale={client_transaction_id:crypto.randomUUID(),shift_id:shift.id,branch_id:branch,currency:'KES',offline_created_at:new Date().toISOString(),lines:cart.map(item=>({product_id:item.product.id,quantity:Number(item.quantity).toFixed(3),discount_percent:Number(item.discount_percent||0).toFixed(4)})),payments:[{method:$('sale').elements.method.value,amount:total.toFixed(2)}]};
+const total=cart.reduce((sum,item)=>sum+cartLineTotal(item),0);if(total<=0)return status('Sale total must be greater than zero.');if($('sale').elements.method.value==='mpesa' && !$('sale').elements.mpesa_phone.value.trim())return status('Enter the customer M-Pesa phone number.');
+const sale={client_transaction_id:crypto.randomUUID(),shift_id:shift.id,branch_id:branch,currency:'KES',offline_created_at:new Date().toISOString(),mpesa_phone:$('sale').elements.mpesa_phone.value,lines:cart.map(item=>({product_id:item.product.id,quantity:Number(item.quantity).toFixed(3),discount_percent:Number(item.discount_percent||0).toFixed(4)})),payments:[{method:$('sale').elements.method.value,amount:total.toFixed(2)}]};
 try{const encrypted=await encrypt(sale);await reqStore('queue','readwrite',s=>s.put({id:sale.client_transaction_id,...encrypted}));cart.forEach(item=>{item.product.available_quantity=(Number(item.product.available_quantity)-Number(item.quantity)).toFixed(3);});cart=[];await saveCache();renderCatalog();await updateQueue();status('Multi-product sale stored safely in the local queue.');if(navigator.onLine)await syncQueue();}catch(err){status('Could not save sale locally: '+err.message);}});
-async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=await queueRecords();for(const item of items){try{const sale=await decrypt(item);await api('/pos/sync',{method:'POST',body:JSON.stringify(sale)});await reqStore('queue','readwrite',s=>s.delete(item.id));status('Synced sale '+item.id);}catch(err){status('Sync paused for '+item.id+': '+err.message);break;}}await updateQueue();try{await refreshOnline();}catch(e){status('Queue sync done; catalogue refresh failed: '+e.message);}}
+async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=await queueRecords();for(const item of items){try{const sale=await decrypt(item);const synced=await api('/pos/sync',{method:'POST',body:JSON.stringify(sale)});const mpesaPayment=(synced.payments||[]).find(p=>p.method==='mpesa');if(mpesaPayment){if(!sale.mpesa_phone)throw new Error('Sale synced, but M-Pesa phone number is missing; reload the receipt and initiate STK Push from payment management.');const push=await api('/integrations/mpesa/pos/sales/'+synced.id+'/payments/'+mpesaPayment.id+'/stk-push',{method:'POST',body:JSON.stringify({phone_number:sale.mpesa_phone})});status('Sale '+synced.id+' synced. M-Pesa STK Push '+push.status+'; customer must approve on phone.');}await reqStore('queue','readwrite',s=>s.delete(item.id));}catch(err){status('Sync paused for '+item.id+': '+err.message);break;}}await updateQueue();try{await refreshOnline();}catch(e){status('Queue sync done; catalogue refresh failed: '+e.message);}}
+$('retryMpesaRefund').addEventListener('click',async()=>{
+ if(!pendingMpesaRefund)return;
+ try{
+  const payout=await api('/integrations/mpesa/pos/returns/'+pendingMpesaRefund.returnId+'/refunds/'+pendingMpesaRefund.refundId+'/b2c',{method:'POST',body:JSON.stringify({phone_number:$('mpesaRefundRetryPhone').value})});
+  $('mpesaRefundRetryStatus').textContent='M-Pesa B2C payout status: '+payout.status+'. '+(payout.message||'');
+  status('M-Pesa refund payout status: '+payout.status+'.');
+  if(payout.status==='success'){$('mpesaRefundRetry').hidden=true;pendingMpesaRefund=null;}
+ }catch(err){status('M-Pesa payout retry failed: '+err.message);}
+});
 $('sync').addEventListener('click',syncQueue);
 })();
 </script></body></html>

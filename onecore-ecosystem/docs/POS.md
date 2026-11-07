@@ -23,8 +23,8 @@ replays idempotent and conflicting reuse return HTTP 409.
 
 Shift close compares counted cash with opening float plus recorded cash tender and
 returns the variance. Credit tenders are stored as unsettled. Cash/card/bank are
-recorded tender types only; no acquiring gateway, M-Pesa, STK push or bank
-verification is connected.
+cash/card/bank tender records are manual; M-Pesa STK Push is available through
+the configured Safaricom Daraja integration and is settled only after verified callback.
 
 ## Sale receipts and returns
 
@@ -41,10 +41,10 @@ verification is connected.
 - Return stock is added through append-only inventory receipt movements in the
   original sale branch. Return IDs are tenant-unique and canonical request hashes
   protect safe retries; conflicting reuse returns HTTP 409.
-- Refund rows are accounting records only. `refunds_executed=false` is returned
-  because cash drawer payout or card/bank/M-Pesa gateway execution is not automated.
-- Return valuation uses the original stored sale line unit price. POS tax allocation,
-  discount allocation and accounting journal integration are not yet implemented.
+- Cash/card/bank refund rows remain operational records; M-Pesa refunds can be sent
+  through the Daraja B2C flow and are marked paid only after a successful result callback.
+- Return valuation uses the original tax-inclusive discounted line snapshots.
+  POS returns create a pending accounting bridge until every allocated payout is confirmed.
 
 ## Browser offline behavior
 
@@ -72,8 +72,9 @@ attestation.
   and cash drawer integration.
 - Cashier permissions, multi-user/multi-till shift reconciliation and approval
   thresholds beyond the manager permission on returns.
-- M-Pesa/card/bank gateway integrations, verified callbacks, settlement and
-  reconciliation. Manual tender/refund rows are not payment verification/execution.
+- Card/bank gateway integrations and automated settlement feeds remain future work.
+  M-Pesa requires approved Daraja credentials, a public HTTPS callback host and
+  production shortcode/B2C entitlements; sandbox CI does not prove live provider settlement.
 - Server-side stock reservations, supervisor review of stale offline stock conflicts,
   queue dead-letter/retry visibility, background sync and sync telemetry.
 - Bandwidth-aware catalogue refresh, crash recovery, cross-device/cross-branch
@@ -102,7 +103,9 @@ Partial and full returns now use the original tax-inclusive discounted line valu
 
 - Tax percentages are organization-configured product settings; no automatic KRA tax category mapping, VAT exemptions, withholding tax, eTIMS device certification, invoice numbering compliance or statutory filing is asserted.
 - Discounts are controlled by the existing `manage` permission, not a configurable threshold/approval matrix. Per-cashier discount limits and manager override PINs remain future work.
-- POS refunds remain accounting records only; no M-Pesa/card/bank/cash payout is executed.
+- M-Pesa B2C payout is supported for eligible refunds; cash/card/bank payout execution
+  remains manual. A B2C timeout is treated as an uncertain outcome and must be reconciled
+  with Safaricom before retrying to avoid duplicate disbursement.
 - The tax/discount calculation is tax-exclusive and rounds monetary line amounts to two decimal places. Confirm applicable product tax treatment with the organization's tax adviser before production use.
 
 
@@ -138,3 +141,46 @@ A sale journal debits each tender/receivable account and discounts, then credits
 Every source has one unique organization/source-type/source-ID bridge link. Replays do not create duplicate journals. When mappings are not configured, or a source date falls in a closed fiscal period, the POS transaction remains operationally recorded and its bridge link stays pending with a reason. After correcting the mapping or period issue, an authorized manager can post pending integrations. The backfill endpoint discovers legacy sales/returns that predate the bridge and processes them in bounded batches. The integration list is branch-scoped.
 
 The mapping uses the organization's chart of accounts and base currency. POS currency must therefore be consistent with the accounting base currency; foreign-currency conversion, payment-gateway settlement, card/M-Pesa execution and bank reconciliation are not performed by this bridge. Finance must verify account classification and statutory tax treatment before production use.
+
+
+## Safaricom M-Pesa Daraja collections and refunds
+
+The POS accepts an `mpesa` tender allocation as **unsettled**. After the POS sale is
+synchronized, an authorized manager initiates an STK Push using
+`POST /api/v1/integrations/mpesa/pos/sales/{sale_id}/payments/{payment_id}/stk-push`
+with a Kenyan phone number. The customer must approve the prompt on their handset.
+The initiation response is not proof of payment. Only a matching Daraja STK callback
+with a successful result, matching CheckoutRequestID, exact amount and a receipt
+number changes the tender to recorded and retries the pending POS journal.
+
+Payment status is available at
+`GET /api/v1/integrations/mpesa/pos/sales/{sale_id}/payments`.
+Duplicate callbacks are idempotent. Callback URLs contain high-entropy one-time tokens;
+only token hashes are stored. Callback handlers do not require a logged-in user.
+
+For refunds, the return flow can record an `mpesa` refund allocation as pending.
+A manager initiates its B2C disbursement through
+`POST /api/v1/integrations/mpesa/pos/returns/{return_id}/refunds/{refund_id}/b2c`.
+The refund is marked recorded only after a successful B2C result callback with a
+transaction receipt. Timeouts and failed results do not claim that money was sent.
+B2C requires an approved Daraja shortcode, initiator name, pre-encrypted security
+credential, and registered result and timeout callback URLs.
+
+### Required environment configuration
+
+- `INTEGRATION_MPESA_ENABLED=true`
+- `MPESA_BASE_URL=https://sandbox.safaricom.co.ke` (or approved production Daraja host)
+- `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`
+- `MPESA_SHORTCODE`, `MPESA_PASSKEY`, and `MPESA_TRANSACTION_TYPE` (`CustomerPayBillOnline` or `CustomerBuyGoodsOnline`)
+- `MPESA_CALLBACK_URL=https://your-public-host/api/v1/integrations/mpesa/callbacks`
+- For B2C: `MPESA_INITIATOR_NAME`, `MPESA_SECURITY_CREDENTIAL` (Safaricom-encrypted),
+  `MPESA_B2C_RESULT_URL`, and `MPESA_B2C_TIMEOUT_URL`.
+
+STK and B2C Daraja amounts are whole KES shillings. Fractional-shilling tenders or
+refunds are rejected for provider execution and must be handled by another tender
+or a separately approved reconciliation process. The organization's POS accounting
+mapping currently posts confirmed M-Pesa collections/refunds to the configured bank
+clearing account; configure that account as the M-Pesa clearing control account.
+Safaricom sandbox credentials and registered callback URLs are required for live
+end-to-end verification. Production activation also requires a Safaricom-approved
+shortcode and B2C permissions; these cannot be provisioned by repository code.
