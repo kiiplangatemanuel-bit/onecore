@@ -5436,6 +5436,11 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
     db: Session=Depends(get_db)):
     """Build a report card from published assessments only; drafts never leak."""
     require_permission(membership, "read")
+    if academic_year < 2000 or academic_year > 2200 or not term.strip():
+        raise HTTPException(422, "A valid academic year and term are required")
+    if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,24}", term.strip()):
+        raise HTTPException(422, "Invalid term value")
+    term = term.strip()
     learner = db.query(SchoolLearner).filter_by(
         id=learner_id, organization_id=membership.organization_id
     ).first()
