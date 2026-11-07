@@ -3788,14 +3788,33 @@ def add_hr_payroll_item(run_id: int, payload: HRPayrollItemIn,
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     line.gross_pay, line.deductions_total, line.net_pay = gross, deductions, net
+    previous_gross = Decimal(str(line.gross_pay))
+    previous_deductions = Decimal(str(line.deductions_total))
+    previous_net = Decimal(str(line.net_pay))
     db.add(item)
     all_lines = db.query(HRPayrollLine).filter_by(
         organization_id=membership.organization_id, run_id=run.id
     ).all()
-    run.gross_total = payroll_money(sum((Decimal(str(x.gross_pay)) for x in all_lines), Decimal("0.00")) - Decimal(str(line.gross_pay)) + gross)
-    run.deductions_total = payroll_money(sum((Decimal(str(x.deductions_total)) for x in all_lines), Decimal("0.00")) - Decimal(str(line.deductions_total)) + deductions)
-    run.net_total = payroll_money(sum((Decimal(str(x.net_pay)) for x in all_lines), Decimal("0.00")) - Decimal(str(line.net_pay)) + net)
-    db.commit()
+    run.gross_total = payroll_money(sum((Decimal(str(x.gross_pay)) for x in all_lines), Decimal("0.00")) - previous_gross + gross)
+    run.deductions_total = payroll_money(sum((Decimal(str(x.deductions_total)) for x in all_lines), Decimal("0.00")) - previous_deductions + deductions)
+    run.net_total = payroll_money(sum((Decimal(str(x.net_pay)) for x in all_lines), Decimal("0.00")) - previous_net + net)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(HRPayrollItem).filter_by(
+            organization_id=membership.organization_id, client_item_id=payload.client_item_id
+        ).first()
+        if existing and existing.request_hash == request_hash and existing.run_id == run.id:
+            refreshed_line = db.query(HRPayrollLine).filter_by(
+                organization_id=membership.organization_id, run_id=run.id,
+                employee_id=payload.employee_id
+            ).first()
+            return {"id": existing.id, "status": "already_recorded",
+                    "gross_pay": str(refreshed_line.gross_pay),
+                    "deductions_total": str(refreshed_line.deductions_total),
+                    "net_pay": str(refreshed_line.net_pay)}
+        raise HTTPException(409, "Payroll item conflicts with an existing item ID")
     db.refresh(item)
     audit(db, user.id, membership.organization_id, "hr.payroll.item.added",
           "hr_payroll_item", item.id, f"run:{run.id};employee:{line.employee_id};type:{item.item_type}")
