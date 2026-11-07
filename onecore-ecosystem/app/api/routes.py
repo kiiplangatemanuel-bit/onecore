@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -2994,6 +2994,107 @@ def reject_crm_quote(quote_id:int,membership=Depends(active_membership),
     row.status="rejected";row.rejected_at=datetime.now(timezone.utc)
     db.commit();audit(db,user.id,membership.organization_id,"crm.quote.rejected","crm_quote",row.id)
     return {"id":row.id,"status":row.status}
+
+
+
+@router.post("/crm/quotes/{quote_id}/convert-to-order", status_code=201)
+def convert_crm_quote_to_order(quote_id: int, payload: CRMQuoteConvertIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Convert an accepted quote once; conversion creates an order, not stock or an invoice."""
+    require_permission(membership, "update")
+    quote=db.query(CRMQuote).filter_by(
+        id=quote_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not quote or not can_access_branch(membership, quote.branch_id):
+        raise HTTPException(404, "Quote not found")
+    existing=db.query(CRMSalesOrder).filter_by(
+        organization_id=membership.organization_id, quote_id=quote.id
+    ).first()
+    if existing:
+        return {"id":existing.id,"order_number":existing.order_number,
+            "quote_id":quote.id,"status":existing.status,"already_converted":True}
+    if quote.status != "accepted":
+        raise HTTPException(409, "Only accepted quotes can be converted to sales orders")
+    if quote.valid_until.date() < datetime.now(timezone.utc).date():
+        raise HTTPException(409, "Expired quotes cannot be converted")
+    order_number=(payload.order_number or f"SO-{quote.quote_number}").strip().upper()
+    lines=db.query(CRMQuoteLine).filter_by(
+        organization_id=membership.organization_id, quote_id=quote.id
+    ).order_by(CRMQuoteLine.id).all()
+    if not lines:
+        raise HTTPException(409, "Accepted quote has no line items")
+    order=CRMSalesOrder(
+        organization_id=membership.organization_id, branch_id=quote.branch_id,
+        quote_id=quote.id, contact_id=quote.contact_id, lead_id=quote.lead_id,
+        order_number=order_number, currency=quote.currency,
+        subtotal=quote.subtotal, tax_total=quote.tax_total, total=quote.total,
+        status="confirmed", confirmed_at=datetime.now(timezone.utc), created_by=user.id,
+    )
+    db.add(order)
+    try:
+        db.flush()
+        for line in lines:
+            db.add(CRMSalesOrderLine(
+                organization_id=membership.organization_id, sales_order_id=order.id,
+                quote_line_id=line.id, description=line.description,
+                quantity=line.quantity, unit_price=line.unit_price, tax_rate=line.tax_rate,
+                subtotal=line.subtotal, tax_amount=line.tax_amount, total=line.total,
+            ))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing=db.query(CRMSalesOrder).filter_by(
+            organization_id=membership.organization_id, quote_id=quote.id
+        ).first()
+        if existing:
+            return {"id":existing.id,"order_number":existing.order_number,
+                "quote_id":quote.id,"status":existing.status,"already_converted":True}
+        raise HTTPException(409, "Sales order number already exists in this organization")
+    db.refresh(order)
+    audit(db,user.id,membership.organization_id,"crm.quote.converted_to_order",
+          "crm_sales_order",order.id,f"quote:{quote.id};order:{order.order_number}")
+    return {"id":order.id,"order_number":order.order_number,"quote_id":quote.id,
+            "status":order.status,"currency":order.currency,"total":str(order.total),
+            "already_converted":False}
+
+
+@router.get("/crm/orders")
+def list_crm_sales_orders(membership=Depends(active_membership), db: Session=Depends(get_db),
+                          limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership,"read")
+    q=db.query(CRMSalesOrder).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed: return []
+        q=q.filter(CRMSalesOrder.branch_id.in_(allowed))
+    rows=q.order_by(CRMSalesOrder.id.desc()).limit(limit).all()
+    return [{"id":x.id,"order_number":x.order_number,"quote_id":x.quote_id,
+        "contact_id":x.contact_id,"lead_id":x.lead_id,"currency":x.currency,
+        "total":str(x.total),"status":x.status,"confirmed_at":x.confirmed_at.isoformat(),
+        "branch_id":x.branch_id} for x in rows]
+
+
+@router.get("/crm/orders/{order_id}")
+def get_crm_sales_order(order_id: int, membership=Depends(active_membership),
+                        db: Session=Depends(get_db)):
+    require_permission(membership,"read")
+    order=db.query(CRMSalesOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or not can_access_branch(membership,order.branch_id):
+        raise HTTPException(404,"Sales order not found")
+    lines=db.query(CRMSalesOrderLine).filter_by(
+        organization_id=membership.organization_id,sales_order_id=order.id
+    ).order_by(CRMSalesOrderLine.id).all()
+    return {"id":order.id,"order_number":order.order_number,"quote_id":order.quote_id,
+        "contact_id":order.contact_id,"lead_id":order.lead_id,"currency":order.currency,
+        "subtotal":str(order.subtotal),"tax_total":str(order.tax_total),"total":str(order.total),
+        "status":order.status,"confirmed_at":order.confirmed_at.isoformat(),
+        "lines":[{"id":x.id,"quote_line_id":x.quote_line_id,"description":x.description,
+            "quantity":str(x.quantity),"unit_price":str(x.unit_price),"tax_rate":str(x.tax_rate),
+            "subtotal":str(x.subtotal),"tax_amount":str(x.tax_amount),"total":str(x.total)}
+            for x in lines]}
 
 
 @router.get("/crm/forecast")
