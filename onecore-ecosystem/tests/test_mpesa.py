@@ -1,4 +1,5 @@
 from base64 import b64decode
+from decimal import Decimal
 import hashlib
 from types import SimpleNamespace
 
