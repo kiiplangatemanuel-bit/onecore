@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     mpesa_consumer_secret: str = ""
     mpesa_shortcode: str = ""
     mpesa_passkey: str = ""
+    mpesa_transaction_type: str = "CustomerPayBillOnline"
     mpesa_callback_url: str = ""
     mpesa_initiator_name: str = ""
     mpesa_security_credential: str = ""
