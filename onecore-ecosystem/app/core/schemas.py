@@ -178,7 +178,7 @@ class POSSaleLineIn(BaseModel):
 
 class POSPaymentIn(BaseModel):
     method: str = Field(pattern=r"^(cash|card|bank|credit)$")
-    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"))
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     provider_reference: str = Field(default="", max_length=120)
 
 
@@ -246,7 +246,7 @@ class AccountingInvoiceLineIn(BaseModel):
     tax_account_id: int | None = Field(default=None, gt=0)
     description: str = Field(min_length=2, max_length=240)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999"))
-    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
 
