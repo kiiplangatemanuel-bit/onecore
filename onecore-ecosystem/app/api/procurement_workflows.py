@@ -666,6 +666,8 @@ def escalate_purchase_order_approval(order_id: int, payload: ApprovalEscalationI
     ).first()
     if not principal or not target or principal.user_id == target.user_id:
         raise HTTPException(422, "Escalation principal and target must be distinct active organization members")
+    if principal.user_id == order.created_by:
+        raise HTTPException(403, "The purchase-order creator cannot delegate approval of their own order")
     if order.branch_id and any(
         member.branch_scope != "*" and order.branch_id not in {v.strip() for v in member.branch_scope.split(",")}
         for member in (principal, target)
@@ -1120,11 +1122,19 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
             ProcurementSupplierStatementLine.matched_payment_id == payload.payment_id,
             ProcurementSupplierStatementLine.id != line.id,
         ).first()
+        payment_in_matched_batch = db.query(ProcurementSupplierStatementLine).join(
+            ProcurementSettlement,
+            ProcurementSettlement.id == ProcurementSupplierStatementLine.matched_settlement_id,
+        ).join(ProcurementSettlementAllocation,
+               ProcurementSettlementAllocation.settlement_id == ProcurementSettlement.id).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSettlementAllocation.accounting_payment_id == payload.payment_id,
+        ).first()
         if (not target or Decimal(target.amount) != abs(Decimal(line.amount))
                 or Decimal(line.amount) >= 0
                 or target.payment_date.date() < statement.start_date.date()
                 or target.payment_date.date() > statement.end_date.date()
-                or duplicate_target):
+                or duplicate_target or payment_in_matched_batch):
             raise HTTPException(422, "Payment supplier, period, sign or amount does not match the statement line")
         line.matched_payment_id = target.id
     elif payload.credit_note_id:
@@ -1156,12 +1166,21 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
             ProcurementSupplierStatementLine.matched_settlement_id == payload.settlement_id,
             ProcurementSupplierStatementLine.id != line.id,
         ).first()
+        allocation_payment_ids = [x[0] for x in db.query(ProcurementSettlementAllocation.accounting_payment_id).filter(
+            ProcurementSettlementAllocation.organization_id == membership.organization_id,
+            ProcurementSettlementAllocation.settlement_id == payload.settlement_id,
+            ProcurementSettlementAllocation.accounting_payment_id.is_not(None),
+        ).all()]
+        individually_matched = db.query(ProcurementSupplierStatementLine).filter(
+            ProcurementSupplierStatementLine.organization_id == membership.organization_id,
+            ProcurementSupplierStatementLine.matched_payment_id.in_(allocation_payment_ids or [-1]),
+        ).first()
         if (not target or Decimal(target.amount) != abs(Decimal(line.amount))
                 or Decimal(line.amount) >= 0
                 or target.payment_date.date() < statement.start_date.date()
                 or target.payment_date.date() > statement.end_date.date()
-                or duplicate_target):
-            raise HTTPException(422, "Settlement supplier, period, sign or amount does not match the statement line")
+                or duplicate_target or individually_matched):
+            raise HTTPException(422, "Settlement supplier, period, sign, amount or prior payment matching does not match the statement line")
         line.matched_settlement_id = target.id
     line.matched_by = user.id
     line.matched_at = datetime.now(timezone.utc)
