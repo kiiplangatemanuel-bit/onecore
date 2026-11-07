@@ -278,6 +278,8 @@ def _stk_callback(db: Session, token: str, body: dict):
         payment = db.query(POSPayment).filter_by(id=intent.payment_id).first()
         if payment:
             payment.status = "unsettled"
+        _audit(db, intent.organization_id, None, "mpesa.stk.failed",
+               "pos_payment", intent.payment_id, f"result_code:{intent.result_code};{intent.result_description}")
     db.commit()
     return True
 
@@ -405,7 +407,9 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         return True
     result = body.get("Result") or body
     callback_conversation = str(result.get("ConversationID") or "")
-    if intent.conversation_id and callback_conversation != intent.conversation_id:
+    if intent.conversation_id and callback_conversation and callback_conversation != intent.conversation_id:
+        return False
+    if not timeout and intent.conversation_id and not callback_conversation:
         return False
     code = result.get("ResultCode")
     intent.result_code = str(code if code is not None else "")[:40]
@@ -442,6 +446,10 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
     else:
         intent.status = "timeout" if timeout else "failed"
         # Keep refund pending; no money movement is claimed until confirmed success.
+        _audit(db, intent.organization_id, None,
+               "mpesa.b2c.timeout" if timeout else "mpesa.b2c.failed",
+               "pos_refund", intent.refund_id,
+               f"result_code:{intent.result_code};{intent.result_description}")
     db.commit()
     return True
 
