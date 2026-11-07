@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from app.core.config import settings
-from app.core.database import Base, engine, SessionLocal
+from app.core.database import SessionLocal
 from app.core.models import User
 from app.core.security import hash_password
 from app.api.routes import router
@@ -11,7 +11,6 @@ from app.api.platform_routes import router as platform_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         email = settings.bootstrap_admin_email.lower()
