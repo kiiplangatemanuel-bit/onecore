@@ -81,7 +81,7 @@ The extended inventory API adds:
 - Stocktakes with captured expected and counted quantities, maker-checker approval and append-only variance adjustments.
 - Per-warehouse reorder thresholds, lead-time-aware suggested quantities, simple moving-average demand forecasts, multi-store dashboard and inventory alerts.
 - Organization and branch-specific price lists with per-product prices and promotion percentages.
-- Batch-layer inventory valuation using recorded receipt costs, with FIFO and weighted-average reporting modes.
+- Inventory valuation for batch and non-batch stock using recorded batch receipt costs and configurable product default cost, with FIFO and weighted-average reporting modes.
 
 ### API entry points
 
