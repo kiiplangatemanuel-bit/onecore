@@ -18,6 +18,8 @@ def test_inventory_product_tax_rate_is_bounded_and_optional():
         InventoryProductIn(sku="BAD-TAX", name="Bad tax", tax_rate="100.01")
     with pytest.raises(ValidationError):
         InventoryProductIn(sku="NEG-TAX", name="Bad tax", tax_rate="-1")
+    with pytest.raises(ValidationError):
+        InventoryProductIn(sku="PREC-TAX", name="Bad precision", tax_rate="1.00001")
 
 
 def test_pos_line_discount_and_tax_calculation_is_discount_first():
@@ -67,6 +69,12 @@ def test_discount_validation_and_persisted_tax_snapshots():
         POSSaleSyncIn(
             client_transaction_id="offline-pos-tax-003", shift_id=1, branch_id="branch-1",
             lines=[{"product_id": 1, "quantity": "1.000", "discount_percent": "100.01"}],
+            payments=[{"method": "cash", "amount": "1.00"}],
+        )
+    with pytest.raises(ValidationError):
+        POSSaleSyncIn(
+            client_transaction_id="offline-pos-tax-004", shift_id=1, branch_id="branch-1",
+            lines=[{"product_id": 1, "quantity": "1.000", "discount_percent": "1.00001"}],
             payments=[{"method": "cash", "amount": "1.00"}],
         )
     assert POSSale.subtotal_amount is not None
