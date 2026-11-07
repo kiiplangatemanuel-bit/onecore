@@ -71,9 +71,11 @@ def upgrade():
     op.create_index("ix_crm_campaign_schedules_organization_id", "crm_campaign_schedules", ["organization_id"])
     op.create_index("ix_crm_campaign_schedules_campaign_id", "crm_campaign_schedules", ["campaign_id"], unique=True)
     op.create_index("ix_crm_campaign_schedules_next_run_at", "crm_campaign_schedules", ["next_run_at"])
+    op.add_column("crm_campaign_schedules", sa.Column("last_error", sa.String(1000), nullable=True))
 
 
 def downgrade():
+    op.drop_column("crm_campaign_schedules", "last_error")
     op.drop_table("crm_campaign_schedules")
     op.drop_table("crm_audience_segments")
     op.drop_table("crm_message_templates")
