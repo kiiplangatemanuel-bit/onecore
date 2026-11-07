@@ -138,9 +138,11 @@ def downgrade():
     op.drop_column("crm_campaign_schedules", "recurrence")
 
     op.drop_index("ix_crm_audience_segments_branch_id", table_name="crm_audience_segments")
-    op.drop_column("crm_audience_segments", "branch_id")
+    with op.batch_alter_table("crm_audience_segments") as batch:
+        batch.drop_column("branch_id")
     op.drop_index("ix_crm_template_org_name_version", table_name="crm_communication_templates")
     op.drop_index("ix_crm_communication_templates_branch_id", table_name="crm_communication_templates")
-    op.drop_column("crm_communication_templates", "version")
-    op.drop_column("crm_communication_templates", "branch_id")
+    with op.batch_alter_table("crm_communication_templates") as batch:
+        batch.drop_column("version")
+        batch.drop_column("branch_id")
     op.create_index("ix_crm_template_org_name", "crm_communication_templates", ["organization_id", "name"], unique=True)
