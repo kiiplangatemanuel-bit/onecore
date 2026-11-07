@@ -332,6 +332,11 @@ class AccountingCreditNoteIn(BaseModel):
         return self
 
 
+class AccountingYearEndCloseIn(BaseModel):
+    retained_earnings_account_id: int = Field(gt=0)
+    confirmation_code: str = Field(min_length=2, max_length=40)
+
+
 class AccountingFiscalPeriodIn(BaseModel):
     code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
     start_date: date
