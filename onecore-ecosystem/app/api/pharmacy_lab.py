@@ -744,7 +744,12 @@ def reverse_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_memb
     _need(db,m,u,"pharmacy.manage",disp.branch_id)
     if disp.status!="dispensed":raise HTTPException(409,"Dispense is not reversible")
     data=_payload(disp);patient,_,_=_patient_read(db,m,u,disp.patient_id)
-    verifier_id=int(payload.get("verifier_id",0));_verifier(db,m,verifier_id,disp.branch_id)
+    prior_returns=_resource_list(db,m,"pharmacy_return",patient_id=disp.patient_id,limit=1000)
+    if any(_payload(x).get("dispense_id")==disp.id for x in prior_returns):
+        raise HTTPException(409,"A dispense with a recorded return cannot be reversed; disposition the return instead")
+    verifier_id=int(payload.get("verifier_id",0))
+    if verifier_id==u.id:raise HTTPException(403,"A second pharmacist must verify the reversal")
+    _verifier(db,m,verifier_id,disp.branch_id)
     reason=_required_text(payload,"reason",500)
     restock=_decimal(payload.get("restock_quantity","0"),"restock_quantity",places=3)
     if restock<0 or restock>Decimal(data["quantity"]):raise HTTPException(422,"Invalid restock quantity")
@@ -769,7 +774,9 @@ def reverse_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_memb
     rx=_get(db,m,int(data["prescription_id"]),"pharmacy_prescription",lock=True)
     rxd=_payload(rx);idx=int(data["line_index"]);line=rxd["lines"][idx]
     line["quantity_dispensed"]=str(max(Decimal("0"),Decimal(line["quantity_dispensed"])-total))
-    line["status"]="pending" if Decimal(line["quantity_dispensed"])==0 else "partially_dispensed"
+    line["refills_used"]=min(int(line.get("refills_allowed",0)),max(0,int(Decimal(line["quantity_dispensed"])//Decimal(line["quantity_prescribed"]))-1))
+    authorized=Decimal(line["quantity_prescribed"])*(1+int(line.get("refills_allowed",0)))
+    line["status"]="pending" if Decimal(line["quantity_dispensed"])==0 else "dispensed" if Decimal(line["quantity_dispensed"])>=authorized else "partially_dispensed"
     rxd["lines"][idx]=line;rxd["status"]="partially_dispensed" if any(
         x["status"]!="dispensed" for x in rxd["lines"]) else "dispensed"
     _update(rx,rxd,u,status=rxd["status"])
@@ -1133,6 +1140,35 @@ def register_laboratory_instrument(payload:dict,m=Depends(active_membership),
         "warning":"Store this key securely; it is returned only once."}
 
 
+@router.post("/lab/instruments/{instrument_id}/rotate-key")
+def rotate_laboratory_instrument_key(instrument_id:int,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    instrument=_get(db,m,instrument_id,"lab_instrument",lock=True)
+    _need(db,m,u,"lab.manage",instrument.branch_id)
+    if instrument.status!="active":raise HTTPException(409,"Only active instruments can rotate credentials")
+    data=_payload(instrument);secret=secrets.token_urlsafe(40)
+    data["api_key_hash"]=hashlib.sha256(secret.encode()).hexdigest()
+    data["key_rotated_at"]=NOW().isoformat();data["key_rotated_by"]=u.id
+    _update(instrument,data,u)
+    _audit_action(db,m,u,"lab.instrument.key_rotated","lab_instrument",instrument.id)
+    db.commit()
+    return {"id":instrument.id,"instrument_key":secret,"warning":"Store this key securely; it is returned only once."}
+
+
+@router.post("/lab/instruments/{instrument_id}/revoke")
+def revoke_laboratory_instrument(instrument_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    instrument=_get(db,m,instrument_id,"lab_instrument",lock=True)
+    _need(db,m,u,"lab.manage",instrument.branch_id)
+    reason=_required_text(payload,"reason",500)
+    data=_payload(instrument);data["api_key_hash"]="";data["revoked_at"]=NOW().isoformat()
+    data["revoked_by"]=u.id;data["revocation_reason"]=reason
+    _update(instrument,data,u,status="revoked")
+    _audit_action(db,m,u,"lab.instrument.revoked","lab_instrument",instrument.id,reason)
+    db.commit()
+    return {"id":instrument.id,"status":instrument.status}
+
+
 @router.post("/lab/instruments/{instrument_id}/qc")
 def record_laboratory_qc(instrument_id:int,payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -1169,13 +1205,23 @@ def record_laboratory_calibration(instrument_id:int,payload:dict,m=Depends(activ
 @router.post("/lab/instruments/{instrument_id}/results")
 def receive_analyzer_result(instrument_id:int,payload:dict,
     x_instrument_key:str=Header(...,alias="X-Instrument-Key",min_length=32),
-    m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
-    instrument=_get(db,m,instrument_id,"lab_instrument",lock=True)
-    _need(db,m,u,"lab.manage",instrument.branch_id)
+    db:Session=Depends(get_db)):
+    instrument=db.query(HealthcareResource).filter_by(
+        id=instrument_id,resource_type="lab_instrument").with_for_update().first()
+    if not instrument:
+        raise HTTPException(404,"Analyzer instrument not found")
     data=_payload(instrument)
     supplied=hashlib.sha256(x_instrument_key.encode()).hexdigest()
     if not hmac.compare_digest(data.get("api_key_hash",""),supplied):
         raise HTTPException(401,"Invalid analyzer credential")
+    if instrument.status!="active":
+        raise HTTPException(409,"Analyzer instrument is revoked or inactive")
+    m=db.query(Membership).filter_by(organization_id=instrument.organization_id,
+        user_id=data.get("registered_by"),is_active=True).first()
+    u=db.query(User).filter_by(id=data.get("registered_by"),is_active=True).first()
+    if not m or not u or not can_access_branch(m,instrument.branch_id):
+        raise HTTPException(401,"Analyzer registration owner is no longer authorized")
+
     latest_qc=_resource_list(db,m,"lab_qc",branch_id=instrument.branch_id,limit=1000)
     latest_qc=next((x for x in latest_qc if x.parent_id==instrument.id),None)
     if not latest_qc or latest_qc.status!="passed":
@@ -1198,7 +1244,10 @@ def receive_analyzer_result(instrument_id:int,payload:dict,
     od["lines"][idx]=line;od["status"]="results_entered" if all(x["status"]=="entered" for x in od["lines"]) else "processing"
     _update(order,od,u,status=od["status"])
     data["last_seen_at"]=NOW().isoformat();_update(instrument,data,u)
-    if bool(payload.get("is_critical")):
+    critical=_critical_result(line,line["result_value"],bool(payload.get("is_critical")))
+    line["is_critical"]=critical;od["lines"][idx]=line
+    _update(order,od,u,status=od["status"])
+    if critical:
         alert=_create(db,m,u,"lab_critical_alert",{"order_id":order.id,"line_index":idx,
             "patient_id":order.patient_id,"test_code":code,"result_value":line["result_value"],
             "status":"queued","escalation_required":True},order.branch_id,order.patient_id,
@@ -1207,7 +1256,7 @@ def receive_analyzer_result(instrument_id:int,payload:dict,
     _patient_event(db,m,u,_patient(db,order.patient_id,m),"lab.instrument.result_received",
         {"instrument_id":instrument.id,"order_id":order.id,"line_index":idx},order.id)
     db.commit()
-    return {"order_id":order.id,"line_index":idx,"status":"entered","critical_alert":bool(payload.get("is_critical"))}
+    return {"order_id":order.id,"line_index":idx,"status":"entered","critical_alert":critical}
 
 
 @router.get("/lab/critical-alerts")
