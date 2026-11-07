@@ -142,10 +142,10 @@ def run_due_schedules(db,limit=10):
         db.commit()
         try:
             _execute_schedule(db,schedule_id,now)
-        except Exception:
+        except Exception as exc:
             db.rollback()
             row=db.query(CRMCampaignSchedule).filter_by(id=schedule_id).first()
             if row:
-                row.status="failed";row.lease_until=None;row.last_error=str(__import__("sys").exc_info()[1])[:1000];db.commit()
+                row.status="failed";row.lease_until=None;row.last_error=str(exc)[:1000];db.commit()
         processed+=1
     return processed
