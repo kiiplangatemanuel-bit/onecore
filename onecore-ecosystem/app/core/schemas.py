@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing import Any
 
 class LoginIn(BaseModel):
@@ -301,6 +301,15 @@ class AccountingFixedAssetIn(BaseModel):
     accumulated_depreciation_account_id: int = Field(gt=0)
     depreciation_expense_account_id: int = Field(gt=0)
     payment_account_id: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_salvage_value(self):
+        if self.salvage_value >= self.cost:
+            raise ValueError("Salvage value must be less than asset cost")
+        if len({self.asset_account_id, self.accumulated_depreciation_account_id,
+                self.depreciation_expense_account_id, self.payment_account_id}) != 4:
+            raise ValueError("Fixed asset ledger accounts must be distinct")
+        return self
 
 
 class AccountingDepreciationIn(BaseModel):
