@@ -87,7 +87,7 @@ def test_kenya_2026_rule_pack_has_official_authority_sources_and_effective_date(
     assert any("nssf" in authority for authority in authorities)
     assert any("kenya law" in authority or "sha" in authority for authority in authorities)
     assert KENYA_2026_RULES["effective_from"] == "2026-02-01"
-    assert KENYA_2026_RULES["status"] == "active"
+    assert KENYA_2026_RULES["status"] == "draft"
 
 
 
