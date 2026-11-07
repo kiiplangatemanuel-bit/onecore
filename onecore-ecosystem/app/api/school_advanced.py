@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -707,8 +707,10 @@ def downloadable_transcript(learner_id:int,m=Depends(active_membership),db:Sessi
                            "last_name":learner.last_name},"report_cards":cards}
     canonical=json.dumps(transcript,sort_keys=True,separators=(",",":"),ensure_ascii=False)
     digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return {"transcript":transcript,"verification":{"algorithm":"SHA-256","digest":digest,
-            "instructions":"Hash the canonical UTF-8 JSON transcript using sorted keys and compact separators to verify integrity."}}
+    return Response(content=canonical,media_type="application/json",
+        headers={"Content-Disposition":f'attachment; filename="transcript-{learner.admission_number}.json"',
+                 "X-Transcript-Algorithm":"SHA-256","X-Transcript-Digest":digest,
+                 "Cache-Control":"no-store, private"})
 
 
 @router.post("/school/notifications",status_code=201)
