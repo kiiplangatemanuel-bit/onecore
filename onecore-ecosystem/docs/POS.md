@@ -79,3 +79,28 @@ attestation.
 - Bandwidth-aware catalogue refresh, crash recovery, cross-device/cross-branch
   reconciliation, accessibility, threat modelling, browser/device matrix,
   PostgreSQL race tests, performance, security assessment and pilot UAT.
+
+
+## Product tax and controlled POS discounts
+
+Product tax is configured on the tenant-owned inventory product using `tax_rate` (percentage, 0–100). The POS catalogue exposes this configured rate; the client cannot choose or override it at checkout. The rate is snapshotted on every posted sale line so later product tax edits do not rewrite historic receipts.
+
+Checkout supports a per-line `discount_percent` (0–100). Any non-zero discount requires the caller's `manage` permission; ordinary cashier checkout remains available with zero discount. Offline request hashes include the discount percentage, preventing a queued transaction ID from being replayed with different discount terms.
+
+Calculation order is explicit:
+1. Gross line subtotal = rounded unit price × quantity.
+2. Discount = rounded subtotal × discount percentage.
+3. Taxable base = subtotal − discount.
+4. Tax = rounded taxable base × product tax rate.
+5. Line total = taxable base + tax.
+
+Sale headers and receipt responses include subtotal, discount, tax and final total. Each sale line stores its original tax and discount snapshot.
+
+Partial and full returns now use the original tax-inclusive discounted line value rather than the unadjusted unit price. Returned discount and tax values are also snapshotted. When the final outstanding quantity on a line is returned, the return absorbs any prior rounding residue so cumulative returns cannot exceed the original line total.
+
+### Boundaries
+
+- Tax percentages are organization-configured product settings; no automatic KRA tax category mapping, VAT exemptions, withholding tax, eTIMS device certification, invoice numbering compliance or statutory filing is asserted.
+- Discounts are controlled by the existing `manage` permission, not a configurable threshold/approval matrix. Per-cashier discount limits and manager override PINs remain future work.
+- POS refunds remain accounting records only; no M-Pesa/card/bank/cash payout is executed.
+- The tax/discount calculation is tax-exclusive and rounds monetary line amounts to two decimal places. Confirm applicable product tax treatment with the organization's tax adviser before production use.
