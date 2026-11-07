@@ -90,6 +90,7 @@ def campaign_report(campaign_id:int,membership=Depends(active_membership),db:Ses
         "accepted":counts.get("sent",0)+counts.get("delivered",0),"failed":counts.get("failed",0),
         "suppressed":counts.get("suppressed",0)}
 
+@router.get("/unsubscribe/{token}")
 @router.post("/unsubscribe/{token}")
 def unsubscribe(token:str,db:Session=Depends(get_db)):
     d=db.query(CRMCampaignDelivery).filter_by(unsubscribe_token_hash=hashlib.sha256(token.encode()).hexdigest()).first()
