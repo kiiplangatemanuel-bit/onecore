@@ -96,7 +96,7 @@ def create_segment(payload:CRMSegmentIn,membership=Depends(active_membership),
                    user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage");_branch(db,membership,payload.branch_id)
     validate_segment_filters(payload.filters)
-    row=CRMAudienceSegment(organization_id=membership.organization_id,branch_id=payload.branch_id,
+    row=CRMAudienceSegment(organization_id=membership.organization_id,branch_id=payload.branch_id or None,
         name=payload.name.strip(),filters=payload.filters,is_active=True,created_by=user.id)
     db.add(row)
     try:db.commit()
