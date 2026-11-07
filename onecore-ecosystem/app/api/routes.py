@@ -2378,6 +2378,122 @@ def accounting_aging(invoice_type:str=Query(pattern=r"^(receivable|payable)$"),
         "buckets":{k:str(v) for k,v in buckets.items()},"invoices":output}
 
 
+@router.get("/accounting/subledger-reconciliation")
+def accounting_subledger_reconciliation(
+    invoice_type: str = Query(pattern=r"^(receivable|payable)$"),
+    as_of: date | None = None,
+    membership=Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    """Compare open AR/AP invoice balances with their control-account GL balances."""
+    require_permission(membership, "read")
+    cutoff = as_of or datetime.now(timezone.utc).date()
+    cutoff_end = datetime.combine(cutoff, time.max, tzinfo=timezone.utc)
+    allowed = branch_scope_ids(membership)
+
+    invoice_query = db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id == membership.organization_id,
+        AccountingInvoice.invoice_type == invoice_type,
+        AccountingInvoice.status.in_(("posted", "partially_paid", "paid")),
+        AccountingInvoice.issue_date <= cutoff_end,
+    )
+    if allowed is not None:
+        if not allowed:
+            return {"invoice_type": invoice_type, "as_of": cutoff.isoformat(),
+                "subledger_total": "0.00", "control_account_total": "0.00",
+                "difference": "0.00", "balanced": True, "accounts": []}
+        invoice_query = invoice_query.filter(
+            or_(AccountingInvoice.branch_id.is_(None), AccountingInvoice.branch_id.in_(allowed))
+        )
+    invoices = invoice_query.all()
+    control_ids = {row.control_account_id for row in invoices}
+    if not control_ids:
+        return {"invoice_type": invoice_type, "as_of": cutoff.isoformat(),
+            "subledger_total": "0.00", "control_account_total": "0.00",
+            "difference": "0.00", "balanced": True, "accounts": []}
+
+    invoice_ids = [row.id for row in invoices]
+    payments = db.query(AccountingInvoicePayment).filter(
+        AccountingInvoicePayment.organization_id == membership.organization_id,
+        AccountingInvoicePayment.invoice_id.in_(invoice_ids),
+        AccountingInvoicePayment.payment_date <= cutoff_end,
+    ).all()
+    paid_by_invoice = {}
+    for payment in payments:
+        paid_by_invoice[payment.invoice_id] = paid_by_invoice.get(
+            payment.invoice_id, Decimal("0.00")) + Decimal(payment.amount)
+
+    credits = db.query(AccountingCreditNote).filter(
+        AccountingCreditNote.organization_id == membership.organization_id,
+        AccountingCreditNote.invoice_id.in_(invoice_ids),
+        AccountingCreditNote.status == "posted",
+        AccountingCreditNote.issue_date <= cutoff_end,
+    ).all()
+    credit_by_invoice = {}
+    for credit in credits:
+        credit_by_invoice[credit.invoice_id] = credit_by_invoice.get(
+            credit.invoice_id, Decimal("0.00")) + Decimal(credit.total)
+
+    subledger = {account_id: Decimal("0.00") for account_id in control_ids}
+    for invoice in invoices:
+        balance = (Decimal(invoice.total)
+            - paid_by_invoice.get(invoice.id, Decimal("0.00"))
+            - credit_by_invoice.get(invoice.id, Decimal("0.00")))
+        subledger[invoice.control_account_id] += max(balance, Decimal("0.00"))
+
+    account_query = db.query(AccountingAccount).filter(
+        AccountingAccount.organization_id == membership.organization_id,
+        AccountingAccount.id.in_(control_ids),
+    )
+    accounts = {account.id: account for account in account_query.all()}
+    journal_query = db.query(AccountingJournalLine).join(
+        AccountingJournal, AccountingJournal.id == AccountingJournalLine.journal_id
+    ).filter(
+        AccountingJournalLine.organization_id == membership.organization_id,
+        AccountingJournalLine.account_id.in_(control_ids),
+        AccountingJournal.organization_id == membership.organization_id,
+        AccountingJournal.status == "posted",
+        AccountingJournal.entry_date <= cutoff_end,
+    )
+    if allowed is not None:
+        journal_query = journal_query.filter(
+            or_(AccountingJournalLine.branch_id.is_(None),
+                AccountingJournalLine.branch_id.in_(allowed))
+        )
+    gl_by_account = {account_id: Decimal("0.00") for account_id in control_ids}
+    for line in journal_query.all():
+        signed = (Decimal(line.debit) - Decimal(line.credit)
+            if invoice_type == "receivable"
+            else Decimal(line.credit) - Decimal(line.debit))
+        gl_by_account[line.account_id] += signed
+
+    output = []
+    for account_id in sorted(control_ids):
+        sub = subledger[account_id]
+        gl = gl_by_account[account_id]
+        output.append({
+            "account_id": account_id,
+            "account_code": accounts[account_id].code if account_id in accounts else "",
+            "account_name": accounts[account_id].name if account_id in accounts else "",
+            "subledger_balance": str(sub.quantize(Decimal("0.01"))),
+            "control_account_balance": str(gl.quantize(Decimal("0.01"))),
+            "difference": str((gl - sub).quantize(Decimal("0.01"))),
+            "balanced": gl == sub,
+        })
+    sub_total = sum(subledger.values(), Decimal("0.00"))
+    gl_total = sum(gl_by_account.values(), Decimal("0.00"))
+    difference = gl_total - sub_total
+    return {
+        "invoice_type": invoice_type,
+        "as_of": cutoff.isoformat(),
+        "subledger_total": str(sub_total.quantize(Decimal("0.01"))),
+        "control_account_total": str(gl_total.quantize(Decimal("0.01"))),
+        "difference": str(difference.quantize(Decimal("0.01"))),
+        "balanced": difference == 0 and all(item["balanced"] for item in output),
+        "accounts": output,
+    }
+
+
 @router.get("/accounting/fiscal-periods")
 def list_accounting_periods(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
