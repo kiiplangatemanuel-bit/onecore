@@ -10,6 +10,7 @@ from app.core.models import (CRMCampaign, CRMCampaignSchedule, CRMMessageTemplat
     Membership, User, AuditEvent)
 from app.services.crm_automation import matches_segment
 from app.api.crm_campaigns import dispatch_campaign
+from app.services.datetime_utils import as_utc
 
 
 PLACEHOLDERS={"first_name","last_name","full_name","email","phone","company","campaign_name"}
@@ -33,7 +34,7 @@ def _next_occurrence(value,recurrence,now,tz_name):
     from zoneinfo import ZoneInfo
     zone=ZoneInfo(tz_name)
     step=timedelta(days=1 if recurrence=="daily" else 7)
-    nxt=value.astimezone(zone)+step
+    nxt=as_utc(value).astimezone(zone)+step
     local_now=now.astimezone(zone)
     while nxt<=local_now:nxt+=step
     return nxt.astimezone(timezone.utc)
@@ -42,7 +43,7 @@ def _next_occurrence(value,recurrence,now,tz_name):
 def _execute_schedule(db,schedule_id,now):
     schedule=db.query(CRMCampaignSchedule).filter_by(id=schedule_id).with_for_update().first()
     if not schedule or schedule.status!="scheduled":return
-    if not schedule.lease_until or schedule.lease_until<now:
+    if not schedule.lease_until or as_utc(schedule.lease_until)<now:
         return
     parent=db.query(CRMCampaign).filter_by(
         id=schedule.campaign_id,organization_id=schedule.organization_id).first()
