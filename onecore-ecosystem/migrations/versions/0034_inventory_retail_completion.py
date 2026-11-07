@@ -132,9 +132,22 @@ def upgrade():
     op.create_index("ix_inventory_prices_price_list_id", "inventory_prices", ["price_list_id"])
     op.create_index("ix_inventory_prices_product_id", "inventory_prices", ["product_id"])
     op.create_index("uq_inventory_price_product", "inventory_prices", ["organization_id","price_list_id","product_id"], unique=True)
+    op.create_table("inventory_replenishment_runs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=False),
+        sa.Column("idempotency_key", sa.String(100), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), sa.ForeignKey("procurement_requisitions.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
+    op.create_index("ix_inventory_replenishment_runs_organization_id", "inventory_replenishment_runs", ["organization_id"])
+    op.create_index("ix_inventory_replenishment_runs_branch_id", "inventory_replenishment_runs", ["branch_id"])
+    op.create_index("ix_inventory_replenishment_runs_requisition_id", "inventory_replenishment_runs", ["requisition_id"])
+    op.create_index("uq_inventory_replenishment_org_key_branch", "inventory_replenishment_runs",
+        ["organization_id","idempotency_key","branch_id"], unique=True)
 
 
 def downgrade():
+    op.drop_table("inventory_replenishment_runs")
     with op.batch_alter_table("inventory_products") as batch_op:
         batch_op.drop_column("cost_price")
     op.drop_index("ix_inventory_stock_movements_warehouse_id", table_name="inventory_stock_movements")
