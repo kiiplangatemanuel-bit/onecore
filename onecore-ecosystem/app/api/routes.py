@@ -1229,3 +1229,65 @@ def school_assessment_results(assessment_id:int,scale_name:str="default",members
         if score!=previous: rank=index
         item["rank"]=rank;previous=score
     return {"assessment_id":assessment.id,"status":"published","results":results}
+
+
+@router.get("/school/assessments")
+def list_school_assessments(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    rows=db.query(SchoolAssessment).filter_by(organization_id=membership.organization_id).order_by(
+        SchoolAssessment.academic_year.desc(),SchoolAssessment.id.desc()).all()
+    result=[]
+    for row in rows:
+        cls=db.query(SchoolClass).filter_by(id=row.class_id,organization_id=membership.organization_id).first()
+        if cls and can_access_branch(membership,cls.branch_id):
+            result.append({"id":row.id,"class_id":row.class_id,"subject_id":row.subject_id,
+                "title":row.title,"academic_year":row.academic_year,"term":row.term,
+                "maximum_score":str(row.maximum_score),"weight":str(row.weight),"status":row.status})
+    return result
+
+
+@router.get("/school/classes/{class_id}/report-cards")
+def school_report_cards(class_id:int,term:str,scale_name:str="default",
+                        membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    cls=db.query(SchoolClass).filter_by(id=class_id,organization_id=membership.organization_id,is_active=True).first()
+    if not cls or not can_access_branch(membership,cls.branch_id): raise HTTPException(404,"Class not found")
+    assessments=db.query(SchoolAssessment).filter_by(
+        organization_id=membership.organization_id,class_id=class_id,term=term,status="published").all()
+    if not assessments: return {"class_id":class_id,"term":term,"report_cards":[]}
+    assessment_ids=[a.id for a in assessments]
+    rows=db.query(SchoolLearner,SchoolMark,SchoolAssessment,SchoolSubject).join(
+        SchoolMark,SchoolMark.learner_id==SchoolLearner.id).join(
+        SchoolAssessment,SchoolAssessment.id==SchoolMark.assessment_id).join(
+        SchoolSubject,SchoolSubject.id==SchoolAssessment.subject_id).filter(
+        SchoolLearner.organization_id==membership.organization_id,
+        SchoolLearner.class_id==class_id,SchoolLearner.status=="active",
+        SchoolMark.organization_id==membership.organization_id,
+        SchoolAssessment.id.in_(assessment_ids)).all()
+    by_learner={}
+    for learner,mark,assessment,subject in rows:
+        entry=by_learner.setdefault(learner.id,{"learner_id":learner.id,"admission_number":learner.admission_number,
+            "learner":learner.first_name+" "+learner.last_name,"weighted_total":Decimal("0"),
+            "weight_total":Decimal("0"),"subjects":[]})
+        pct=Decimal(mark.score)/Decimal(assessment.maximum_score)*Decimal("100")
+        weight=Decimal(assessment.weight)
+        entry["weighted_total"]+=pct*weight;entry["weight_total"]+=weight
+        entry["subjects"].append({"subject":subject.name,"assessment":assessment.title,
+            "score":str(mark.score),"maximum_score":str(assessment.maximum_score),
+            "percentage":str(pct.quantize(Decimal("0.01")))})
+    bands=db.query(SchoolGradeBand).filter_by(organization_id=membership.organization_id,scale_name=scale_name).all()
+    cards=[]
+    for entry in by_learner.values():
+        average=entry["weighted_total"]/entry["weight_total"] if entry["weight_total"] else Decimal("0")
+        band=next((b for b in bands if b.minimum_percent<=average<=b.maximum_percent),None)
+        cards.append({"learner_id":entry["learner_id"],"admission_number":entry["admission_number"],
+            "learner":entry["learner"],"weighted_average":str(average.quantize(Decimal("0.01"))),
+            "grade":band.grade if band else None,"points":str(band.points) if band else None,
+            "subjects":entry["subjects"]})
+    cards.sort(key=lambda x:(-Decimal(x["weighted_average"]),x["admission_number"]))
+    previous=None;rank=0
+    for index,card in enumerate(cards,1):
+        score=Decimal(card["weighted_average"])
+        if score!=previous:rank=index
+        card["rank"]=rank;previous=score
+    return {"class_id":class_id,"term":term,"academic_year":cls.academic_year,"report_cards":cards}
