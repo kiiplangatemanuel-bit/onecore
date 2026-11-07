@@ -12,6 +12,7 @@ from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
 from app.services.crm_delivery import build_unsubscribe_url, send_campaign_message
+from app.services.datetime_utils import as_utc
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM communications"])
 
@@ -57,7 +58,7 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
         consent=latest_consent(db,r,c)
         checked_at=datetime.now(timezone.utc)
         if not consent or consent.decision!="granted" or (
-            consent.expires_at and consent.expires_at<=checked_at
+            consent.expires_at and as_utc(consent.expires_at)<=checked_at
         ):
             r.status="suppressed"
             r.claimed_at=None
