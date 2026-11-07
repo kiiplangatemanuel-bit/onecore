@@ -7,7 +7,7 @@ campaign, and provider idempotency keys make ambiguous retries safe.
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, update
 from app.core.models import (CRMCampaign, CRMCampaignSchedule, CRMCommunicationTemplate,
     CRMAudienceSegment, CRMContact, CRMContactConsent, CRMCampaignRecipient,
     Membership, User, AuditEvent)
@@ -154,9 +154,19 @@ def run_due_schedules(db,organization_id=None,limit=10):
         row=next((x for x in candidates if x.next_run_at and as_utc(x.next_run_at)<=now
             and (x.status=="scheduled" or not x.lease_until or as_utc(x.lease_until)<now)),None)
         if not row:break
-        row.status="running";row.claimed_at=now;row.lease_until=now+timedelta(minutes=10)
+        claim_filters=[CRMCampaignSchedule.id==row.id,CRMCampaignSchedule.status==row.status]
+        if row.status=="scheduled":
+            claim_filters.append(CRMCampaignSchedule.next_run_at==row.next_run_at)
+        elif row.lease_until is None:
+            claim_filters.append(CRMCampaignSchedule.lease_until.is_(None))
+        else:
+            claim_filters.append(CRMCampaignSchedule.lease_until==row.lease_until)
+        claimed=db.execute(update(CRMCampaignSchedule).where(*claim_filters).values(
+            status="running",claimed_at=now,lease_until=now+timedelta(minutes=10)))
         schedule_id=row.id
         db.commit()
+        if claimed.rowcount!=1:
+            continue
         try:
             _execute_schedule(db,schedule_id,now)
         except Exception as exc:
