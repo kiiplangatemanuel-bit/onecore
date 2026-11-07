@@ -59,7 +59,7 @@ def _prepare_child(db,schedule,parent,membership,user,now,run_number):
         raise ValueError("Scheduled audience branch no longer matches the campaign")
     child=CRMCampaign(organization_id=parent.organization_id,
         branch_id=parent.branch_id or (segment.branch_id if segment else None),
-        campaign_number=child_number,name=f"{parent.name} · run {run_number}",
+        campaign_number=child_number,name=(parent.name[:155]+f" · run {run_number}")[:180],
         subject=template.subject if template else parent.subject,
         channel=parent.channel,purpose=parent.purpose,
         message=template.body if template else parent.message,
