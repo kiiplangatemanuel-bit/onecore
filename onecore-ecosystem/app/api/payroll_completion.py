@@ -168,7 +168,8 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
         except ValueError:
             certificate_valid = False
     disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid else ZERO
-    taxable = max(ZERO, money(gross - deductible - meal_exemption - disability_exemption))
+    taxable_benefits = money(extra.get("taxable_benefits", 0))
+    taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
     paye = max(ZERO, money(gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
@@ -177,7 +178,7 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     if net < 0:
         raise HTTPException(422, "Deductions exceed gross pay; review employee declarations and payroll items")
     return {
-        "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
+        "gross_pay": str(gross), "taxable_benefits": str(taxable_benefits), "taxable_pay": str(taxable), "paye": str(paye),
         "personal_relief": str(personal_relief), "insurance_relief": str(insurance_relief),
         "nssf_employee": str(nssf), "nssf_employer": str(employer_nssf),
         "shif_employee": str(shif), "housing_levy_employee": str(ahl),
@@ -354,7 +355,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         cash_allowances = money(extras.get("cash_allowances", 0))
         taxable_benefits = money(extras.get("taxable_benefits", 0))
         meal_benefit = money(extras.get("meal_benefit", 0))
-        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + taxable_benefits + meal_benefit)
+        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + meal_benefit)
         result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
         snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
                     "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
