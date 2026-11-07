@@ -123,7 +123,9 @@ def _execute_schedule(db,schedule_id,now):
             schedule.lease_until=datetime.now(timezone.utc)+timedelta(minutes=10)
             db.commit()
             result=dispatch_campaign(child.id,batch_size=20,membership=membership,user=user,db=db)
-            if result.get("remaining",0)<=0 or result.get("processed",0)<=0:break
+            if result.get("remaining",0)<=0:break
+            if result.get("processed",0)<=0:
+                raise RuntimeError("Campaign recipients are still claimed by another dispatcher; retry after the recipient lease expires")
     db.refresh(child)
     schedule.last_run_at=datetime.now(timezone.utc)
     schedule.last_run_campaign_id=child.id
