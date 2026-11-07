@@ -73,6 +73,12 @@ def school_ui():
     page = Path(__file__).resolve().parent / "web" / "school.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
+
+@app.get("/school/advanced", response_class=HTMLResponse)
+def school_advanced_ui():
+    page = Path(__file__).resolve().parent / "web" / "school_advanced.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
+
 @app.get("/pos", response_class=HTMLResponse)
 def pos_ui():
     page = Path(__file__).resolve().parent / "web" / "pos.html"
