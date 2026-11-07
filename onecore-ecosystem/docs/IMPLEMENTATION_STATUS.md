@@ -760,3 +760,16 @@ Boundaries: tax is an organization-configured percentage, not an eTIMS/KRA tax c
 - Added pending integration diagnostics and manager retry endpoint for missing mappings or closed-period blockers.
 - Added branch-scoped integration listing, audit events, migration 0024, and bridge contract tests.
 - External payment execution/settlement and jurisdiction-specific tax validation remain outside this increment.
+
+
+## CRM campaign automation and healthcare privacy increment
+
+Implemented on branch `feature/crm-automation-healthcare-privacy`:
+- Versioned reusable email/SMS/WhatsApp templates with safe contact personalization variables.
+- Nested AND/OR audience segments with an allow-listed contact-field/operator DSL and preview.
+- Durable one-time, daily and weekly campaign schedules; child campaign per occurrence, recipient-level rendered content, scheduler leases and a supervised worker.
+- Consent-aware recipient snapshots and existing dispatch provider idempotency/retry/callback pipeline reused by the scheduler.
+- Healthcare-specific branch roles, patient-level access grants, revocation/expiry, append-only purpose-based consent, 15-minute justified break-glass access and immutable access audit records.
+- Patient identity and clinical encounter content stored as authenticated Fernet ciphertext; separate healthcare encryption key configuration.
+- Dedicated CRM automation and Healthcare privacy workspaces, migrations `0030` and `0031`, tests and operator documentation.
+- CI and production UAT must pass before claiming deployment readiness. Production key rotation/management, MFA/step-up, retention and data-subject workflows, penetration testing and clinical/legal review remain operational requirements.
