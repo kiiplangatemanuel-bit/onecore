@@ -938,6 +938,108 @@ class LaboratoryValidateIn(BaseModel):
 
 
 
+class PrescriptionLineIn(BaseModel):
+    medicine_id: int = Field(gt=0)
+    dose: str = Field(min_length=1, max_length=120)
+    frequency: str = Field(min_length=1, max_length=120)
+    duration_days: int = Field(ge=1, le=365)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999"), multiple_of=Decimal("0.001"))
+    refills_allowed: int = Field(default=0, ge=0, le=12)
+
+
+class PharmacyPrescriptionIn(BaseModel):
+    encounter_id: int = Field(gt=0)
+    prescription_number: str = Field(min_length=4, max_length=80)
+    valid_until: date
+    lines: list[PrescriptionLineIn] = Field(min_length=1, max_length=30)
+
+
+class PharmacyDispenseIn(BaseModel):
+    line_id: int = Field(gt=0)
+    batch_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999"), multiple_of=Decimal("0.001"))
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    verifier_id: int = Field(gt=0)
+
+
+class PharmacyAllergyIn(BaseModel):
+    patient_id: int = Field(gt=0)
+    allergen: str = Field(min_length=2, max_length=180)
+    reaction: str = Field(default="", max_length=500)
+    severity: str = Field(default="unknown", pattern=r"^(unknown|mild|moderate|severe)$")
+
+
+class PharmacySafetyRuleIn(BaseModel):
+    medicine_a_id: int = Field(gt=0)
+    medicine_b_id: int | None = Field(default=None, gt=0)
+    rule_type: str = Field(pattern=r"^(interaction|allergy)$")
+    severity: str = Field(default="warning", pattern=r"^(warning|block)$")
+    description: str = Field(min_length=5, max_length=500)
+
+
+class PharmacyReturnIn(BaseModel):
+    dispense_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999"), multiple_of=Decimal("0.001"))
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class PharmacyRecallIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class LaboratoryPanelIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40)
+    name: str = Field(min_length=2, max_length=180)
+    description: str = Field(default="", max_length=500)
+    test_ids: list[int] = Field(min_length=1, max_length=50)
+
+
+class LaboratorySampleDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(accepted|rejected)$")
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class LaboratoryInstrumentIn(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    manufacturer: str = Field(default="", max_length=120)
+    model: str = Field(default="", max_length=120)
+    branch_id: str | None = Field(default=None, max_length=36)
+
+
+class LaboratoryInstrumentResultIn(BaseModel):
+    accession_number: str = Field(min_length=3, max_length=80)
+    test_code: str = Field(min_length=2, max_length=40)
+    result_value: str = Field(min_length=1, max_length=4000)
+    result_unit: str = Field(default="", max_length=40)
+    result_notes: str = Field(default="", max_length=4000)
+    is_critical: bool = False
+
+
+class LaboratoryQCIn(BaseModel):
+    instrument_id: int = Field(gt=0)
+    control_lot: str = Field(min_length=2, max_length=80)
+    result: str = Field(min_length=1, max_length=200)
+    expected_range: str = Field(min_length=1, max_length=120)
+    passed: bool
+
+
+class LaboratoryCalibrationIn(BaseModel):
+    instrument_id: int = Field(gt=0)
+    calibration_reference: str = Field(min_length=2, max_length=120)
+    outcome: str = Field(pattern=r"^(passed|failed)$")
+    next_due: date
+
+
+class PharmacyLabBillingIn(BaseModel):
+    patient_id: int = Field(gt=0)
+    source_type: str = Field(pattern=r"^(pharmacy_dispense|laboratory_order)$")
+    source_id: int = Field(gt=0)
+    insurer_name: str = Field(default="", max_length=180)
+    member_policy_number: str = Field(default="", max_length=100)
+    amount: Decimal = Field(gt=0, le=Decimal("999999999999"), multiple_of=Decimal("0.01"))
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+
+
 class SaccoMemberIn(BaseModel):
     member_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
     full_name: str = Field(min_length=2, max_length=180)
