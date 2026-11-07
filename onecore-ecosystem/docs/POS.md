@@ -65,7 +65,7 @@ attestation.
 
 ## Remaining POS requirements
 
-- Discount and tax calculation, customer accounts, receipt rendering/thermal printing and cash drawer integration.
+- Customer accounts, receipt rendering/thermal printing and cash drawer integration.
 - Offline re-authentication/device registration, local authorization expiry/revocation
   and a robust 24-hour offline entitlement.
 - Discounts, tax calculation, customer accounts, receipt rendering/thermal printing
@@ -135,6 +135,6 @@ A sale journal debits each tender/receivable account and discounts, then credits
 - `GET /api/v1/accounting/pos-integrations?status=pending|posted`
 - `POST /api/v1/accounting/pos-integrations/post-pending`
 
-Every source has one unique organization/source-type/source-ID bridge link. Replays do not create duplicate journals. When mappings are not configured, or a source date falls in a closed fiscal period, the POS transaction remains operationally recorded and its bridge link stays pending with a reason. After correcting the mapping or period issue, an authorized manager can post pending integrations. The integration list is branch-scoped.
+Every source has one unique organization/source-type/source-ID bridge link. Replays do not create duplicate journals. When mappings are not configured, or a source date falls in a closed fiscal period, the POS transaction remains operationally recorded and its bridge link stays pending with a reason. After correcting the mapping or period issue, an authorized manager can post pending integrations. The backfill endpoint discovers legacy sales/returns that predate the bridge and processes them in bounded batches. The integration list is branch-scoped.
 
 The mapping uses the organization's chart of accounts and base currency. POS currency must therefore be consistent with the accounting base currency; foreign-currency conversion, payment-gateway settlement, card/M-Pesa execution and bank reconciliation are not performed by this bridge. Finance must verify account classification and statutory tax treatment before production use.
