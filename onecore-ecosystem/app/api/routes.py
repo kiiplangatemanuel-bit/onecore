@@ -551,7 +551,8 @@ def list_crm_leads(stage: str | None = None, membership=Depends(active_membershi
              "source": x.source, "estimated_value": str(x.estimated_value),
              "currency": x.currency, "assigned_to": x.assigned_to, "next_step": x.next_step,
              "branch_id": x.branch_id, "expected_close_date": x.expected_close_date.isoformat() if x.expected_close_date else None,
-             "probability_override": str(x.probability_override) if x.probability_override is not None else None} for x in rows]
+             "probability_override": str(x.probability_override) if x.probability_override is not None else None,
+             "actual_value": str(x.actual_value) if x.actual_value is not None else None} for x in rows]
 
 
 @router.post("/crm/leads", status_code=201)
