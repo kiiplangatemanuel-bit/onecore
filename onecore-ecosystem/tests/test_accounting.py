@@ -90,3 +90,44 @@ def test_accounting_financial_statements_workspace_controls():
     assert 'id="financialStatementForm"' in html
     assert 'id="financialStatementResult"' in html
     assert "/accounting/financial-statements" in html
+
+
+def test_accounting_year_end_close_routes_and_confirmation_contract():
+    paths = app.openapi()["paths"]
+    preview = "/api/v1/accounting/fiscal-periods/{period_id}/year-end-close-preview"
+    close = "/api/v1/accounting/fiscal-periods/{period_id}/year-end-close"
+    assert preview in paths and "get" in paths[preview]
+    assert close in paths and "post" in paths[close]
+    from app.core.schemas import AccountingYearEndCloseIn
+    payload = AccountingYearEndCloseIn(
+        retained_earnings_account_id=7, confirmation_code="FY2026")
+    assert payload.confirmation_code == "FY2026"
+    with pytest.raises(ValidationError):
+        AccountingYearEndCloseIn(retained_earnings_account_id=0, confirmation_code="FY")
+
+
+def test_accounting_workspace_exposes_year_end_close_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="yearEndPreviewForm"' in html
+    assert 'id="yearEndPostForm"' in html
+    assert "/year-end-close-preview" in html
+    assert "/year-end-close" in html
+
+
+def test_accounting_financial_statements_route_contract():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/accounting/financial-statements"
+    assert endpoint in paths
+    params = {item["name"] for item in paths[endpoint]["get"]["parameters"]}
+    assert {"statement_type", "start_date", "end_date"} <= params
+
+
+def test_accounting_financial_statements_workspace_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="financialStatementForm"' in html
+    assert 'id="financialStatementResult"' in html
+    assert "/accounting/financial-statements" in html
