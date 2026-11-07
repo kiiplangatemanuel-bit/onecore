@@ -1,8 +1,8 @@
 """Campaign dispatch, delivery callbacks, one-click unsubscribe and reporting."""
 import hashlib, secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
@@ -10,7 +10,7 @@ from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactC
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
-from app.services.crm_delivery import send_campaign_message
+from app.services.crm_delivery import build_unsubscribe_url, send_campaign_message
 
 router=APIRouter(prefix="/api/v1/crm",tags=["CRM communications"])
 
@@ -26,41 +26,92 @@ def latest_consent(db,r,c):
 @router.post("/campaigns/{campaign_id}/dispatch")
 def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage"); c=campaign_or_404(db,campaign_id,membership.organization_id,membership)
-    if c.status not in {"ready","sending","partial","failed"}: raise HTTPException(409,"Prepare campaign before dispatch")
-    rows=db.query(CRMCampaignRecipient).filter_by(organization_id=membership.organization_id,campaign_id=c.id).filter(
-        CRMCampaignRecipient.status.in_(["prepared","failed"])).order_by(CRMCampaignRecipient.id).limit(batch_size).with_for_update().all()
+    require_permission(membership,"manage")
+    c=campaign_or_404(db,campaign_id,membership.organization_id,membership)
+    if c.status not in {"ready","sending","partial","failed"}:
+        raise HTTPException(409,"Prepare campaign before dispatch")
+    if c.purpose=="marketing":
+        build_unsubscribe_url("configuration-check",settings.crm_public_base_url)
+    now=datetime.now(timezone.utc)
+    lease_expired=now-timedelta(minutes=10)
+    eligible=or_(
+        CRMCampaignRecipient.status.in_(["prepared","failed"]),
+        and_(
+            CRMCampaignRecipient.status=="sending",
+            or_(CRMCampaignRecipient.claimed_at.is_(None),
+                CRMCampaignRecipient.claimed_at<lease_expired),
+        ),
+    )
+    rows=db.query(CRMCampaignRecipient).filter_by(
+        organization_id=membership.organization_id,campaign_id=c.id
+    ).filter(eligible).order_by(CRMCampaignRecipient.id).limit(batch_size).with_for_update().all()
     processed=accepted=failed=suppressed=0
-    # Claim recipients before releasing row locks so concurrent dispatch batches skip them.
-    for recipient in rows: recipient.status="sending"
-    c.status="sending"; db.commit()
+    for recipient in rows:
+        recipient.status="sending"
+        recipient.claimed_at=now
+    c.status="sending"
+    db.commit()
     for r in rows:
-        processed+=1; consent=latest_consent(db,r,c); now=datetime.now(timezone.utc)
-        if not consent or consent.decision!="granted" or (consent.expires_at and consent.expires_at<=now):
-            r.status="suppressed"; db.add(CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,
-                attempt_number=0,status="suppressed",error_message="Consent revoked or expired")); db.commit(); suppressed+=1; continue
-        attempts=db.query(func.count(CRMCampaignDelivery.id)).filter_by(recipient_id=r.id).scalar() or 0
-        if attempts>=5: r.status="exhausted"; db.commit(); failed+=1; continue
-        token=secrets.token_urlsafe(32); digest=hashlib.sha256(token.encode()).hexdigest()
-        d=CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,attempt_number=attempts+1,
-            status="sending",unsubscribe_token_hash=digest); db.add(d); r.status="sending"; db.commit()
+        processed+=1
+        consent=latest_consent(db,r,c)
+        checked_at=datetime.now(timezone.utc)
+        if not consent or consent.decision!="granted" or (
+            consent.expires_at and consent.expires_at<=checked_at
+        ):
+            r.status="suppressed"
+            r.claimed_at=None
+            db.add(CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,
+                attempt_number=0,status="suppressed",error_message="Consent revoked or expired"))
+            db.commit()
+            suppressed+=1
+            continue
+        attempts=db.query(func.count(CRMCampaignDelivery.id)).filter_by(
+            organization_id=r.organization_id,recipient_id=r.id
+        ).scalar() or 0
+        if attempts>=5:
+            r.status="exhausted"
+            r.claimed_at=None
+            db.commit()
+            failed+=1
+            continue
+        token=secrets.token_urlsafe(32)
+        unsubscribe_url=build_unsubscribe_url(token,settings.crm_public_base_url) if c.purpose=="marketing" else None
+        digest=hashlib.sha256(token.encode()).hexdigest()
+        d=CRMCampaignDelivery(organization_id=r.organization_id,recipient_id=r.id,
+            attempt_number=attempts+1,status="sending",unsubscribe_token_hash=digest)
+        db.add(d)
+        db.commit()
         try:
-            base=settings.crm_public_base_url.rstrip("/")
-            url=f"{base}/api/v1/crm/unsubscribe/{token}" if base else None
             result=send_campaign_message(c.channel,r.address_snapshot,c.name,c.message,
-                f"onecore-crm-{c.id}-{r.id}",url)
-            d.status="accepted"; d.provider_message_id=result["provider_message_id"]
-            d.accepted_at=datetime.now(timezone.utc); r.status="sent"; db.commit(); accepted+=1
+                f"onecore-crm-{c.id}-{r.id}",unsubscribe_url)
+            d.status="accepted"
+            d.provider_message_id=result["provider_message_id"]
+            d.accepted_at=datetime.now(timezone.utc)
+            r.status="sent"
+            r.claimed_at=None
+            db.commit()
+            accepted+=1
         except Exception as exc:
-            d.status="failed"; d.error_message=str(exc)[:1000]; r.status="failed"; db.commit(); failed+=1
-    remaining=db.query(CRMCampaignRecipient).filter_by(organization_id=membership.organization_id,campaign_id=c.id).filter(
-        CRMCampaignRecipient.status.in_(["prepared","failed","sending"])).count()
+            d.status="failed"
+            d.error_message=str(exc)[:1000]
+            r.status="failed"
+            r.claimed_at=None
+            db.commit()
+            failed+=1
+    remaining=db.query(CRMCampaignRecipient).filter_by(
+        organization_id=membership.organization_id,campaign_id=c.id
+    ).filter(or__(
+        CRMCampaignRecipient.status.in_(["prepared","failed"]),
+        CRMCampaignRecipient.status=="sending",
+    )).count()
     statuses={x[0] for x in db.query(CRMCampaignRecipient.status).filter_by(
         organization_id=membership.organization_id,campaign_id=c.id).all()}
-    c.status=("sent" if remaining==0 and statuses <= {"sent","delivered","suppressed"} else "partial")
+    c.status=("sent" if remaining==0 and statuses <= {"sent","delivered","suppressed"}
+              else "partial")
     db.commit()
-    return {"campaign_id":c.id,"status":c.status,"processed":processed,"accepted":accepted,
-        "failed":failed,"suppressed":suppressed,"remaining":remaining}
+    return {"campaign_id":c.id,"status":c.status,"processed":processed,
+        "accepted":accepted,"failed":failed,"suppressed":suppressed,"remaining":remaining}
+
 
 @router.post("/delivery-events")
 def delivery_event(payload:dict,x_crm_delivery_secret:str|None=Header(None),db:Session=Depends(get_db)):
@@ -92,7 +143,6 @@ def campaign_report(campaign_id:int,membership=Depends(active_membership),db:Ses
         "accepted":counts.get("sent",0)+counts.get("delivered",0),"failed":counts.get("failed",0),
         "suppressed":counts.get("suppressed",0),"exhausted":counts.get("exhausted",0)}
 
-@router.get("/unsubscribe/{token}")
 @router.post("/unsubscribe/{token}")
 def unsubscribe(token:str,db:Session=Depends(get_db)):
     d=db.query(CRMCampaignDelivery).filter_by(unsubscribe_token_hash=hashlib.sha256(token.encode()).hexdigest()).first()
