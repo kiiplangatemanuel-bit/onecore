@@ -509,6 +509,7 @@ def replenishment(membership=Depends(active_membership),db:Session=Depends(get_d
     require_permission(membership,"read")
     rules=db.query(InventoryReorderRule).join(InventoryWarehouse,InventoryWarehouse.id==InventoryReorderRule.warehouse_id).filter(InventoryReorderRule.organization_id==membership.organization_id,InventoryReorderRule.is_active==True).all()
     allowed=branch_scope_ids(membership)
+    if allowed is not None: rules=[r for r in rules if db.query(InventoryWarehouse).filter_by(id=r.warehouse_id).first() and db.query(InventoryWarehouse).filter_by(id=r.warehouse_id).first().branch_id in allowed]
     result=[]
     for rule in rules:
         wh=get_warehouse(db,membership.organization_id,rule.warehouse_id,membership)
@@ -619,10 +620,14 @@ def inventory_dashboard(membership=Depends(active_membership),db:Session=Depends
         if allowed is not None and wh.branch_id not in allowed: continue
         if warehouse_qty(db,membership.organization_id,wh,rule.product_id)-active_reserved(db,membership.organization_id,wh.id,rule.product_id) <= dec(rule.minimum_quantity):
             low += 1
-    expired=db.query(InventoryBatch).filter(InventoryBatch.organization_id==membership.organization_id,
-        InventoryBatch.status=="available",InventoryBatch.expiry_date<datetime.now(timezone.utc)).count()
-    quarantined=db.query(InventoryBatch).filter_by(organization_id=membership.organization_id,status="quarantined").count()
-    in_transit=db.query(InventoryTransfer).filter_by(organization_id=membership.organization_id,status="in_transit").count()
+    batch_query=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(InventoryBatch.organization_id==membership.organization_id)
+    transfer_query=db.query(InventoryTransfer).filter_by(organization_id=membership.organization_id,status="in_transit")
+    if allowed is not None:
+        batch_query=batch_query.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else batch_query.filter(False)
+        transfer_query=transfer_query.join(InventoryWarehouse,InventoryWarehouse.id==InventoryTransfer.source_warehouse_id).filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else transfer_query.filter(False)
+    expired=batch_query.filter(InventoryBatch.status=="available",InventoryBatch.expiry_date<datetime.now(timezone.utc)).count()
+    quarantined=batch_query.filter(InventoryBatch.status=="quarantined").count()
+    in_transit=transfer_query.count()
     return {"active_products":products,"warehouses":len(warehouses),"low_stock_rule_count":low,
         "expired_batches":expired,"quarantined_batches":quarantined,"transfers_in_transit":in_transit}
 
@@ -631,7 +636,10 @@ def inventory_dashboard(membership=Depends(active_membership),db:Session=Depends
 def inventory_alerts(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
     now=datetime.now(timezone.utc)
-    batches=db.query(InventoryBatch).filter_by(organization_id=membership.organization_id,status="available").all()
+    batch_query=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(InventoryBatch.organization_id==membership.organization_id,InventoryBatch.status=="available")
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: batch_query=batch_query.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else batch_query.filter(False)
+    batches=batch_query.all()
     alerts=[]
     for b in batches:
         if b.expiry_date:
