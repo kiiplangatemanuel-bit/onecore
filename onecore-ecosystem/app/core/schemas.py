@@ -1041,6 +1041,39 @@ class PharmacyLabBillingIn(BaseModel):
     currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
 
 
+
+class PharmacyDispenseReversalIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+    verifier_id: int = Field(gt=0)
+    restock_quantity: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("999999"), multiple_of=Decimal("0.001"))
+
+
+class PharmacyStockAdjustmentIn(BaseModel):
+    quantity_delta: Decimal
+    reason: str = Field(min_length=5, max_length=500)
+    verifier_id: int = Field(gt=0)
+
+    @field_validator("quantity_delta")
+    @classmethod
+    def adjustment_nonzero(cls, value):
+        if value == 0 or abs(value) > Decimal("999999"):
+            raise ValueError("Adjustment must be non-zero and within the supported range")
+        return value
+
+
+class PharmacyReplenishmentIn(BaseModel):
+    medicine_id: int = Field(gt=0)
+    branch_id: str = Field(min_length=1, max_length=36)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999"), multiple_of=Decimal("0.001"))
+    supplier_id: int | None = Field(default=None, gt=0)
+    reason: str = Field(default="", max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=120)
+
+
+class PharmacyClaimDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected|settled)$")
+    note: str = Field(min_length=3, max_length=500)
+
 class SaccoMemberIn(BaseModel):
     member_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
     full_name: str = Field(min_length=2, max_length=180)
