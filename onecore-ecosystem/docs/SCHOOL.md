@@ -83,3 +83,31 @@ class/date register loader, status and note controls, and batch save. It is a ba
 staff interface; role-specific approval and parent-facing workflows are not included. CI must
 pass the full migration downgrade/upgrade and pytest workflow before this increment is
 considered verified.
+
+
+## Learner promotion and transfer history increment
+
+The learner placement workflow now supports controlled academic-year promotion and
+class/branch transfer:
+
+- `POST /api/v1/school/learners/{learner_id}/placements` requires organization
+  manage permission, an active learner, an existing source placement and an active
+  target class.
+- Promotion requires a strictly later academic year. Transfers can move between
+  parallel classes in the same year or into a later year; moving backwards in the
+  academic calendar is rejected.
+- The actor must have access to both source and target branches. The learner's
+  current class and branch are updated in the same database transaction that writes
+  the append-only placement history and audit event.
+- `GET /api/v1/school/learners/{learner_id}/placements` returns chronological
+  history with source/target class and year details, subject to access to both
+  branches represented in the history.
+- Placement history is retained rather than overwriting the previous class link. The `/school` workspace includes a placement form and chronological history viewer.
+  Existing attendance rows remain associated with the class in which they were
+  originally recorded.
+
+This increment does not implement class capacity/waitlists, guardian consent,
+bulk promotion, promotion eligibility rules, transcript migration, fee carry-forward,
+or notifications. Effective dates are recorded as administrative history; the API
+does not backdate historical attendance or assessment membership. Review the school's
+approved promotion policy and safeguarding procedures before production use.

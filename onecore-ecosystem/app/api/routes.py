@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -3088,3 +3088,87 @@ def list_school_attendance(class_id:int, attendance_date:date,
         "entries":[{"learner_id":a.learner_id,"admission_number":l.admission_number,
         "learner":f"{l.first_name} {l.last_name}","status":a.status,"note":a.note}
         for a,l in rows]}
+
+
+@router.post("/school/learners/{learner_id}/placements", status_code=201)
+def change_school_learner_placement(learner_id: int, payload: SchoolLearnerPlacementIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Promote or transfer an active learner while retaining the previous placement."""
+    require_permission(membership, "manage")
+    learner = db.query(SchoolLearner).filter_by(
+        id=learner_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not learner or learner.status != "active" or not can_access_branch(membership, learner.branch_id):
+        raise HTTPException(404, "Active learner not found")
+    if not learner.class_id:
+        raise HTTPException(409, "Learner must have a current class before a placement change")
+    source = db.query(SchoolClass).filter_by(
+        id=learner.class_id, organization_id=membership.organization_id
+    ).first()
+    target = db.query(SchoolClass).filter_by(
+        id=payload.target_class_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not source or not target:
+        raise HTTPException(404, "Source or target class not found")
+    if not can_access_branch(membership, source.branch_id) or not can_access_branch(membership, target.branch_id):
+        raise HTTPException(403, "Access to both source and target branches is required")
+    if source.id == target.id:
+        raise HTTPException(409, "Learner is already enrolled in the target class")
+    if target.academic_year < source.academic_year:
+        raise HTTPException(422, "A learner cannot be moved to an earlier academic year")
+    if payload.change_type == "promotion" and target.academic_year <= source.academic_year:
+        raise HTTPException(422, "A promotion must move the learner to a later academic year")
+    if payload.effective_date < source.created_at.date():
+        raise HTTPException(422, "Effective date cannot precede the source class creation date")
+    history = SchoolEnrollmentHistory(
+        organization_id=membership.organization_id, learner_id=learner.id,
+        from_class_id=source.id, to_class_id=target.id,
+        effective_date=datetime.combine(payload.effective_date, time.min, tzinfo=timezone.utc),
+        change_type=payload.change_type, reason=payload.reason, changed_by=user.id,
+    )
+    learner.class_id = target.id
+    learner.branch_id = target.branch_id
+    db.add(history)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action=f"school.learner.{payload.change_type}", resource_type="school_learner",
+        resource_id=str(learner.id),
+        detail=f"from_class:{source.id};to_class:{target.id};effective:{payload.effective_date.isoformat()}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Learner placement changed concurrently; reload and retry")
+    db.refresh(history)
+    return {"learner_id": learner.id, "from_class_id": source.id, "to_class_id": target.id,
+        "change_type": history.change_type, "effective_date": payload.effective_date.isoformat(),
+        "history_id": history.id}
+
+
+@router.get("/school/learners/{learner_id}/placements")
+def list_school_learner_placements(learner_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    learner = db.query(SchoolLearner).filter_by(
+        id=learner_id, organization_id=membership.organization_id
+    ).first()
+    if not learner or not can_access_branch(membership, learner.branch_id):
+        raise HTTPException(404, "Learner not found")
+    rows = db.query(SchoolEnrollmentHistory).filter_by(
+        organization_id=membership.organization_id, learner_id=learner.id
+    ).order_by(SchoolEnrollmentHistory.effective_date, SchoolEnrollmentHistory.id).all()
+    results = []
+    for row in rows:
+        source = db.query(SchoolClass).filter_by(
+            id=row.from_class_id, organization_id=membership.organization_id).first()
+        target = db.query(SchoolClass).filter_by(
+            id=row.to_class_id, organization_id=membership.organization_id).first()
+        if not source or not target or not can_access_branch(membership, source.branch_id) or not can_access_branch(membership, target.branch_id):
+            raise HTTPException(404, "Placement history not found")
+        results.append({"id": row.id, "from_class_id": source.id, "from_class": source.name,
+            "from_academic_year": source.academic_year, "to_class_id": target.id,
+            "to_class": target.name, "to_academic_year": target.academic_year,
+            "change_type": row.change_type, "effective_date": row.effective_date.date().isoformat(),
+            "reason": row.reason, "changed_by": row.changed_by})
+    return {"learner_id": learner.id, "current_class_id": learner.class_id, "placements": results}
+

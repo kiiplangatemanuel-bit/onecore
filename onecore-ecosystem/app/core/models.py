@@ -757,6 +757,21 @@ class CRMQuoteLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class SchoolEnrollmentHistory(Base):
+    """Append-only record of each learner's class placement change."""
+    __tablename__ = "school_enrollment_history"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    learner_id: Mapped[int] = mapped_column(ForeignKey("school_learners.id"), index=True)
+    from_class_id: Mapped[int] = mapped_column(ForeignKey("school_classes.id"), index=True)
+    to_class_id: Mapped[int] = mapped_column(ForeignKey("school_classes.id"), index=True)
+    effective_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    change_type: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(500))
+    changed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class SchoolAttendance(Base):
     """One daily attendance decision per learner and tenant."""
     __tablename__ = "school_attendance"
