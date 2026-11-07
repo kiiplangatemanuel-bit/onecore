@@ -3228,6 +3228,12 @@ def convert_crm_quote_to_order(quote_id: int, payload: CRMQuoteConvertIn,
                 quantity=line.quantity, unit_price=line.unit_price, tax_rate=line.tax_rate,
                 subtotal=line.subtotal, tax_amount=line.tax_amount, total=line.total,
             ))
+        lead=db.query(CRMLead).filter_by(id=quote.lead_id,organization_id=membership.organization_id).first() if quote.lead_id else None
+        if lead and lead.source_campaign_id:
+            db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
+                contact_id=order.contact_id,lead_id=lead.id,sales_order_id=order.id,event_type="sales_order_confirmed",
+                revenue_amount=Decimal("0"),currency=order.currency,idempotency_key="order-confirmed-%s"%order.id,
+                occurred_at=order.confirmed_at,created_by=user.id))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -3239,13 +3245,6 @@ def convert_crm_quote_to_order(quote_id: int, payload: CRMQuoteConvertIn,
                 "quote_id":quote.id,"status":existing.status,"already_converted":True}
         raise HTTPException(409, "Sales order number already exists in this organization")
     db.refresh(order)
-    lead=db.query(CRMLead).filter_by(id=order.lead_id,organization_id=membership.organization_id).first() if order.lead_id else None
-    if lead and lead.source_campaign_id:
-        db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
-            contact_id=order.contact_id,lead_id=lead.id,sales_order_id=order.id,event_type="sales_order_confirmed",
-            revenue_amount=Decimal("0"),currency=order.currency,idempotency_key="order-confirmed-%s"%order.id,
-            occurred_at=order.confirmed_at,created_by=user.id))
-        db.commit()
     audit(db,user.id,membership.organization_id,"crm.quote.converted_to_order",
           "crm_sales_order",order.id,f"quote:{quote.id};order:{order.order_number}")
     return {"id":order.id,"order_number":order.order_number,"quote_id":quote.id,
