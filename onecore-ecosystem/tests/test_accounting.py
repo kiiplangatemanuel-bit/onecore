@@ -56,3 +56,20 @@ def test_accounting_tables_and_routes_exist():
     assert "/api/v1/accounting/accounts" in paths
     assert "/api/v1/accounting/journals" in paths
     assert "/api/v1/accounting/trial-balance" in paths
+
+
+def test_accounting_subledger_reconciliation_route_contract():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/accounting/subledger-reconciliation"
+    assert endpoint in paths
+    params = {item["name"] for item in paths[endpoint]["get"]["parameters"]}
+    assert {"invoice_type", "as_of"} <= params
+
+
+def test_accounting_workspace_exposes_subledger_reconciliation():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="subledgerReconciliation"' in html
+    assert 'id="subledgerResult"' in html
+    assert "/accounting/subledger-reconciliation" in html

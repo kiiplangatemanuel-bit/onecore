@@ -242,3 +242,23 @@ This is an operational close checklist, not a complete statutory close process:
 it does not yet perform retained-earnings transfer, tax filing validation,
 subledger-to-control-account reconciliation, depreciation completeness
 certification, management sign-off or a formal close pack.
+
+
+## AR/AP subledger-to-control-account reconciliation
+
+- Added a read-only, tenant- and branch-scoped reconciliation for receivables and
+  payables at a selected accounting date.
+- The subledger side includes posted invoices dated on or before the cutoff, less
+  settlements and posted credit notes dated on or before that date.
+- The general-ledger side sums posted journal lines on the invoice control accounts
+  through the same cutoff, using the normal debit balance for receivables and credit
+  balance for payables.
+- The response reports each control account's subledger balance, GL balance,
+  difference and balanced flag, plus totals and an overall balanced result.
+- API: GET /api/v1/accounting/subledger-reconciliation?invoice_type=receivable|payable&as_of=YYYY-MM-DD
+
+This is a diagnostic comparison, not an automatic adjustment or journal-posting
+workflow. Differences must be investigated and corrected through authorized source
+transactions. It does not certify tax, statutory or audit compliance. Historical
+cutoff results rely on dated invoice, payment and credit-note records; imported
+opening balances or unlinked manual control-account entries may produce differences.
