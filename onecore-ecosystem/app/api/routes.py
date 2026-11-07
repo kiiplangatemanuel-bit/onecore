@@ -1641,6 +1641,12 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             _record_pos_sync_conflict(db,membership,user,payload,shift,"offline_expired",
                 {"offline_until":device_expiry.isoformat()})
             raise HTTPException(409,"Trusted device offline authorization expired; supervisor review is required")
+    customer=None
+    if payload.customer_id is not None:
+        from app.core.pos_completion_models import POSCustomer
+        customer=db.query(POSCustomer).filter_by(id=payload.customer_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
+        if not customer or (customer.branch_id and customer.branch_id!=payload.branch_id):
+            raise HTTPException(404,"Active customer not found for this organization and branch")
     product_ids = {line.product_id for line in payload.lines}
     products = db.query(InventoryProduct).filter(
         InventoryProduct.organization_id == membership.organization_id,
@@ -1734,6 +1740,16 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     )
     db.add(sale)
     db.flush()
+    if customer:
+        from app.core.pos_completion_models import POSCustomerSale, POSLoyaltyEntry
+        db.add(POSCustomerSale(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id))
+        customer.lifetime_spend=Decimal(customer.lifetime_spend or 0)+total
+        points_earned=int(total//Decimal("100"))
+        if points_earned:
+            db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id,
+                entry_type="earn",points_delta=points_earned,idempotency_key=f"sale:{sale.id}:earn",
+                note="1 point per 100 currency units spent",created_by=user.id))
+            customer.points_balance+=points_earned
     movement_index=0
     for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
