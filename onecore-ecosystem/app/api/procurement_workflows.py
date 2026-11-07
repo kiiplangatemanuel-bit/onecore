@@ -297,7 +297,8 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
             if response.get("ResponseCode") == "0":
                 response_conversation = str(response.get("ConversationID") or "")[:100]
                 response_originator = str(response.get("OriginatorConversationID") or "")[:100]
-                if row.provider_conversation_id and response_conversation and row.provider_conversation_id != response_conversation:
+                if ((row.provider_conversation_id and response_conversation and row.provider_conversation_id != response_conversation)
+                        or (row.provider_originator_id and response_originator and row.provider_originator_id != response_originator)):
                     row.status = "exception"
                     row.provider_result_description = "Daraja response correlation does not match an earlier callback"
                 else:
@@ -431,6 +432,9 @@ def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = 
         settlement.provider_conversation_id = conversation[:100]
         settlement.provider_originator_id = str(result.get("OriginatorConversationID") or "")[:100]
     elif conversation != settlement.provider_conversation_id:
+        return False
+    callback_originator = str(result.get("OriginatorConversationID") or "")
+    if settlement.provider_originator_id and callback_originator and callback_originator != settlement.provider_originator_id:
         return False
     if settlement.status in {"settled", "provider_confirmed"}:
         return True
@@ -1092,7 +1096,7 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
                 or duplicate_target):
             raise HTTPException(422, "Invoice supplier, period, sign, status or amount does not match the statement line")
         line.matched_invoice_id = target.id
-    else:
+    elif payload.payment_id:
         target = db.query(AccountingInvoicePayment).join(
             AccountingInvoice, AccountingInvoice.id == AccountingInvoicePayment.invoice_id
         ).filter(AccountingInvoicePayment.id == payload.payment_id,
