@@ -114,6 +114,7 @@ class ProcurementSupplierStatementLine(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     matched_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_invoices.id"), nullable=True)
     matched_payment_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_invoice_payments.id"), nullable=True)
+    matched_credit_note_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_credit_notes.id"), nullable=True)
     matched_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
