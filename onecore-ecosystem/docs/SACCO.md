@@ -97,3 +97,23 @@ account, bank or mobile-money wallet. Repayment endpoints record internal receip
 they do not verify external settlement. Interest is fixed at origination and no
 penalties, arrears accrual, rescheduling, early-settlement rebates or variable-rate
 recalculation are provided. No general-ledger journal is automatically posted.
+
+
+## Loan arrears ageing report
+
+- Added read-only `GET /api/v1/sacco/loans/arrears?as_of=YYYY-MM-DD`.
+- Reports overdue unpaid scheduled principal and interest as of the requested date,
+  grouped into 1–30, 31–60, 61–90 and over-90-day ageing buckets.
+- Provides per-loan overdue principal, overdue interest, total overdue, overdue
+  installment count and oldest due date/days past due.
+- Results are tenant-scoped and branch-filtered using the caller's accessible
+  branches. The report is derived from scheduled installment due/paid values and
+  does not mutate loan or schedule records.
+- Added a SACCO workspace report form and contract tests.
+
+Boundaries: this is scheduled-installment arrears visibility, not a full collections
+or prudential classification engine. It does not accrue late fees, calculate
+penalties, restructure loans, apply non-performing-loan rules, issue notices,
+allocate recovery costs or create accounting journals. It does not reconcile
+receipts with bank/mobile-money settlement. Validate policies and regulatory
+ageing definitions with the SACCO before operational use.
