@@ -404,3 +404,50 @@ class ProcurementRequisitionIn(BaseModel):
 
 class ProcurementRequisitionReviewIn(BaseModel):
     reason: str = Field(default="", max_length=500)
+
+
+class GoodsReceiptLineIn(BaseModel):
+    line_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class GoodsReceiptIn(BaseModel):
+    lines: list[GoodsReceiptLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_po_lines_and_keys(self):
+        line_ids = [x.line_id for x in self.lines]
+        keys = [x.idempotency_key for x in self.lines]
+        if len(line_ids) != len(set(line_ids)):
+            raise ValueError("Each purchase order line may appear only once per receipt")
+        if len(keys) != len(set(keys)):
+            raise ValueError("Receipt idempotency keys must be unique")
+        return self
+
+
+class GoodsReceiptInspectionLineIn(BaseModel):
+    receipt_line_id: int = Field(gt=0)
+    quantity_accepted: Decimal = Field(ge=0, le=Decimal("999999999999"))
+    quantity_rejected: Decimal = Field(ge=0, le=Decimal("999999999999"))
+    rejection_reason: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def positive_inspection_total(self):
+        if self.quantity_accepted + self.quantity_rejected <= 0:
+            raise ValueError("Inspection must account for a positive quantity")
+        if self.quantity_rejected > 0 and len(self.rejection_reason.strip()) < 5:
+            raise ValueError("A rejection reason of at least 5 characters is required")
+        return self
+
+
+class GoodsReceiptInspectionIn(BaseModel):
+    lines: list[GoodsReceiptInspectionLineIn] = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def unique_receipt_lines(self):
+        ids = [x.receipt_line_id for x in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each receipt line may be inspected only once per request")
+        return self
