@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1291,3 +1291,239 @@ def school_report_cards(class_id:int,term:str,scale_name:str="default",
         if score!=previous:rank=index
         card["rank"]=rank;previous=score
     return {"class_id":class_id,"term":term,"academic_year":cls.academic_year,"report_cards":cards}
+
+
+# Accounts receivable/payable: draft invoices, controlled posting and idempotent
+# settlement journals. Tax rates are configured by the tenant; this is not an
+# eTIMS or statutory tax engine.
+def _accounting_get_accounts(db, organization_id, account_ids):
+    rows=db.query(AccountingAccount).filter(
+        AccountingAccount.organization_id==organization_id,
+        AccountingAccount.is_active==True,
+        AccountingAccount.id.in_(set(account_ids))
+    ).all()
+    mapped={x.id:x for x in rows}
+    if set(mapped)!=set(account_ids):
+        raise HTTPException(404,"One or more accounting accounts were not found")
+    return mapped
+
+
+def _accounting_make_journal(db, membership, user, entry_date, reference, memo, lines, branch_id=None):
+    journal=AccountingJournal(
+        organization_id=membership.organization_id,branch_id=branch_id,
+        journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=reference,
+        memo=memo,status="posted",
+        entry_date=datetime.combine(entry_date,time.min,tzinfo=timezone.utc),
+        created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+    db.add(journal);db.flush()
+    for line in lines:
+        db.add(AccountingJournalLine(
+            organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=line["account_id"],branch_id=line.get("branch_id",branch_id),
+            description=line["description"],debit=line["debit"],credit=line["credit"]))
+    return journal
+
+
+@router.post("/accounting/invoices",status_code=201)
+def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    if payload.due_date<payload.issue_date: raise HTTPException(422,"Due date cannot precede issue date")
+    if payload.invoice_type=="receivable" and (not payload.contact_id or payload.supplier_id):
+        raise HTTPException(422,"A receivable invoice requires a customer contact only")
+    if payload.invoice_type=="payable" and (not payload.supplier_id or payload.contact_id):
+        raise HTTPException(422,"A payable invoice requires a supplier only")
+    if payload.branch_id: _crm_branch_check(db,membership,payload.branch_id)
+    control=_accounting_get_accounts(db,membership.organization_id,[payload.control_account_id])[payload.control_account_id]
+    expected_control="asset" if payload.invoice_type=="receivable" else "liability"
+    if control.account_type!=expected_control:
+        raise HTTPException(422,f"{payload.invoice_type} control account must be {expected_control}")
+    if payload.contact_id and not db.query(CRMContact).filter_by(
+        id=payload.contact_id,organization_id=membership.organization_id).first():
+        raise HTTPException(404,"Customer contact not found")
+    if payload.supplier_id and not db.query(ProcurementSupplier).filter_by(
+        id=payload.supplier_id,organization_id=membership.organization_id,is_active=True).first():
+        raise HTTPException(404,"Supplier not found")
+    account_ids={x.account_id for x in payload.lines}
+    account_ids.update(x.tax_account_id for x in payload.lines if x.tax_account_id)
+    accounts=_accounting_get_accounts(db,membership.organization_id,account_ids)
+    subtotal=Decimal("0.00");tax_total=Decimal("0.00");computed=[]
+    for item in payload.lines:
+        expected_line=("revenue",) if payload.invoice_type=="receivable" else ("expense","asset")
+        if accounts[item.account_id].account_type not in expected_line:
+            raise HTTPException(422,"Invoice line account type is not valid for this invoice")
+        if item.tax_rate>0:
+            if not item.tax_account_id: raise HTTPException(422,"Tax account is required when tax rate is greater than zero")
+            expected_tax="liability" if payload.invoice_type=="receivable" else "asset"
+            if accounts[item.tax_account_id].account_type!=expected_tax:
+                raise HTTPException(422,f"Tax account must be {expected_tax} for this invoice type")
+        elif item.tax_account_id:
+            raise HTTPException(422,"Tax account must be omitted when tax rate is zero")
+        line_sub=(item.quantity*item.unit_price).quantize(Decimal("0.01"))
+        line_tax=(line_sub*item.tax_rate/Decimal("100")).quantize(Decimal("0.01"))
+        line_total=line_sub+line_tax
+        subtotal+=line_sub;tax_total+=line_tax
+        computed.append((item,line_sub,line_tax,line_total))
+    total=subtotal+tax_total
+    if total<=0: raise HTTPException(422,"Invoice total must be greater than zero")
+    invoice=AccountingInvoice(
+        organization_id=membership.organization_id,branch_id=payload.branch_id,
+        invoice_type=payload.invoice_type,contact_id=payload.contact_id,supplier_id=payload.supplier_id,
+        invoice_number=payload.invoice_number.strip().upper(),
+        issue_date=datetime.combine(payload.issue_date,time.min,tzinfo=timezone.utc),
+        due_date=datetime.combine(payload.due_date,time.min,tzinfo=timezone.utc),
+        currency=payload.currency,control_account_id=control.id,subtotal=subtotal,
+        tax_total=tax_total,total=total,amount_paid=Decimal("0"),status="draft",created_by=user.id)
+    db.add(invoice);db.flush()
+    for item,line_sub,line_tax,line_total in computed:
+        db.add(AccountingInvoiceLine(
+            organization_id=membership.organization_id,invoice_id=invoice.id,
+            account_id=item.account_id,tax_account_id=item.tax_account_id,
+            description=item.description.strip(),quantity=item.quantity,unit_price=item.unit_price,
+            subtotal=line_sub,tax_rate=item.tax_rate,tax_amount=line_tax,total=line_total))
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Invoice number already exists in this organization")
+    db.refresh(invoice)
+    audit(db,user.id,membership.organization_id,"accounting.invoice.created","accounting_invoice",invoice.id)
+    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"invoice_type":invoice.invoice_type,
+        "subtotal":str(invoice.subtotal),"tax_total":str(invoice.tax_total),"total":str(invoice.total),
+        "amount_paid":str(invoice.amount_paid),"balance":str(invoice.total),"status":invoice.status}
+
+
+@router.get("/accounting/invoices")
+def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
+    membership=Depends(active_membership),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(AccountingInvoice).filter_by(organization_id=membership.organization_id)
+    if invoice_type:
+        if invoice_type not in ("receivable","payable"): raise HTTPException(422,"Invalid invoice type")
+        q=q.filter(AccountingInvoice.invoice_type==invoice_type)
+    if status:
+        if status not in ("draft","posted","partially_paid","paid"): raise HTTPException(422,"Invalid invoice status")
+        q=q.filter(AccountingInvoice.status==status)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter((AccountingInvoice.branch_id==None)|(AccountingInvoice.branch_id.in_(allowed)))
+    rows=q.order_by(AccountingInvoice.due_date,AccountingInvoice.id.desc()).limit(limit).all()
+    return [{"id":x.id,"invoice_number":x.invoice_number,"invoice_type":x.invoice_type,
+        "contact_id":x.contact_id,"supplier_id":x.supplier_id,"issue_date":x.issue_date.date().isoformat(),
+        "due_date":x.due_date.date().isoformat(),"currency":x.currency,"subtotal":str(x.subtotal),
+        "tax_total":str(x.tax_total),"total":str(x.total),"amount_paid":str(x.amount_paid),
+        "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id} for x in rows]
+
+
+@router.post("/accounting/invoices/{invoice_id}/post")
+def post_accounting_invoice(invoice_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id,organization_id=membership.organization_id).with_for_update().first()
+    if not invoice: raise HTTPException(404,"Invoice not found")
+    if invoice.status!="draft": raise HTTPException(409,"Only draft invoices can be posted")
+    if invoice.branch_id and not can_access_branch(membership,invoice.branch_id):
+        raise HTTPException(404,"Invoice not found")
+    items=db.query(AccountingInvoiceLine).filter_by(
+        invoice_id=invoice.id,organization_id=membership.organization_id).all()
+    if not items: raise HTTPException(409,"Invoice has no lines")
+    lines=[]
+    if invoice.invoice_type=="receivable":
+        lines.append({"account_id":invoice.control_account_id,"description":"Accounts receivable "+invoice.invoice_number,
+            "debit":invoice.total,"credit":Decimal("0")})
+        for item in items:
+            lines.append({"account_id":item.account_id,"description":item.description,
+                "debit":Decimal("0"),"credit":item.subtotal})
+            if item.tax_amount:
+                lines.append({"account_id":item.tax_account_id,"description":"Output tax "+item.description,
+                    "debit":Decimal("0"),"credit":item.tax_amount})
+    else:
+        lines.append({"account_id":invoice.control_account_id,"description":"Accounts payable "+invoice.invoice_number,
+            "debit":Decimal("0"),"credit":invoice.total})
+        for item in items:
+            lines.append({"account_id":item.account_id,"description":item.description,
+                "debit":item.subtotal,"credit":Decimal("0")})
+            if item.tax_amount:
+                lines.append({"account_id":item.tax_account_id,"description":"Input tax "+item.description,
+                    "debit":item.tax_amount,"credit":Decimal("0")})
+    validate_journal_lines([type("Line",(),line)() for line in lines])
+    journal=_accounting_make_journal(db,membership,user,invoice.issue_date.date(),
+        invoice.invoice_number,"Invoice posting "+invoice.invoice_number,lines,invoice.branch_id)
+    invoice.status="posted";invoice.journal_id=journal.id;invoice.posted_by=user.id
+    invoice.posted_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"accounting.invoice.posted","accounting_invoice",invoice.id)
+    return {"id":invoice.id,"status":invoice.status,"journal_id":journal.id,"journal_number":journal.journal_number}
+
+
+@router.post("/accounting/invoices/{invoice_id}/payments",status_code=201)
+def record_accounting_invoice_payment(invoice_id:int,payload:AccountingInvoicePaymentIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id,organization_id=membership.organization_id).with_for_update().first()
+    if not invoice: raise HTTPException(404,"Invoice not found")
+    if invoice.status not in ("posted","partially_paid"): raise HTTPException(409,"Only posted invoices can be paid")
+    if invoice.branch_id and not can_access_branch(membership,invoice.branch_id): raise HTTPException(404,"Invoice not found")
+    duplicate=db.query(AccountingInvoicePayment).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if duplicate:
+        if duplicate.invoice_id==invoice.id and duplicate.amount==payload.amount and duplicate.payment_account_id==payload.payment_account_id:
+            return {"id":duplicate.id,"status":"already_applied","journal_id":duplicate.journal_id}
+        raise HTTPException(409,"Payment idempotency key was already used")
+    balance=Decimal(invoice.total)-Decimal(invoice.amount_paid)
+    if payload.amount>balance: raise HTTPException(422,"Payment exceeds outstanding invoice balance")
+    payment_account=_accounting_get_accounts(db,membership.organization_id,[payload.payment_account_id])[payload.payment_account_id]
+    if payment_account.account_type!="asset": raise HTTPException(422,"Payment account must be an asset account")
+    if invoice.invoice_type=="receivable":
+        journal_lines=[
+            {"account_id":payment_account.id,"description":"Receipt "+invoice.invoice_number,"debit":payload.amount,"credit":Decimal("0")},
+            {"account_id":invoice.control_account_id,"description":"Settle receivable "+invoice.invoice_number,"debit":Decimal("0"),"credit":payload.amount}]
+    else:
+        journal_lines=[
+            {"account_id":invoice.control_account_id,"description":"Settle payable "+invoice.invoice_number,"debit":payload.amount,"credit":Decimal("0")},
+            {"account_id":payment_account.id,"description":"Supplier payment "+invoice.invoice_number,"debit":Decimal("0"),"credit":payload.amount}]
+    journal=_accounting_make_journal(db,membership,user,payload.payment_date, payload.reference,
+        "Invoice settlement "+invoice.invoice_number,journal_lines,invoice.branch_id)
+    payment=AccountingInvoicePayment(
+        organization_id=membership.organization_id,invoice_id=invoice.id,payment_account_id=payment_account.id,
+        journal_id=journal.id,amount=payload.amount,
+        payment_date=datetime.combine(payload.payment_date,time.min,tzinfo=timezone.utc),
+        reference=payload.reference,idempotency_key=payload.idempotency_key,created_by=user.id)
+    db.add(payment);invoice.amount_paid=Decimal(invoice.amount_paid)+payload.amount
+    invoice.status="paid" if invoice.amount_paid==invoice.total else "partially_paid"
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Payment conflicts with an existing request")
+    audit(db,user.id,membership.organization_id,"accounting.invoice.payment","accounting_invoice",invoice.id,
+        f"{payload.amount}:{payload.reference}")
+    return {"id":payment.id,"status":invoice.status,"amount_paid":str(invoice.amount_paid),
+        "balance":str(invoice.total-invoice.amount_paid),"journal_id":journal.id}
+
+
+@router.get("/accounting/aging")
+def accounting_aging(invoice_type:str=Query(pattern=r"^(receivable|payable)$"),
+    as_of:date|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    cutoff=as_of or datetime.now(timezone.utc).date()
+    q=db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id==membership.organization_id,
+        AccountingInvoice.invoice_type==invoice_type,
+        AccountingInvoice.status.in_(("posted","partially_paid")))
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return {"invoice_type":invoice_type,"as_of":cutoff.isoformat(),"buckets":{},"invoices":[]}
+        q=q.filter((AccountingInvoice.branch_id==None)|(AccountingInvoice.branch_id.in_(allowed)))
+    rows=q.order_by(AccountingInvoice.due_date).all()
+    buckets={"current":Decimal("0"),"1_30":Decimal("0"),"31_60":Decimal("0"),"61_90":Decimal("0"),"over_90":Decimal("0")}
+    output=[]
+    for x in rows:
+        balance=Decimal(x.total)-Decimal(x.amount_paid)
+        if balance<=0:continue
+        days=(cutoff-x.due_date.date()).days
+        key="current" if days<=0 else "1_30" if days<=30 else "31_60" if days<=60 else "61_90" if days<=90 else "over_90"
+        buckets[key]+=balance
+        output.append({"invoice_id":x.id,"invoice_number":x.invoice_number,"due_date":x.due_date.date().isoformat(),
+            "days_overdue":max(days,0),"balance":str(balance),"bucket":key})
+    return {"invoice_type":invoice_type,"as_of":cutoff.isoformat(),
+        "buckets":{k:str(v) for k,v in buckets.items()},"invoices":output}
