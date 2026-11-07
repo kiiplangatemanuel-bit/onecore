@@ -164,11 +164,11 @@ Branch: `feature/procurement-settlement-governance`; migration `0033_procurement
 - Supplier statements can be imported, matched line-by-line to supplier AP invoices, AP payments or posted supplier credit notes, then reconciled only when every line is matched and opening balance plus statement movements equals closing balance.
 
 ### Delegated approvals and supplier portal
-- Delegations are tenant-scoped, time-bounded, branch-aware, auditable and reject overlapping active windows for the same principal. A delegate can approve only the next applicable purchase-order approval tier for the delegated principal's role; the creator cannot approve their own order.
+- Delegations are tenant-scoped, time-bounded, branch-aware, auditable and reject overlapping active windows for the same principal. A delegate can approve only the next applicable purchase-order approval tier for the delegated principal's role; the creator cannot approve their own order. Managers can escalate a pending tier to a higher-authority approver through a time-limited substitution.
 - Supplier portal tokens are random, stored as SHA-256 digests, scoped to one supplier, expiring and revocable. The portal supports invited RFQs, quote submission, purchase-order details, supplier invoices and delivery updates. Tokens are shown only once at creation.
 
 ### Discrepancy and reconciliation controls
-- Invoice discrepancies can be opened against matched/accounted source invoices and resolved with an auditable resolution note after the invoice returns to a matched/accounted state.
+- Invoice discrepancies can be opened against matched/accounted source invoices and resolved with an auditable resolution note after the invoice returns to a matched/accounted state. An evidence-based auto-resolution action rechecks purchase-order prices, accepted/returned receipt quantities, source/AP totals and duplicate references; unresolved discrepancies remain open for manual correction.
 - `GET /accounting-reconciliation` compares procurement source invoices with their AP bridge records and reports missing integrations, total mismatches, settled payments and unmatched bank statement lines.
 
 ### API routes added
