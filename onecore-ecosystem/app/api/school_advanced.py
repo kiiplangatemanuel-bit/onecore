@@ -303,20 +303,23 @@ def publish_exam_timetable(timetable_id:int,m=Depends(active_membership),
     return _data(row)
 
 
-@router.put("/school/exam-sessions/{session_id}/seating")
-def save_seating_plan(session_id:int,payload:list[dict[str,Any]],m=Depends(active_membership),
+@router.put("/school/exam-timetables/{timetable_id}/sessions/{session_index}/seating")
+def save_seating_plan(timetable_id:int,session_index:int,payload:list[dict[str,Any]],m=Depends(active_membership),
                       u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
-    session=_get(db,m,"exam_session",session_id)
+    timetable=_get(db,m,"exam_timetable",timetable_id)
+    sessions=list(timetable.data.get("sessions",[]))
+    if session_index<0 or session_index>=len(sessions): raise HTTPException(404,"Exam session not found")
     seats=[str(x.get("seat","")).strip() for x in payload]
     learners=[int(x.get("learner_id",0)) for x in payload]
     if not payload or any(not x for x in seats) or len(seats)!=len(set(seats)) or len(learners)!=len(set(learners)) or 0 in learners:
         raise HTTPException(422,"Seating plan requires unique learner IDs and seat labels")
     for learner_id in learners: _learner(db,m,learner_id)
-    session.data={**session.data,"seating_plan":payload}
-    _audit(db,m,u,"school.exam.seating_saved","exam_session",session.id)
+    sessions[session_index]={**sessions[session_index],"seating_plan":payload}
+    timetable.data={**timetable.data,"sessions":sessions}
+    _audit(db,m,u,"school.exam.seating_saved","exam_timetable",timetable.id)
     _commit(db)
-    return _data(session)
+    return _data(timetable)
 
 
 @router.post("/school/assessments/{assessment_id}/moderation")
@@ -390,7 +393,7 @@ def bulk_promote(payload:BulkPromotionIn,m=Depends(active_membership),
         raise HTTPException(422,"Promotion target must be a later academic year")
     if target.academic_year<source.academic_year: raise HTTPException(422,"Cannot move learners backwards")
     learners=db.query(SchoolLearner).filter(SchoolLearner.organization_id==m.organization_id,
-        SchoolLearner.id.in_(payload.learner_ids),SchoolLearner.current_class_id==source.id,
+        SchoolLearner.id.in_(payload.learner_ids),SchoolLearner.class_id==source.id,
         SchoolLearner.status=="active").with_for_update().all()
     found={x.id for x in learners}
     missing=sorted(set(payload.learner_ids)-found)
@@ -398,7 +401,7 @@ def bulk_promote(payload:BulkPromotionIn,m=Depends(active_membership),
         raise HTTPException(422,{"message":"Some learners are not active in the source class","learner_ids":missing})
     moved=[]
     for learner in learners:
-        learner.current_class_id=target.id
+        learner.class_id=target.id
         learner.branch_id=target.branch_id
         hist=_create(db,m,u,"placement_history",{"learner_id":learner.id,"from_class_id":source.id,
             "to_class_id":target.id,"change_type":payload.change_type,"effective_date":payload.effective_date.isoformat(),
@@ -551,6 +554,43 @@ def teacher_portal(m=Depends(active_membership),u:User=Depends(current_user),db:
             "assessments":[{"id":x.id,"title":x.title,"class_id":x.class_id,"subject_id":x.subject_id,
                             "status":x.status} for x in db.query(SchoolAssessment).filter(
                 SchoolAssessment.organization_id==m.organization_id,SchoolAssessment.class_id.in_(class_ids or {-1})).all()]}
+
+
+
+class ReportCardIn(BaseModel):
+    learner_id: int = Field(gt=0)
+    academic_year: int = Field(ge=2000, le=2200)
+    term: str = Field(min_length=1, max_length=40)
+    summary: str = Field(default="", max_length=4000)
+    grades: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/school/report-cards",status_code=201)
+def create_report_card(payload:ReportCardIn,m=Depends(active_membership),
+                       u:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(m,"create")
+    learner=_learner(db,m,payload.learner_id)
+    duplicate=next((x for x in _rows(db,m,"report_card") if x.data.get("learner_id")==learner.id
+                    and x.data.get("academic_year")==payload.academic_year
+                    and x.data.get("term")==payload.term),None)
+    if duplicate: raise HTTPException(409,"A report card already exists for this learner, year and term")
+    row=_create(db,m,u,"report_card",{**payload.model_dump(mode="json"),"status":"draft"})
+    _audit(db,m,u,"school.report_card.created","report_card",row.id)
+    _commit(db)
+    return _data(row)
+
+
+@router.post("/school/report-cards/{report_card_id}/submit")
+def submit_report_card(report_card_id:int,m=Depends(active_membership),
+                       u:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(m,"create")
+    row=_get(db,m,"report_card",report_card_id)
+    if row.data.get("status")!="draft": raise HTTPException(409,"Only draft report cards can be submitted")
+    row.data={**row.data,"status":"submitted","submitted_by":u.id,
+              "submitted_at":datetime.now(timezone.utc).isoformat()}
+    _audit(db,m,u,"school.report_card.submitted","report_card",row.id)
+    _commit(db)
+    return _data(row)
 
 
 @router.post("/school/report-cards/{report_card_id}/decision")
