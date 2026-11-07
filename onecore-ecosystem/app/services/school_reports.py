@@ -78,7 +78,7 @@ def build_learner_report_rows(assessment_rows, grade_bands):
     overall_grade = grade_for_percentage(overall, grade_bands) if overall is not None else None
     return {
         "subjects": subjects,
-        "complete": all_complete,
+        "complete": bool(grouped) and all_complete,
         "overall_percentage": None if overall is None else str(overall),
         "overall_grade": overall_grade["grade"] if overall_grade else None,
         "overall_grade_points": overall_grade["points"] if overall_grade else None,
