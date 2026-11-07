@@ -714,3 +714,22 @@ Implemented on branch `feature/hr-employees-leave` (based on CRM campaign branch
 Boundaries: no leave entitlements/accrual ledger, holiday calendar, balance deduction,
 payroll, payslips, statutory deductions, attendance integration or employee document
 management. Public holidays are not excluded from the current working-day calculation.
+
+
+## HR attendance and timekeeping increment (7 November 2026)
+
+Implemented on branch `feature/hr-attendance-timekeeping`:
+
+- Server-timestamped clock-in/clock-out for the active employee profile linked to
+  the signed-in user; employee self-service is tenant and branch scoped.
+- One attendance session per employee per UTC calendar day, protected by a unique
+  database index and explicit conflict responses for duplicate punches.
+- Clock-out calculates elapsed whole minutes; attendance rows retain UTC timestamps.
+- Employee attendance history and manager team report with branch scope filtering.
+- Audit events for clock-in and clock-out; migration `0023_hr_attendance`.
+- Added accessible attendance controls and tables to the HR workspace plus contract
+  and duration tests.
+
+Boundaries: no organization timezone configuration, shift calendars, breaks, overtime,
+geolocation/biometrics, offline punches, manager correction workflow, multiple daily
+sessions or payroll integration. UTC-day attendance is not a local payroll timesheet.
