@@ -44,5 +44,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p='/tmp/crm-scheduler-heartbeat'; assert os.path.exists(p) and time.time()-os.path.getmtime(p)<120"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 volumes:
   onecore_data:
