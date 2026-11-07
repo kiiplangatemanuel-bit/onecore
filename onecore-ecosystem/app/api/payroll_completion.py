@@ -317,7 +317,7 @@ def approve_calculation(run_id: int, payload: dict=Body(default={}), membership=
         raise HTTPException(403, "Maker cannot approve own payroll")
     snaps = [r for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
     lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run_id).count()
-    if len(snaps) != lines or any(_json_hash({k:v for k,v in s.data.items() if k != "sha256"}) != s.data.get("sha256") for s in snaps):
+    if len(snaps) != lines or any(_json_hash({k:v for k,v in s.data.items() if k not in ("sha256", "key")}) != s.data.get("sha256") for s in snaps):
         raise HTTPException(409, "Payroll snapshot integrity or employee count check failed")
     run.status = "approved"
     run.approved_by, run.approved_at = user.id, datetime.now(timezone.utc)
@@ -423,6 +423,8 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     if not batch:
         raise HTTPException(404, "Payment batch not found")
     d = dict(batch.data)
+    if d.get("status") not in ("authorized", "partial", "failed"):
+        raise HTTPException(409, "Payment batch must be authorized before provider callbacks")
     item_id = int(payload.get("employee_id", 0))
     row = next((x for x in d["rows"] if x["employee_id"] == item_id), None)
     if not row:
@@ -430,8 +432,8 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     status = payload.get("status")
     if status not in ("paid", "failed"):
         raise HTTPException(422, "Callback status must be paid or failed")
-    if row["status"] == "paid" and status != "paid":
-        raise HTTPException(409, "A settled salary payment cannot be downgraded")
+    if row["status"] == "paid" and (status != "paid" or row.get("provider_reference") != payload.get("provider_reference")):
+        raise HTTPException(409, "A settled salary payment cannot be downgraded or assigned a different reference")
     if status == "paid" and not payload.get("provider_reference"):
         raise HTTPException(422, "Verified provider reference is required")
     row.update({"status": status, "provider_reference": payload.get("provider_reference"),
