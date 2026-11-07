@@ -107,3 +107,51 @@ def test_school_learner_placement_schema_and_routes():
     assert "/api/v1/school/learners/{learner_id}/placements" in paths
     assert "post" in paths["/api/v1/school/learners/{learner_id}/placements"]
     assert "get" in paths["/api/v1/school/learners/{learner_id}/placements"]
+
+
+def test_advanced_school_schemas_validate_ranking_exam_and_bulk_promotion():
+    from app.api.school_advanced import RankingConfigIn, ExamSessionIn, BulkPromotionIn, FeePaymentIn
+    assert RankingConfigIn(academic_year=2026, grouping="subject",
+                           ranking_method="dense").ranking_method == "dense"
+    with pytest.raises(ValidationError):
+        ExamSessionIn(timetable_id=1, subject_id=2, exam_date="2026-11-10",
+                      starts_at="14:00", ends_at="13:00", venue="Hall")
+    with pytest.raises(ValidationError):
+        BulkPromotionIn(source_class_id=1, target_class_id=2, effective_date="2027-01-01",
+                        learner_ids=[1, 1], reason="Completed academic year")
+    payment=FeePaymentIn(learner_id=1, amount="1500.00", payment_date="2026-11-08",
+                         method="mpesa", reference="QWERTY123", idempotency_key="mpesa-QWERTY123")
+    assert str(payment.amount) == "1500.00"
+
+
+def test_advanced_school_routes_are_registered():
+    paths=app.openapi()["paths"]
+    expected={
+        "/api/v1/school/advanced/ranking-config",
+        "/api/v1/school/rankings",
+        "/api/v1/school/exam-timetables",
+        "/api/v1/school/exam-timetables/{timetable_id}/sessions/{session_index}/seating",
+        "/api/v1/school/assessments/{assessment_id}/moderation",
+        "/api/v1/school/curriculum/nodes",
+        "/api/v1/school/competencies",
+        "/api/v1/school/promotions/bulk",
+        "/api/v1/school/fees/charges",
+        "/api/v1/school/fees/payments",
+        "/api/v1/school/fees/payments/{payment_id}/allocate",
+        "/api/v1/school/fees/learners/{learner_id}/statement",
+        "/api/v1/school/guardian/portal",
+        "/api/v1/school/teacher/portal",
+        "/api/v1/school/staff/portal",
+        "/api/v1/school/report-cards",
+        "/api/v1/school/transcripts/{learner_id}",
+        "/api/v1/school/dashboard",
+        "/api/v1/school/reconciliation",
+    }
+    assert expected.issubset(paths.keys())
+
+
+def test_school_guardian_and_teacher_roles_are_least_privilege():
+    from app.core.authorization import ROLE_PERMISSIONS
+    assert ROLE_PERMISSIONS["guardian"] == {"read"}
+    assert "manage" not in ROLE_PERMISSIONS["teacher"]
+    assert "manage" in ROLE_PERMISSIONS["school_admin"]
