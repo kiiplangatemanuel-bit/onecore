@@ -315,3 +315,26 @@ class AccountingFixedAssetIn(BaseModel):
 class AccountingDepreciationIn(BaseModel):
     period_date: date
     idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class AccountingBankStatementLineIn(BaseModel):
+    transaction_date: date
+    description: str = Field(min_length=1, max_length=240)
+    reference: str = Field(default="", max_length=120)
+    amount: Decimal = Field(ne=0, ge=Decimal("-9999999999999999"), le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+
+class AccountingBankStatementIn(BaseModel):
+    bank_account_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    statement_reference: str = Field(min_length=2, max_length=80)
+    start_date: date
+    end_date: date
+    opening_balance: Decimal = Field(ge=Decimal("-9999999999999999"), le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    closing_balance: Decimal = Field(ge=Decimal("-9999999999999999"), le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    lines: list[AccountingBankStatementLineIn] = Field(min_length=0, max_length=5000)
+
+
+class AccountingBankMatchIn(BaseModel):
+    statement_line_id: int = Field(gt=0)
+    journal_line_id: int = Field(gt=0)
