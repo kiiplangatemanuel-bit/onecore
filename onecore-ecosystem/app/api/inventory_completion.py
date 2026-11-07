@@ -646,25 +646,46 @@ def get_price_list_prices(price_list_id:int,membership=Depends(active_membership
 @router.get("/valuation")
 def inventory_valuation(method:str=Query(default="weighted_average",pattern=r"^(weighted_average|fifo)$"),membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    batches=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(InventoryBatch.organization_id==membership.organization_id,InventoryBatch.status=="available").all()
     allowed=branch_scope_ids(membership)
-    if allowed is not None: batches=[b for b in batches if db.query(InventoryWarehouse).filter_by(id=b.warehouse_id).first() and db.query(InventoryWarehouse).filter_by(id=b.warehouse_id).first().branch_id in allowed]
-    by_product={}
-    for b in batches:
-        qty=dec(b.quantity_on_hand)
-        if qty<=0:continue
-        item=by_product.setdefault(b.product_id,{"quantity":Decimal("0"),"value":Decimal("0"),"layers":[]})
-        item["quantity"]+=qty;item["value"]+=qty*dec(b.unit_cost);item["layers"].append((b.created_at,qty,dec(b.unit_cost)))
+    products=db.query(InventoryProduct).filter_by(organization_id=membership.organization_id,is_active=True).all()
     out=[]
-    for pid,item in by_product.items():
-        if method=="weighted_average":
-            value=item["value"]
-        else:
-            # FIFO valuation uses the currently remaining receipt layers, oldest receipt first.
-            value=sum(q*c for _,q,c in sorted(item["layers"],key=lambda x:x[0]))
-        out.append({"product_id":pid,"quantity":str(item["quantity"].quantize(Q3)),"unit_cost":str((item["value"]/item["quantity"]).quantize(MONEY) if item["quantity"] else "0"),
-            "inventory_value":str(value.quantize(MONEY)),"method":method})
-    return {"method":method,"currency":"organization_currency","items":out,"total_value":str(sum(dec(x["inventory_value"]) for x in out).quantize(MONEY))}
+    total_value=Decimal("0")
+    for product in products:
+        movement_query=db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+            InventoryStockMovement.organization_id==membership.organization_id,
+            InventoryStockMovement.product_id==product.id)
+        if allowed is not None:
+            movement_query=movement_query.filter(InventoryStockMovement.branch_id.in_(allowed)) if allowed else movement_query.filter(False)
+        on_hand=max(Decimal("0"),dec(movement_query.scalar() or 0))
+        if on_hand<=0: continue
+        batch_query=db.query(InventoryBatch).join(InventoryWarehouse,InventoryWarehouse.id==InventoryBatch.warehouse_id).filter(
+            InventoryBatch.organization_id==membership.organization_id,InventoryBatch.product_id==product.id,
+            InventoryBatch.status=="available",InventoryBatch.quantity_on_hand>0)
+        if allowed is not None:
+            batch_query=batch_query.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else batch_query.filter(False)
+        layers=batch_query.order_by(InventoryBatch.created_at.asc()).all()
+        batch_qty=sum((dec(b.quantity_on_hand) for b in layers),Decimal("0"))
+        # Any legacy or non-batch-managed quantity is valued at the configured product cost.
+        valued_batch_qty=min(batch_qty,on_hand)
+        remaining=valued_batch_qty
+        batch_value=Decimal("0")
+        # Preserve newest layers when untracked issues have reduced ledger stock;
+        # batch-aware FEFO/FIFO issues already update their source layers directly.
+        for batch in reversed(layers):
+            if remaining<=0: break
+            qty=min(dec(batch.quantity_on_hand),remaining)
+            batch_value+=qty*dec(batch.unit_cost)
+            remaining-=qty
+        unbatched_qty=max(Decimal("0"),on_hand-valued_batch_qty)
+        unbatched_value=unbatched_qty*dec(product.cost_price)
+        value=(batch_value+unbatched_value).quantize(MONEY,rounding=ROUND_HALF_UP)
+        average=(value/on_hand).quantize(MONEY,rounding=ROUND_HALF_UP)
+        total_value+=value
+        out.append({"product_id":product.id,"sku":product.sku,"quantity":str(on_hand.quantize(Q3)),
+            "unit_cost":str(average),"inventory_value":str(value),"batched_quantity":str(valued_batch_qty.quantize(Q3)),
+            "unbatched_quantity":str(unbatched_qty.quantize(Q3)),"method":method})
+    return {"method":method,"currency":"organization_currency","items":out,
+        "total_value":str(total_value.quantize(MONEY,rounding=ROUND_HALF_UP))}
 
 
 @router.get("/dashboard")
