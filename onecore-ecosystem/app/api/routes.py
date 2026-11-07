@@ -7,13 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
+from app.services.accounting import validate_journal_lines
+from datetime import datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
@@ -311,3 +313,142 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
           row.id, f"{payload.movement_type}:{payload.quantity_delta}:{payload.branch_id or 'unassigned'}")
     return {"id": row.id, "status": "applied", "quantity_delta": str(row.quantity_delta),
             "balance": str(new_balance)}
+
+
+# Accounting foundation: tenant chart of accounts, posted double-entry journals,
+# immutable posted lines and a tenant/branch-filtered trial balance.
+@router.get("/accounting/accounts")
+def accounting_accounts(membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(AccountingAccount).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(AccountingAccount.code).all()
+    return [{"id": a.id, "code": a.code, "name": a.name, "account_type": a.account_type}
+            for a in rows]
+
+
+@router.post("/accounting/accounts", status_code=201)
+def create_accounting_account(payload: AccountingAccountIn,
+                              membership=Depends(active_membership),
+                              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    code = payload.code.strip().upper()
+    if db.query(AccountingAccount).filter_by(
+        organization_id=membership.organization_id, code=code
+    ).first():
+        raise HTTPException(409, "Account code already exists in this organization")
+    row = AccountingAccount(organization_id=membership.organization_id, code=code,
+                            name=payload.name.strip(), account_type=payload.account_type,
+                            created_by=user.id)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Account code already exists in this organization")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "accounting.account.created",
+          "accounting_account", row.id)
+    return {"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type}
+
+
+@router.post("/accounting/journals", status_code=201)
+def post_accounting_journal(payload: AccountingJournalIn,
+                            membership=Depends(active_membership),
+                            user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    validate_journal_lines(payload.lines)
+    allowed = branch_scope_ids(membership)
+    branch_ids = {line.branch_id for line in payload.lines if line.branch_id}
+    if payload.branch_id:
+        branch_ids.add(payload.branch_id)
+    if allowed is not None and (not allowed or any(b not in allowed for b in branch_ids)):
+        raise HTTPException(403, "Journal contains a branch outside your membership scope")
+    if branch_ids:
+        valid = {b.id for b in db.query(Branch).filter(
+            Branch.organization_id == membership.organization_id,
+            Branch.is_active == True, Branch.id.in_(branch_ids)
+        ).all()}
+        if valid != branch_ids:
+            raise HTTPException(404, "Journal branch not found")
+    account_ids = {line.account_id for line in payload.lines}
+    accounts = db.query(AccountingAccount).filter(
+        AccountingAccount.organization_id == membership.organization_id,
+        AccountingAccount.is_active == True,
+        AccountingAccount.id.in_(account_ids)
+    ).all()
+    if {a.id for a in accounts} != account_ids:
+        raise HTTPException(404, "Journal account not found")
+    journal = AccountingJournal(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        journal_number="JRN-" + uuid.uuid4().hex[:16].upper(),
+        reference=payload.reference, memo=payload.memo, status="posted",
+        entry_date=datetime.combine(payload.entry_date, time.min, tzinfo=timezone.utc),
+        created_by=user.id, posted_by=user.id, posted_at=datetime.now(timezone.utc)
+    )
+    db.add(journal)
+    db.flush()
+    for line in payload.lines:
+        db.add(AccountingJournalLine(
+            organization_id=membership.organization_id, journal_id=journal.id,
+            account_id=line.account_id, branch_id=line.branch_id or payload.branch_id,
+            description=line.description, debit=line.debit, credit=line.credit
+        ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Journal could not be posted due to a conflicting request")
+    db.refresh(journal)
+    audit(db, user.id, membership.organization_id, "accounting.journal.posted",
+          "accounting_journal", journal.id, journal.journal_number)
+    return {"id": journal.id, "journal_number": journal.journal_number,
+            "status": journal.status, "entry_date": payload.entry_date.isoformat()}
+
+
+@router.get("/accounting/journals")
+def list_accounting_journals(membership=Depends(active_membership), db: Session = Depends(get_db),
+                             limit: int = Query(default=100, ge=1, le=500)):
+    require_permission(membership, "read")
+    query = db.query(AccountingJournal).filter_by(
+        organization_id=membership.organization_id, status="posted"
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter((AccountingJournal.branch_id == None) |
+                             (AccountingJournal.branch_id.in_(allowed)))
+    rows = query.order_by(AccountingJournal.id.desc()).limit(limit).all()
+    return [{"id": j.id, "journal_number": j.journal_number, "reference": j.reference,
+             "memo": j.memo, "entry_date": j.entry_date.date().isoformat(),
+             "status": j.status} for j in rows]
+
+
+@router.get("/accounting/trial-balance")
+def accounting_trial_balance(membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(
+        AccountingAccount.id, AccountingAccount.code, AccountingAccount.name,
+        AccountingAccount.account_type,
+        func.coalesce(func.sum(AccountingJournalLine.debit), 0).label("debit"),
+        func.coalesce(func.sum(AccountingJournalLine.credit), 0).label("credit")
+    ).outerjoin(AccountingJournalLine, (
+        (AccountingJournalLine.account_id == AccountingAccount.id) &
+        (AccountingJournalLine.organization_id == membership.organization_id)
+    )).filter(AccountingAccount.organization_id == membership.organization_id,
+              AccountingAccount.is_active == True)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return {"accounts": [], "total_debits": "0.00", "total_credits": "0.00"}
+        query = query.filter((AccountingJournalLine.branch_id == None) |
+                             (AccountingJournalLine.branch_id.in_(allowed)))
+    rows = query.group_by(AccountingAccount.id).order_by(AccountingAccount.code).all()
+    accounts = [{"account_id": r.id, "code": r.code, "name": r.name,
+                 "account_type": r.account_type, "debits": str(r.debit),
+                 "credits": str(r.credit)} for r in rows]
+    total_debits = sum((Decimal(str(r.debit)) for r in rows), Decimal("0"))
+    total_credits = sum((Decimal(str(r.credit)) for r in rows), Decimal("0"))
+    return {"accounts": accounts, "total_debits": str(total_debits),
+            "total_credits": str(total_credits), "balanced": total_debits == total_credits}
