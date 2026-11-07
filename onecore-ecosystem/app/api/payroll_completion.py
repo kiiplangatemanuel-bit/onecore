@@ -343,8 +343,13 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         if not isinstance(extras, dict):
             raise HTTPException(422, "Each employee payroll input must be an object")
         extras = {**extras, "as_at_date": run.period_end.isoformat()}
-        period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
-        days_employed = int(extras.get("days_employed", period_days))
+        if "resident_for_tax" in extras and not isinstance(extras["resident_for_tax"], bool):
+            raise HTTPException(422, "resident_for_tax must be a verified boolean employee tax status")
+        try:
+            period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
+            days_employed = int(extras.get("days_employed", period_days))
+        except (ValueError, TypeError, ArithmeticError):
+            raise HTTPException(422, "Invalid employment proration day counts")
         if period_days < 1 or days_employed < 0 or days_employed > period_days:
             raise HTTPException(422, "Invalid payroll proration days")
         prorated_base = money(D(str(line.base_pay)) * D(days_employed) / D(period_days))
