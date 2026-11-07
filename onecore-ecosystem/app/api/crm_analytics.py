@@ -60,9 +60,13 @@ def update_forecast_details(lead_id:int,payload:dict,m=Depends(active_membership
         except Exception:raise HTTPException(422,"expected_close_date must be timezone-aware ISO-8601 or null")
     if "probability_override" in payload:
         value=payload["probability_override"]
-        if value is not None and (isinstance(value,bool) or not 0<=float(value)<=100):
-            raise HTTPException(422,"probability_override must be between 0 and 100")
-        row.probability_override=Decimal(str(value)) if value is not None else None
+        if value is not None:
+            try:probability=Decimal(str(value))
+            except Exception:raise HTTPException(422,"probability_override must be numeric")
+            if isinstance(value,bool) or not probability.is_finite() or not 0<=probability<=100:
+                raise HTTPException(422,"probability_override must be between 0 and 100")
+            row.probability_override=probability
+        else:row.probability_override=None
     if row.stage=="won" and row.actual_closed_at is None:
         row.actual_closed_at=datetime.now(timezone.utc)
         if row.actual_value is None:row.actual_value=row.estimated_value
@@ -298,7 +302,7 @@ def create_attribution(campaign_id:int,payload:dict,m=Depends(active_membership)
         order=db.query(CRMSalesOrder).filter_by(id=order_id,organization_id=m.organization_id,contact_id=contact_id).first()
         if not order or (lead_id and order.lead_id!=lead_id) or not can_access_branch(m,order.branch_id):
             raise HTTPException(404,"Sales order not found")
-    elif event in {"order_won","invoice_paid"}:raise HTTPException(422,"Order-won and invoice-paid events require a sales order")
+    elif event in {"sales_order_confirmed","order_won","invoice_paid"}:raise HTTPException(422,"Sales-order and invoice events require a sales order")
     existing=db.query(CRMCampaignAttribution).filter_by(organization_id=m.organization_id,idempotency_key=key).first()
     if existing:return {"id":existing.id,"duplicate":True}
     row=CRMCampaignAttribution(organization_id=m.organization_id,campaign_id=campaign.id,contact_id=contact_id,
@@ -359,7 +363,9 @@ def scheduler_heartbeat(payload:dict,m=Depends(active_membership),db:Session=Dep
     if not name or len(name)>80:raise HTTPException(422,"Invalid worker name")
     row=db.query(CRMWorkerHeartbeat).filter_by(organization_id=m.organization_id,worker_name=name).first()
     if not row:row=CRMWorkerHeartbeat(organization_id=m.organization_id,worker_name=name);db.add(row)
-    row.last_seen_at=datetime.now(timezone.utc);row.last_processed=max(0,min(int(payload.get("processed",0)),10000))
+    try:processed=int(payload.get("processed",0))
+    except Exception:raise HTTPException(422,"processed must be an integer")
+    row.last_seen_at=datetime.now(timezone.utc);row.last_processed=max(0,min(processed,10000))
     row.last_error=str(payload.get("error",""))[:500]
     db.commit();return {"worker_name":name,"last_seen_at":row.last_seen_at.isoformat()}
 
