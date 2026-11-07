@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Cache-Control" content="no-store"><title>OneCore Pharmacy & Laboratory</title>
+<style>
+:root{color-scheme:light}body{font:15px system-ui;margin:0;background:#f3f6fa;color:#17283e}header{background:#10243d;color:#fff;padding:18px}header a{color:#c8e2ff}main{max-width:1250px;margin:auto;padding:18px}.panel{background:#fff;border:1px solid #d8e0e9;border-radius:12px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}input,textarea,select,button{font:inherit;padding:9px;margin:4px;border:1px solid #b8c5d4;border-radius:7px;max-width:100%}textarea{width:96%;min-height:160px}button{background:#155a9c;color:#fff;border:0;cursor:pointer}button.secondary{background:#e8f0f8;color:#174b7c}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6fa;padding:12px;max-height:460px;overflow:auto}.muted{color:#5a6878}label{display:block;margin:7px 0}#status{min-height:1.5em}.templates{display:flex;gap:6px;flex-wrap:wrap}.templates button{font-size:13px}code{overflow-wrap:anywhere}
+</style></head><body>
+<header><strong>ONECORE · PHARMACY & LABORATORY</strong> · <a href="/healthcare/hospital">Hospital operations</a> · <a href="/healthcare">Patient privacy</a></header>
+<main>
+<section class="panel"><h1>Pharmacy and Laboratory Operations</h1><p class="muted">Medicine catalogue and batch control, e-prescriptions, dispensing, returns, lab catalogue, sample custody, analyzer quality, verified results, billing and insurance. Patient data remains encrypted and branch/patient access controlled.</p>
+<label>Bearer token <input id="token" type="password" autocomplete="off" style="width:min(600px,75vw)"></label>
+<label>Organization ID <input id="org" type="number" min="1"></label>
+<label>Branch ID <input id="branch" placeholder="Required for branch operations"></label>
+<p id="status" role="status" aria-live="polite">Enter an authenticated bearer token and organization ID.</p>
+</section>
+<section class="panel"><h2>Request workbench</h2><p class="muted">Choose an operation below to load a safe request template. Replace sample IDs and values, review the payload, then execute. Full API contracts are available at <a href="/docs">OpenAPI docs</a>.</p>
+<div class="grid">
+<div><label>Method<select id="method"><option>GET</option><option>POST</option></select></label><label>API path<input id="path" value="/api/v1/pharmacy/medicines" style="width:96%"></label></div>
+<div><label>Request JSON<textarea id="body">{}</textarea></label><button id="run">Execute request</button><button class="secondary" id="clear">Clear result</button></div>
+</div><h3>Response</h3><pre id="result">No request executed.</pre>
+</section>
+<div class="grid">
+<section class="panel"><h2>Pharmacy catalogue & stock</h2><div class="templates">
+<button data-method="POST" data-path="/api/v1/pharmacy/medicines" data-body='{"sku":"MED-001","generic_name":"Amoxicillin","active_ingredient":"Amoxicillin","brand_name":"","strength":"500 mg","dosage_form":"capsule","route":"oral","unit":"capsule","sale_price":"15.00","is_controlled":false}'>Create medicine</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/medicines/1/batches" data-body='{"branch_id":"BRANCH","batch_number":"BATCH-001","expiry_date":"2027-12-31","received_quantity":"100","unit_cost":"8.00","selling_price":"15.00","client_batch_id":"RECEIPT-001"}'>Receive batch</button>
+<button data-method="GET" data-path="/api/v1/pharmacy/batches?branch_id=BRANCH">List batches</button>
+<button data-method="GET" data-path="/api/v1/pharmacy/reports/stock?branch_id=BRANCH">Stock & expiry report</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/batches/1/quarantine" data-body='{"reason":"Quality hold"}'>Quarantine batch</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/batches/1/recall" data-body='{"reason":"Manufacturer recall notice"}'>Recall batch</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/batches/expire" data-body='{}'>Expire stock sweep</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/batches/1/adjust" data-body='{"quantity_delta":"-1","reason":"Verified stock count variance","verifier_id":2,"idempotency_key":"stock-adjustment-001"}'>Adjust batch</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/replenishment" data-body='{"medicine_id":1,"branch_id":"BRANCH","quantity":"100","supplier_id":1,"expected_unit_cost":"8.00","reason":"Minimum stock reached","idempotency_key":"replenishment-001"}'>Request replenishment</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/replenishment/1/convert" data-body='{}'>Convert to purchase order</button>
+</div></section>
+<section class="panel"><h2>Prescriptions & dispensing</h2><div class="templates">
+<button data-method="POST" data-path="/api/v1/pharmacy/allergies" data-body='{"patient_id":1,"allergen":"Penicillin","reaction":"Rash","severity":"severe"}'>Record allergy</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/safety-rules" data-body='{"medicine_a_id":1,"medicine_b_id":2,"rule_type":"interaction","severity":"block","description":"Clinically reviewed interaction rule","idempotency_key":"interaction-rule-001"}'>Add safety rule</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/prescriptions" data-body='{"encounter_id":1,"prescription_number":"RX-001","valid_until":"2027-12-31","idempotency_key":"rx-001","lines":[{"medicine_id":1,"dose":"500 mg","frequency":"Three times daily","duration_days":5,"quantity":"15","refills_allowed":1}]}'>Issue prescription</button>
+<button data-method="GET" data-path="/api/v1/pharmacy/prescriptions?branch_id=BRANCH">List prescriptions</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/prescriptions/1/dispense" data-body='{"line_index":0,"quantity":"5","verifier_id":2,"idempotency_key":"dispense-001"}'>Partial dispense</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/prescriptions/1/refill" data-body='{"line_index":0,"quantity":"15","verifier_id":2,"idempotency_key":"refill-001"}'>Refill</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/prescriptions/1/cancel" data-body='{"reason":"Prescriber discontinued therapy"}'>Cancel prescription</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/dispenses/1/return" data-body='{"quantity":"2","reason":"Patient returned sealed pack","idempotency_key":"return-001"}'>Record return</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/returns/1/disposition" data-body='{"decision":"restock","sealed":true,"verifier_id":2,"reason":"Seal and storage conditions verified"}'>Approve return restock</button>
+<button data-method="POST" data-path="/api/v1/pharmacy/dispenses/1/reverse" data-body='{"restock_quantity":"5","verifier_id":2,"reason":"Dispense posted in error"}'>Reverse dispense</button>
+</div></section>
+<section class="panel"><h2>Laboratory catalogue & orders</h2><div class="templates">
+<button data-method="POST" data-path="/api/v1/lab/tests" data-body='{"code":"FBC","name":"Full blood count","specimen_type":"whole_blood","unit":"cells/uL","reference_range":"See age/sex reference table","critical_low":"1000","critical_high":"100000","turnaround_hours":4,"price":"800.00"}'>Create test</button>
+<button data-method="PUT" data-path="/api/v1/lab/tests/1" data-body='{"name":"Updated test name","critical_low":"900","critical_high":"110000","price":"850.00"}'>Update test</button>
+<button data-method="POST" data-path="/api/v1/lab/tests/1/deactivate" data-body='{"reason":"Test retired from current catalogue"}'>Deactivate test</button>
+<button data-method="POST" data-path="/api/v1/lab/panels" data-body='{"code":"CBC-PANEL","name":"CBC panel","test_ids":[1,2,3],"description":"Haematology panel"}'>Create panel</button>
+<button data-method="POST" data-path="/api/v1/lab/orders" data-body='{"encounter_id":1,"test_ids":[1],"client_order_id":"LAB-ORDER-001"}'>Order tests</button>
+<button data-method="GET" data-path="/api/v1/lab/orders?branch_id=BRANCH">List lab orders</button>
+<button data-method="GET" data-path="/api/v1/lab/orders/1">Order details</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/start-processing" data-body='{}'>Start processing</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/samples" data-body='{"accession_number":"ACC-001","specimen_type":"whole_blood"}'>Collect sample</button>
+<button data-method="POST" data-path="/api/v1/lab/samples/1/custody" data-body='{"action":"handoff","recipient_user_id":2,"location":"Main laboratory reception","seal_number":"SEAL-001","idempotency_key":"custody-handoff-001"}'>Handoff sample</button>
+<button data-method="POST" data-path="/api/v1/lab/samples/1/custody" data-body='{"action":"received","recipient_user_id":2,"location":"Haematology bench","seal_number":"SEAL-001","idempotency_key":"custody-receive-001"}'>Confirm receipt</button>
+<button data-method="POST" data-path="/api/v1/lab/samples/1/decision" data-body='{"decision":"accepted","reason":"Specimen quality and identity verified"}'>Accept sample</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/results" data-body='{"line_index":0,"result_value":"65000","result_notes":"Analyzer verified"}'>Enter result</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/validate" data-body='{"note":"Independent review completed"}'>Validate results</button>
+</div></section>
+<section class="panel"><h2>Analyzer, QC & critical alerts</h2><div class="templates">
+<button data-method="POST" data-path="/api/v1/lab/instruments" data-body='{"branch_id":"BRANCH","name":"Hematology Analyzer A","manufacturer":"Vendor","model":"Model X"}'>Register analyzer</button>
+<button data-method="POST" data-path="/api/v1/lab/instruments/1/rotate-key" data-body='{}'>Rotate analyzer key</button>
+<button data-method="POST" data-path="/api/v1/lab/instruments/1/revoke" data-body='{"reason":"Device decommissioned"}'>Revoke analyzer</button>
+<button data-method="POST" data-path="/api/v1/lab/instruments/1/qc" data-body='{"control_lot":"QC-LOT-001","result":"5.2","expected_range":"4.5-5.5","valid_until":"2026-11-09","passed":true}'>Record QC</button>
+<button data-method="POST" data-path="/api/v1/lab/instruments/1/calibration" data-body='{"calibration_reference":"CAL-001","outcome":"passed","next_due":"2027-01-01"}'>Record calibration</button>
+<button data-method="GET" data-path="/api/v1/lab/critical-alerts?branch_id=BRANCH">List critical alerts</button>
+<button data-method="GET" data-path="/api/v1/lab/reports/operations?branch_id=BRANCH">Lab operations report</button>
+<button data-method="POST" data-path="/api/v1/lab/critical-alerts/1/acknowledge" data-body='{"note":"Critical result communicated to responsible clinician"}'>Acknowledge alert</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/deliver" data-body='{"recipient_type":"clinician"}'>Queue clinician result</button>
+<button data-method="POST" data-path="/api/v1/lab/orders/1/deliver" data-body='{"recipient_type":"patient"}'>Queue patient result link</button>
+</div><p class="muted">Analyzer result ingestion requires a unique <code>result_id</code>, accession number and test code plus the one-time instrument credential in <code>X-Instrument-Key</code>. Execute that integration from the connected analyzer adapter.</p></section>
+<section class="panel"><h2>Billing, insurance & traceability</h2><div class="templates">
+<button data-method="POST" data-path="/api/v1/pharmacy-lab/billing" data-body='{"patient_id":1,"source_type":"pharmacy_dispense","source_id":1,"amount":"75.00","currency":"KES","invoice_number":"CLIN-PHARM-001"}'>Invoice pharmacy dispense</button>
+<button data-method="POST" data-path="/api/v1/pharmacy-lab/billing" data-body='{"patient_id":1,"source_type":"laboratory_order","source_id":1,"amount":"800.00","currency":"KES","insurer_name":"Insurer Ltd","policy_number":"POL-001"}'>Invoice lab & submit claim</button>
+<button data-method="POST" data-path="/api/v1/pharmacy-lab/claims/1/decision" data-body='{"decision":"approved","note":"Payer approval reference recorded"}'>Approve insurance claim</button>
+<button data-method="POST" data-path="/api/v1/pharmacy-lab/claims/1/settle" data-body='{"settled_amount":"800.00","settlement_reference":"PAY-001"}'>Reconcile claim settlement</button>
+<button data-method="GET" data-path="/api/v1/pharmacy-lab/traceability?resource_type=pharmacy_controlled_event">Controlled stock audit</button>
+<button data-method="GET" data-path="/api/v1/pharmacy-lab/traceability?resource_type=lab_sample">Sample traceability</button>
+</div></section>
+</div></main>
+<script>
+(()=>{const $=id=>document.getElementById(id),say=s=>$('status').textContent=s;
+function headers(){const t=$('token').value.trim(),o=$('org').value.trim();if(!t||!o)throw Error('Enter bearer token and organization ID');return {'Authorization':'Bearer '+t,'X-Organization-ID':o,'Content-Type':'application/json'};}
+document.querySelectorAll('[data-path]').forEach(b=>b.onclick=()=>{const path=b.dataset.path.replaceAll('BRANCH',$('branch').value.trim());$('method').value=b.dataset.method;$('path').value=path;$('body').value=JSON.stringify(JSON.parse(b.dataset.body||'{}'),null,2);$('result').textContent='Template prepared. Replace example IDs and values before execution.';});
+$('run').onclick=async()=>{try{const path=$('path').value.trim();if(!path.startsWith('/api/v1/'))throw Error('Path must begin with /api/v1/');const method=$('method').value;const body=$('body').value.trim()?JSON.parse($('body').value):{};const response=await fetch(path,{method,headers:headers(),body:method==='GET'?undefined:JSON.stringify(body)});const type=response.headers.get('content-type')||'';const data=type.includes('application/json')?await response.json():await response.text();$('result').textContent=JSON.stringify(data,null,2);if(!response.ok)throw Error(typeof data?.detail==='string'?data.detail:JSON.stringify(data?.detail||data));say('Request completed with HTTP '+response.status+'.');}catch(e){say(e.message);}};
+$('clear').onclick=()=>{$('result').textContent='No request executed.';};
+})();
+</script></body></html>
