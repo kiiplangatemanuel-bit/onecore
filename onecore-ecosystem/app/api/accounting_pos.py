@@ -56,6 +56,28 @@ def _account(db, org_id, account_id):
     ).first()
 
 
+def _mapping_error(db, org_id, values):
+    expected = {
+        "cash_account_id": {"asset"},
+        "card_clearing_account_id": {"asset"},
+        "bank_clearing_account_id": {"asset"},
+        "credit_receivable_account_id": {"asset"},
+        "sales_revenue_account_id": {"revenue"},
+        "sales_discount_account_id": {"revenue", "expense"},
+        "output_tax_account_id": {"liability"},
+        "sales_returns_account_id": {"revenue", "expense"},
+    }
+    for field, account_id in values.items():
+        if account_id is None:
+            continue
+        account = _account(db, org_id, account_id)
+        if not account:
+            return f"Mapped ledger account {account_id} is missing, inactive or belongs to another organization"
+        if account.account_type not in expected[field]:
+            return f"Mapped account {account_id} for {field} must be one of: {', '.join(sorted(expected[field]))}"
+    return ""
+
+
 def _line(lines, account_id, debit=0, credit=0, description=""):
     debit, credit = _money(debit), _money(credit)
     if debit == 0 and credit == 0:
@@ -174,14 +196,11 @@ def post_pos_source(db: Session, organization_id: int, branch_id: str,
             )
             return link
     accounts = _mapping_dict(mapping)
-    required = set(accounts.values())
-    if None in required:
-        required.remove(None)
-    for account_id in required:
-        if not _account(db, organization_id, account_id):
-            link.status = "pending"
-            link.failure_reason = f"Mapped ledger account {account_id} is missing, inactive or belongs to another organization"
-            return link
+    mapping_error = _mapping_error(db, organization_id, accounts)
+    if mapping_error:
+        link.status = "pending"
+        link.failure_reason = mapping_error
+        return link
     source, lines, error = _source_lines(db, organization_id, source_type, source_id, accounts)
     if error:
         link.status = "pending"
@@ -255,9 +274,9 @@ def put_pos_accounting_mapping(payload: POSAccountingMappingIn,
                                membership=Depends(active_membership),
                                user=Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "manage")
-    account_ids = set(payload.model_dump().values())
-    if any(not _account(db, membership.organization_id, account_id) for account_id in account_ids if account_id is not None):
-        raise HTTPException(422, "Every mapped account must be active and owned by this organization")
+    mapping_error = _mapping_error(db, membership.organization_id, payload.model_dump())
+    if mapping_error:
+        raise HTTPException(422, mapping_error)
     mapping = db.query(POSAccountingMapping).filter_by(
         organization_id=membership.organization_id
     ).with_for_update().first()
