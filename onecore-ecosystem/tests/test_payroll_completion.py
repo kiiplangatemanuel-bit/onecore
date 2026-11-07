@@ -49,3 +49,14 @@ def test_non_cash_taxable_benefit_increases_taxable_pay_not_cash_net():
     assert Decimal(with_benefit["gross_pay"]) == Decimal(cash["gross_pay"])
     assert Decimal(with_benefit["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("12000.00")
     assert Decimal(with_benefit["net_pay"]) < Decimal(cash["net_pay"])
+
+
+def test_statutory_bases_exclude_irregular_pay_when_configured():
+    result = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES, {
+        "nssf_pensionable_base": "40000", "shif_contribution_base": "40000",
+        "housing_levy_contribution_base": "40000"
+    })
+    assert Decimal(result["nssf_employee"]) == Decimal("2400.00")
+    assert Decimal(result["shif_employee"]) == Decimal("1100.00")
+    assert Decimal(result["housing_levy_employee"]) == Decimal("600.00")
+    assert Decimal(result["gross_pay"]) == Decimal("100000.00")
