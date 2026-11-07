@@ -251,10 +251,14 @@ async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=
   const credentials=await getDeviceCredentials();
   const headers=credentials?{'X-POS-Device-ID':String(credentials.device_id),'X-POS-Device-Secret':credentials.device_secret}:{};
   const synced=await api('/pos/sync',{method:'POST',headers,body:JSON.stringify(sale)});
-  const mpesaPayment=(synced.payments||[]).find(p=>p.method==='mpesa');
-  if(mpesaPayment){if(!sale.mpesa_phone)throw new Error('Sale synced, but M-Pesa phone number is missing; reload the receipt and initiate STK Push from payment management.');const push=await api('/integrations/mpesa/pos/sales/'+synced.id+'/payments/'+mpesaPayment.id+'/stk-push',{method:'POST',body:JSON.stringify({phone_number:sale.mpesa_phone})});status('Sale '+synced.id+' synced. M-Pesa STK Push '+push.status+'; customer must approve on phone.');}
   await recordSyncEvent(sale,'synced',attempt,null);
   await reqStore('queue','readwrite',s=>s.delete(item.id));
+  const mpesaPayment=(synced.payments||[]).find(p=>p.method==='mpesa');
+  if(mpesaPayment){
+   if(!sale.mpesa_phone){status('Sale '+synced.id+' synced. M-Pesa phone number is missing; initiate STK Push from payment management.');}
+   else{try{const push=await api('/integrations/mpesa/pos/sales/'+synced.id+'/payments/'+mpesaPayment.id+'/stk-push',{method:'POST',body:JSON.stringify({phone_number:sale.mpesa_phone})});status('Sale '+synced.id+' synced. M-Pesa STK Push '+push.status+'; customer must approve on phone.');}
+    catch(paymentError){status('Sale '+synced.id+' is safely synchronized; M-Pesa initiation needs follow-up: '+paymentError.message);}}
+  }
  }catch(err){
   if(sale){
    if(err.status===409){
