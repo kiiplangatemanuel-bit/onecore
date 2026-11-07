@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -784,65 +784,157 @@ def approve_purchase_order(order_id: int, membership=Depends(active_membership),
     return {"id": order.id, "order_number": order.order_number, "status": order.status}
 
 
-@router.post("/procurement/orders/{order_id}/receive")
-def receive_purchase_order(order_id: int, payload: PurchaseOrderReceiptIn,
-                           membership=Depends(active_membership), user: User = Depends(current_user),
-                           db: Session = Depends(get_db)):
+@router.post("/procurement/orders/{order_id}/receive", deprecated=True)
+def receive_purchase_order_legacy(order_id: int, payload: PurchaseOrderReceiptIn,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    """Legacy direct-to-stock receiving is disabled; use GRN inspection."""
+    raise HTTPException(410, "Direct receiving is retired. Create a goods receipt and complete inspection instead.")
+
+
+@router.post("/procurement/orders/{order_id}/goods-receipts", status_code=201)
+def create_goods_receipt(order_id: int, payload: GoodsReceiptIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
     require_permission(membership, "create")
-    q = db.query(ProcurementPurchaseOrder).filter_by(
-        id=order_id, organization_id=membership.organization_id
-    )
-    allowed = branch_scope_ids(membership)
+    q=db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
     if allowed is not None:
-        q = q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id == -1)
-    order = q.with_for_update().first()
+        q=q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id==-1)
+    order=q.with_for_update().first()
     if not order:
-        raise HTTPException(404, "Purchase order not found")
-    if order.status not in {"approved", "partially_received"}:
-        raise HTTPException(409, "Purchase order must be approved before receiving goods")
-    _procurement_branch_check(db, membership, order.branch_id)
-    received_now = 0
-    for item in payload.lines:
-        line = db.query(ProcurementPurchaseOrderLine).filter_by(
-            id=item.line_id, purchase_order_id=order.id,
-            organization_id=membership.organization_id
-        ).with_for_update().first()
-        if not line:
-            raise HTTPException(404, "Purchase order line not found")
-        duplicate = db.query(InventoryStockMovement).filter_by(
-            organization_id=membership.organization_id, idempotency_key=item.idempotency_key
-        ).first()
-        if duplicate:
-            if (duplicate.product_id == line.product_id and duplicate.branch_id == order.branch_id
-                    and duplicate.quantity_delta == item.quantity
-                    and duplicate.movement_type == "receipt"
-                    and duplicate.reference == order.order_number):
-                continue
-            raise HTTPException(409, "Receipt idempotency key was already used")
-        if line.quantity_received + item.quantity > line.quantity_ordered:
-            raise HTTPException(409, "Receipt exceeds the outstanding purchase order quantity")
-        db.add(InventoryStockMovement(
-            organization_id=membership.organization_id, product_id=line.product_id,
-            branch_id=order.branch_id, quantity_delta=item.quantity,
-            movement_type="receipt", reference=order.order_number,
-            idempotency_key=item.idempotency_key, created_by=user.id
-        ))
-        line.quantity_received += item.quantity
-        received_now += 1
+        raise HTTPException(404,"Purchase order not found")
+    if order.status not in {"approved","partially_received"}:
+        raise HTTPException(409,"Only approved purchase orders can receive goods")
+    _procurement_branch_check(db,membership,order.branch_id)
+    receipt=ProcurementGoodsReceipt(
+        organization_id=membership.organization_id,purchase_order_id=order.id,
+        branch_id=order.branch_id,receipt_number="GRN-"+uuid.uuid4().hex[:14].upper(),
+        status="pending_inspection",received_by=user.id)
+    db.add(receipt)
     db.flush()
-    all_lines = db.query(ProcurementPurchaseOrderLine).filter_by(
-        purchase_order_id=order.id, organization_id=membership.organization_id
-    ).all()
-    order.status = "received" if all(
-        x.quantity_received >= x.quantity_ordered for x in all_lines
-    ) else "partially_received"
-    db.commit()
-    audit(db, user.id, membership.organization_id, "procurement.goods_received",
-          "purchase_order", order.id, f"new_receipt_lines:{received_now}")
-    return {"id": order.id, "order_number": order.order_number,
-            "status": order.status, "new_receipt_lines": received_now}
+    try:
+        for item in payload.lines:
+            line=db.query(ProcurementPurchaseOrderLine).filter_by(
+                id=item.line_id,purchase_order_id=order.id,
+                organization_id=membership.organization_id).with_for_update().first()
+            if not line:
+                raise HTTPException(404,"Purchase order line not found")
+            duplicate=db.query(ProcurementGoodsReceiptLine).filter_by(
+                organization_id=membership.organization_id,
+                idempotency_key=item.idempotency_key).first()
+            if duplicate:
+                raise HTTPException(409,"Receipt idempotency key has already been used")
+            if line.quantity_received+item.quantity>line.quantity_ordered:
+                raise HTTPException(409,"Receipt exceeds outstanding ordered quantity")
+            db.add(ProcurementGoodsReceiptLine(
+                organization_id=membership.organization_id,goods_receipt_id=receipt.id,
+                purchase_order_line_id=line.id,product_id=line.product_id,
+                quantity_received=item.quantity,quantity_accepted=Decimal("0"),
+                quantity_rejected=Decimal("0"),idempotency_key=item.idempotency_key))
+            line.quantity_received+=item.quantity
+        all_lines=db.query(ProcurementPurchaseOrderLine).filter_by(
+            purchase_order_id=order.id,organization_id=membership.organization_id).all()
+        order.status="received" if all(x.quantity_received>=x.quantity_ordered for x in all_lines) else "partially_received"
+        db.flush()
+        audit(db,user.id,membership.organization_id,"procurement.grn.created",
+            "goods_receipt",receipt.id,receipt.receipt_number)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"id":receipt.id,"receipt_number":receipt.receipt_number,
+        "status":receipt.status,"purchase_order_id":order.id,
+        "lines":[{"id":x.id,"purchase_order_line_id":x.purchase_order_line_id,
+        "quantity_received":str(x.quantity_received)} for x in receipt.lines]}
 
 
+@router.get("/procurement/goods-receipts")
+def list_goods_receipts(membership=Depends(active_membership),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(ProcurementGoodsReceipt).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementGoodsReceipt.branch_id.in_(allowed)) if allowed else q.filter(ProcurementGoodsReceipt.id==-1)
+    rows=q.order_by(ProcurementGoodsReceipt.id.desc()).limit(limit).all()
+    return [{"id":x.id,"receipt_number":x.receipt_number,"purchase_order_id":x.purchase_order_id,
+        "status":x.status,"inspection_note":x.inspection_note,
+        "created_at":x.created_at.isoformat()} for x in rows]
+
+
+@router.get("/procurement/goods-receipts/{receipt_id}")
+def get_goods_receipt(receipt_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(ProcurementGoodsReceipt).filter_by(
+        id=receipt_id,organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementGoodsReceipt.branch_id.in_(allowed)) if allowed else q.filter(ProcurementGoodsReceipt.id==-1)
+    receipt=q.first()
+    if not receipt:
+        raise HTTPException(404,"Goods receipt not found")
+    lines=db.query(ProcurementGoodsReceiptLine).filter_by(
+        goods_receipt_id=receipt.id,organization_id=membership.organization_id).all()
+    return {"id":receipt.id,"receipt_number":receipt.receipt_number,
+        "purchase_order_id":receipt.purchase_order_id,"status":receipt.status,
+        "inspection_note":receipt.inspection_note,
+        "lines":[{"id":x.id,"purchase_order_line_id":x.purchase_order_line_id,
+        "product_id":x.product_id,"quantity_received":str(x.quantity_received),
+        "quantity_accepted":str(x.quantity_accepted),"quantity_rejected":str(x.quantity_rejected),
+        "rejection_reason":x.rejection_reason} for x in lines]}
+
+
+@router.post("/procurement/goods-receipts/{receipt_id}/inspect")
+def inspect_goods_receipt(receipt_id:int,payload:GoodsReceiptInspectionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    q=db.query(ProcurementGoodsReceipt).filter_by(
+        id=receipt_id,organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        q=q.filter(ProcurementGoodsReceipt.branch_id.in_(allowed)) if allowed else q.filter(ProcurementGoodsReceipt.id==-1)
+    receipt=q.with_for_update().first()
+    if not receipt:
+        raise HTTPException(404,"Goods receipt not found")
+    if receipt.status!="pending_inspection":
+        raise HTTPException(409,"Only pending goods receipts can be inspected")
+    _procurement_branch_check(db,membership,receipt.branch_id)
+    lines={x.id:x for x in db.query(ProcurementGoodsReceiptLine).filter_by(
+        goods_receipt_id=receipt.id,organization_id=membership.organization_id).with_for_update().all()}
+    if {x.receipt_line_id for x in payload.lines}!=set(lines):
+        raise HTTPException(422,"Inspection must account for every receipt line exactly once")
+    try:
+        for item in payload.lines:
+            row=lines[item.receipt_line_id]
+            if item.quantity_accepted+item.quantity_rejected!=row.quantity_received:
+                raise HTTPException(422,"Accepted plus rejected quantity must equal received quantity")
+            row.quantity_accepted=item.quantity_accepted
+            row.quantity_rejected=item.quantity_rejected
+            row.rejection_reason=item.rejection_reason.strip()
+            if item.quantity_accepted>0:
+                db.add(InventoryStockMovement(
+                    organization_id=membership.organization_id,product_id=row.product_id,
+                    branch_id=receipt.branch_id,quantity_delta=item.quantity_accepted,
+                    movement_type="receipt",reference=receipt.receipt_number,
+                    idempotency_key="grn-accepted-"+str(row.id),created_by=user.id))
+        receipt.status="inspected"
+        receipt.inspected_by=user.id
+        receipt.inspected_at=datetime.now(timezone.utc)
+        receipt.inspection_note=payload.note.strip()
+        db.flush()
+        audit(db,user.id,membership.organization_id,"procurement.grn.inspected",
+            "goods_receipt",receipt.id,
+            f"accepted:{sum((x.quantity_accepted for x in lines.values()),Decimal('0'))};rejected:{sum((x.quantity_rejected for x in lines.values()),Decimal('0'))}")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"id":receipt.id,"receipt_number":receipt.receipt_number,
+        "status":receipt.status,"accepted_quantity":str(sum((x.quantity_accepted for x in lines.values()),Decimal("0"))),
+        "rejected_quantity":str(sum((x.quantity_rejected for x in lines.values()),Decimal("0")))}
+ 
+ 
 @router.get("/procurement/orders/{order_id}")
 def get_purchase_order(order_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
     require_permission(membership, "read")
