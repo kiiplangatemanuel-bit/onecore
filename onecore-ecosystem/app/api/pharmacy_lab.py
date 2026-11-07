@@ -247,6 +247,7 @@ def create_pharmacy_medicine(payload: dict, m=Depends(active_membership),
     if db.query(InventoryProduct.id).filter_by(organization_id=m.organization_id, sku=sku).first():
         raise HTTPException(409, "Medicine SKU already exists")
     price = _decimal(payload.get("sale_price", "0"), "sale_price", places=2)
+    if price<0:raise HTTPException(422,"Medicine sale price cannot be negative")
     product = InventoryProduct(organization_id=m.organization_id, sku=sku,
         name=f"{generic} {payload.get('strength','')}".strip(), description=str(payload.get("brand_name",""))[:500],
         unit=unit, sale_price=price, cost_price=Decimal("0"), tax_rate=Decimal("0"),
@@ -1242,9 +1243,10 @@ def validate_laboratory_order(order_id:int,payload:dict,m=Depends(active_members
     if any(x["entered_by"]==u.id for x in od["lines"]):
         raise HTTPException(403,"A result author cannot validate their own results")
     note=_required_text(payload,"note",500)
+    validated_at=NOW().isoformat()
     for line in od["lines"]:
-        line["status"]="validated";line["validated_by"]=u.id;line["validated_at"]=NOW().isoformat()
-    od["status"]="validated";od["validated_by"]=u.id;od["validation_note"]=note
+        line["status"]="validated";line["validated_by"]=u.id;line["validated_at"]=validated_at
+    od["status"]="validated";od["validated_by"]=u.id;od["validated_at"]=validated_at;od["validation_note"]=note
     _update(order,od,u,status="validated")
     _patient_event(db,m,u,patient,"lab.order.validated",{"order_id":order.id,"note":note},order.id)
     db.commit()
@@ -1258,6 +1260,8 @@ def register_laboratory_instrument(payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     branch_id=_required_text(payload,"branch_id",36)
     _need(db,m,u,"lab.manage",branch_id)
+    branch=db.query(Branch).filter_by(id=branch_id,organization_id=m.organization_id,is_active=True).first()
+    if not branch:raise HTTPException(404,"Active branch not found")
     name=_required_text(payload,"name",180)
     secret=secrets.token_urlsafe(40)
     data={"name":name,"manufacturer":str(payload.get("manufacturer",""))[:120],
@@ -1580,9 +1584,11 @@ def pharmacy_stock_report(branch_id:str,m=Depends(active_membership),
         remaining=Decimal(data["remaining_quantity"])
         if row.status=="active":
             expiry=_date(data["expiry_date"],"expiry_date")
-            if expiry<cutoff:expired+=1
-            elif expiry<=expiry_cutoff and remaining>0:near+=1
-            else:bucket["available"]+=remaining
+            if expiry<cutoff:
+                expired+=1
+            else:
+                bucket["available"]+=remaining
+                if expiry<=expiry_cutoff and remaining>0:near+=1
             bucket["unit_cost_value"]+=remaining*Decimal(data["unit_cost"])
         elif row.status=="quarantined":quarantined+=1
         elif row.status=="recalled":recalled+=1
