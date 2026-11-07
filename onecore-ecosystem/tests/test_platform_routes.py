@@ -38,3 +38,19 @@ def test_invitation_role_validation():
     assert InvitationIn(email="staff@example.com", role="staff").role == "staff"
     with pytest.raises(ValidationError):
         InvitationIn(email="staff@example.com", role="root_superadmin")
+
+def test_branch_model_and_schema():
+    from app.core.models import Branch
+    from app.core.schemas import BranchIn
+    assert Branch.__tablename__ == "branches"
+    branch = Branch(id="00000000-0000-0000-0000-000000000001",
+                    organization_id=1, code="HQ", name="Head Office")
+    assert branch.id.endswith("0001")
+    assert BranchIn(code="HQ", name="Head Office").name == "Head Office"
+
+def test_branch_schema_rejects_invalid_code():
+    import pytest
+    from pydantic import ValidationError
+    from app.core.schemas import BranchIn
+    with pytest.raises(ValidationError):
+        BranchIn(code="bad code", name="Branch")
