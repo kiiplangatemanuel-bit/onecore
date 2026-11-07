@@ -895,6 +895,7 @@ class CRMCampaign(Base):
     channel: Mapped[str] = mapped_column(String(16))
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     message: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(String(240), default="")
     template_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaign_templates.id"), nullable=True)
     segment_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contact_segments.id"), nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
