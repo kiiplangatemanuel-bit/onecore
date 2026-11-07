@@ -155,3 +155,16 @@ def test_school_guardian_and_teacher_roles_are_least_privilege():
     assert ROLE_PERMISSIONS["guardian"] == {"read"}
     assert "manage" not in ROLE_PERMISSIONS["teacher"]
     assert "manage" in ROLE_PERMISSIONS["school_admin"]
+
+
+def test_advanced_school_workspace_is_registered_and_linked():
+    from pathlib import Path
+    paths=app.openapi()["paths"]
+    assert "/school/advanced" in paths
+    page=Path(__file__).resolve().parents[1]/"app"/"web"/"school_advanced.html"
+    assert page.exists()
+    html=page.read_text(encoding="utf-8")
+    assert "/school/guardian/portal" in html
+    assert "/school/teacher/portal" in html
+    assert "/school/fees/payments" in html
+    assert "X-Transcript-Digest" in html
