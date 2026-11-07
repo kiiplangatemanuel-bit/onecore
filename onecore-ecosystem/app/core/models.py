@@ -1170,7 +1170,7 @@ class MpesaPaymentIntent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
-    payment_id: Mapped[int] = mapped_column(ForeignKey("pos_payments.id"), unique=True, index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("pos_payments.id"), index=True)
     phone_number: Mapped[str] = mapped_column(String(16))
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     checkout_request_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
