@@ -786,3 +786,39 @@ Limitations and release gates:
 - This is not a claim of HIPAA/ISO certification or Kenyan ODPC/health-sector compliance.
 - No clinical decision support, break-glass workflow, consent identity verification or
   medical interoperability certification is included.
+
+
+## Shared platform security and infrastructure foundation (7 November 2026)
+
+Implemented on the platform security branch / PR #46:
+
+- Production settings fail closed for debug mode, weak/default JWT signing secrets,
+  SQLite, wildcard/non-HTTPS CORS origins, wildcard host allowlists, and missing
+  HTTPS enforcement.
+- Removed the hard-coded bootstrap administrator email/password; bootstrap account
+  creation now requires explicit paired credentials and a 14-character minimum.
+- Replaced the vulnerable python-jose dependency with PyJWT and upgraded the
+  cryptography floor; CI now runs pip-audit against installed requirements.
+- Added bounded process-local login rate limiting, request IDs, common browser
+  security headers, HSTS on HTTPS and private/no-store API responses.
+- Added database-aware /ready endpoint alongside the liveness /health endpoint.
+- Hardened Docker image and Compose defaults: non-root UID, read-only container
+  filesystem, dropped capabilities, no-new-privileges, persistent data volume,
+  health checks, loopback-only published port, trusted proxy allowlist, and
+  .dockerignore rules to prevent local secrets/database files entering images.
+- Tests cover limiter behavior, login throttling, response headers, readiness,
+  production configuration validation and bootstrap credential policy.
+
+CI evidence: PR check run 42410779634 passed dependency audit, migration upgrade,
+downgrade/re-upgrade, Python compilation and pytest on commit
+a36d43188b73b859c4fdea075f2656b896a004da. Later commits in PR #46 add stricter
+HTTPS-only CORS validation, environment documentation and container build exclusions;
+verify the latest PR-head run before merge.
+
+Remaining operational/security release gates: distributed ingress/WAF throttling
+(the application limiter is per worker), MFA/TOTP and recovery, OIDC/SSO, email
+verification/password reset, durable session inventory and revocation, automated
+secret rotation, centralized tamper-evident audit, backup/PITR restore drills,
+metrics/tracing/alerts, production ingress/database/secret-manager configuration,
+penetration testing, load testing, privacy review and production UAT. This baseline
+is not a security certification or evidence of a live production deployment.

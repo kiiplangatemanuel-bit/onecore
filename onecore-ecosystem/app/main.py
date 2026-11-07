@@ -2,6 +2,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from sqlalchemy import text
+from app.core.platform_security import LoginRateLimiter
 from fastapi.responses import HTMLResponse
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -21,19 +24,30 @@ from app.api.healthcare_privacy import router as healthcare_privacy_router
 async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
-        email = settings.bootstrap_admin_email.lower()
-        if not db.query(User).filter_by(email=email).first():
-            db.add(User(email=email, full_name="OneCore Bootstrap Administrator",
-                        password_hash=hash_password(settings.bootstrap_admin_password),
-                        platform_role="root_superadmin"))
-            db.commit()
+        if settings.bootstrap_admin_email and settings.bootstrap_admin_password:
+            email = settings.bootstrap_admin_email.lower()
+            if not db.query(User).filter_by(email=email).first():
+                db.add(User(email=email, full_name="OneCore Bootstrap Administrator",
+                            password_hash=hash_password(settings.bootstrap_admin_password),
+                            platform_role="root_superadmin"))
+                db.commit()
     finally:
         db.close()
     yield
 
 app = FastAPI(title=settings.app_name, version="0.1.0", description="OneCore modular-monolith foundation", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
-                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+trusted_hosts = [x.strip() for x in settings.trusted_hosts.split(",") if x.strip()]
+if trusted_hosts and "*" not in trusted_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+app.add_middleware(CORSMiddleware,
+                   allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
+                   allow_credentials=False,
+                   allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key"])
+app.state.login_rate_limiter = LoginRateLimiter(
+    max_attempts=settings.login_rate_limit_attempts,
+    window_seconds=settings.login_rate_limit_window_seconds,
+)
 app.include_router(router)
 app.include_router(platform_router)
 app.include_router(accounting_statements_router)
@@ -90,16 +104,62 @@ def healthcare_ui():
     return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
 
 @app.middleware("http")
-async def healthcare_no_store(request, call_next):
-    response = await call_next(request)
-    if request.url.path.startswith("/api/v1/healthcare/"):
+async def platform_security_middleware(request, call_next):
+    import uuid
+    from fastapi.responses import JSONResponse
+
+    request_id = request.headers.get("x-request-id", "")
+    if not request_id or len(request_id) > 128 or any(ord(ch) < 32 for ch in request_id):
+        request_id = str(uuid.uuid4())
+
+    client_ip = request.client.host if request.client else "unknown"
+    login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
+    response = None
+    if settings.force_https and request.url.scheme != "https":
+        response = JSONResponse({"detail": "HTTPS is required", "request_id": request_id}, status_code=400)
+    elif login_request and not request.app.state.login_rate_limiter.allow(client_ip):
+        response = JSONResponse(
+            {"detail": "Too many login attempts. Try again later.", "request_id": request_id},
+            status_code=429, headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+        )
+    if response is None:
+        response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; "
+        "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    if request.url.path.startswith("/api/v1/"):
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
+        response.headers["Vary"] = "Authorization"
+    if request.url.path == "/api/v1/auth/login" and response.status_code < 400:
+        client_ip = request.client.host if request.client else "unknown"
+        request.app.state.login_rate_limiter.reset(client_ip)
     return response
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "onecore-api", "environment": settings.app_env}
+    return {"status": "ok", "service": "onecore-api"}
+
+@app.get("/ready")
+def readiness():
+    from fastapi import HTTPException
+    from app.core.database import engine
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Service dependencies are not ready")
+    return {"status": "ready", "service": "onecore-api"}
 
 @app.get("/", response_class=HTMLResponse)
 def public_home():

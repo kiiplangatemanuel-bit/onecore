@@ -25,6 +25,11 @@ jobs:
       - name: Install dependencies
         working-directory: onecore-ecosystem
         run: python -m pip install -r requirements.txt
+      - name: Audit Python dependencies
+        working-directory: onecore-ecosystem
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r requirements.txt
       - name: Apply database migrations
         working-directory: onecore-ecosystem
         run: alembic upgrade head
