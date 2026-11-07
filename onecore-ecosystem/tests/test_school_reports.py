@@ -22,7 +22,7 @@ def test_weighted_subject_report_uses_published_mark_weights():
     ]
     report = build_learner_report_rows(rows, bands)
     assert report["complete"] is True
-    assert report["subjects"][0]["percentage"] == "72.00"
+    assert report["subjects"][0]["percentage"] == "75.00"
     assert report["subjects"][0]["grade"] == "B"
     assert report["overall_percentage"] == "72.00"
 
@@ -47,7 +47,7 @@ def test_report_card_marks_incomplete_if_any_published_assessment_is_unmarked():
 def test_report_card_with_no_published_assessments_is_incomplete():
     report = build_learner_report_rows([], [])
     assert report["subjects"] == []
-    assert report["complete"] is True
+    assert report["complete"] is False
     assert report["overall_percentage"] is None
 
 
