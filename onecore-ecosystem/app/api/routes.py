@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1913,6 +1913,74 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
         "amount_paid":str(invoice.amount_paid),"balance":str(invoice.total),"status":invoice.status}
 
 
+@router.post("/accounting/invoices/{invoice_id}/submit-for-approval")
+def submit_accounting_invoice_for_approval(invoice_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id, organization_id=membership.organization_id).with_for_update().first()
+    if not invoice: raise HTTPException(404, "Invoice not found")
+    if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
+        raise HTTPException(404, "Invoice not found")
+    if invoice.status != "draft": raise HTTPException(409, "Only draft invoices can be submitted")
+    existing=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id, invoice_id=invoice.id).with_for_update().first()
+    if existing and existing.status == "pending":
+        raise HTTPException(409, "Invoice approval is already pending")
+    if existing and existing.status == "approved":
+        raise HTTPException(409, "Invoice has already been approved")
+    if existing:
+        existing.submitted_by=user.id; existing.submitted_at=datetime.now(timezone.utc)
+        existing.approver_user_id=None; existing.status="pending"; existing.decision_note=""; existing.decided_at=None
+    else:
+        existing=AccountingInvoiceApproval(organization_id=membership.organization_id,
+            invoice_id=invoice.id,submitted_by=user.id,status="pending")
+        db.add(existing)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"accounting.invoice.submitted_for_approval",
+        "accounting_invoice",invoice.id)
+    return {"invoice_id":invoice.id,"approval_status":"pending"}
+
+
+@router.get("/accounting/invoices/{invoice_id}/approval")
+def get_accounting_invoice_approval(invoice_id:int,membership=Depends(active_membership),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    invoice=db.query(AccountingInvoice).filter_by(id=invoice_id,
+        organization_id=membership.organization_id).first()
+    if not invoice or (invoice.branch_id and not can_access_branch(membership,invoice.branch_id)):
+        raise HTTPException(404,"Invoice not found")
+    row=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id).first()
+    if not row: return {"invoice_id":invoice.id,"approval_status":"not_required"}
+    return {"invoice_id":invoice.id,"approval_status":row.status,"submitted_by":row.submitted_by,
+        "submitted_at":row.submitted_at.isoformat(),"approver_user_id":row.approver_user_id,
+        "decision_note":row.decision_note,"decided_at":row.decided_at.isoformat() if row.decided_at else None}
+
+
+@router.post("/accounting/invoices/{invoice_id}/approval-decision")
+def decide_accounting_invoice_approval(invoice_id:int,payload:AccountingInvoiceApprovalDecisionIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(id=invoice_id,
+        organization_id=membership.organization_id).with_for_update().first()
+    if not invoice or (invoice.branch_id and not can_access_branch(membership,invoice.branch_id)):
+        raise HTTPException(404,"Invoice not found")
+    row=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id).with_for_update().first()
+    if not row or row.status!="pending": raise HTTPException(409,"Invoice has no pending approval")
+    if row.submitted_by==user.id: raise HTTPException(409,"Invoice submitter cannot approve their own invoice")
+    if row.approver_user_id==user.id: raise HTTPException(409,"Approver has already acted on this invoice")
+    row.status=payload.decision
+    row.approver_user_id=user.id
+    row.decision_note=payload.note.strip()
+    row.decided_at=datetime.now(timezone.utc)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"accounting.invoice.approval_"+payload.decision,
+        "accounting_invoice",invoice.id,row.decision_note)
+    return {"invoice_id":invoice.id,"approval_status":row.status,"approver_user_id":user.id}
+
+
 @router.get("/accounting/invoices")
 def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
     membership=Depends(active_membership),db:Session=Depends(get_db),
@@ -1945,6 +2013,11 @@ def post_accounting_invoice(invoice_id:int,membership=Depends(active_membership)
         id=invoice_id,organization_id=membership.organization_id).with_for_update().first()
     if not invoice: raise HTTPException(404,"Invoice not found")
     if invoice.status!="draft": raise HTTPException(409,"Only draft invoices can be posted")
+    approval=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id).first()
+    if approval and approval.status!="approved":
+        raise HTTPException(409,"Invoice must be approved before posting")
+
     if invoice.branch_id and not can_access_branch(membership,invoice.branch_id):
         raise HTTPException(404,"Invoice not found")
     items=db.query(AccountingInvoiceLine).filter_by(
@@ -1976,6 +2049,110 @@ def post_accounting_invoice(invoice_id:int,membership=Depends(active_membership)
     invoice.posted_at=datetime.now(timezone.utc)
     db.commit();audit(db,user.id,membership.organization_id,"accounting.invoice.posted","accounting_invoice",invoice.id)
     return {"id":invoice.id,"status":invoice.status,"journal_id":journal.id,"journal_number":journal.journal_number}
+
+
+@router.post("/accounting/invoices/{invoice_id}/credit-notes",status_code=201)
+def create_accounting_credit_note(invoice_id:int,payload:AccountingCreditNoteIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(id=invoice_id,
+        organization_id=membership.organization_id).with_for_update().first()
+    if not invoice or (invoice.branch_id and not can_access_branch(membership,invoice.branch_id)):
+        raise HTTPException(404,"Invoice not found")
+    if invoice.status not in ("posted","partially_paid","paid"):
+        raise HTTPException(409,"Only posted invoices can be credited")
+    duplicate=db.query(AccountingCreditNote).filter_by(
+        organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if duplicate:
+        if duplicate.invoice_id==invoice.id and duplicate.credit_note_number==payload.credit_note_number:
+            return {"id":duplicate.id,"credit_note_number":duplicate.credit_note_number,"status":duplicate.status}
+        raise HTTPException(409,"Credit note idempotency key has already been used")
+    existing_number=db.query(AccountingCreditNote).filter_by(
+        organization_id=membership.organization_id,credit_note_number=payload.credit_note_number.strip().upper()).first()
+    if existing_number: raise HTTPException(409,"Credit note number already exists")
+    _accounting_assert_period_open(db,membership.organization_id,payload.issue_date)
+    invoice_lines={x.id:x for x in db.query(AccountingInvoiceLine).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id).with_for_update().all()}
+    if {x.invoice_line_id for x in payload.lines} - set(invoice_lines):
+        raise HTTPException(422,"Credit note lines must belong to this invoice")
+    subtotal=Decimal("0.00");tax_total=Decimal("0.00");allocations=[]
+    for item in payload.lines:
+        source=invoice_lines[item.invoice_line_id]
+        credited=db.query(func.coalesce(func.sum(AccountingCreditNoteLine.quantity),0)).join(
+            AccountingCreditNote,AccountingCreditNote.id==AccountingCreditNoteLine.credit_note_id).filter(
+            AccountingCreditNote.organization_id==membership.organization_id,
+            AccountingCreditNote.invoice_id==invoice.id,
+            AccountingCreditNote.status=="posted",
+            AccountingCreditNoteLine.invoice_line_id==source.id).scalar() or Decimal("0")
+        if item.quantity>Decimal(source.quantity)-Decimal(credited):
+            raise HTTPException(409,"Credit quantity exceeds the uncredited invoice quantity")
+        line_sub=(item.quantity*Decimal(source.unit_price)).quantize(Decimal("0.01"))
+        line_tax=(line_sub*Decimal(source.tax_rate)/Decimal("100")).quantize(Decimal("0.01"))
+        subtotal+=line_sub;tax_total+=line_tax
+        allocations.append((source,item.quantity,line_sub,line_tax,line_sub+line_tax))
+    total=subtotal+tax_total
+    outstanding=Decimal(invoice.total)-Decimal(invoice.amount_paid)
+    if total>outstanding:
+        raise HTTPException(409,"Credit exceeds the outstanding invoice balance; customer refunds and supplier credit balances are not yet supported")
+    note=AccountingCreditNote(organization_id=membership.organization_id,invoice_id=invoice.id,
+        branch_id=invoice.branch_id,credit_note_number=payload.credit_note_number.strip().upper(),
+        issue_date=datetime.combine(payload.issue_date,time.min,tzinfo=timezone.utc),
+        reason=payload.reason.strip(),currency=invoice.currency,subtotal=subtotal,tax_total=tax_total,
+        total=total,status="draft",idempotency_key=payload.idempotency_key,created_by=user.id)
+    db.add(note);db.flush()
+    for source,qty,line_sub,line_tax,line_total in allocations:
+        db.add(AccountingCreditNoteLine(organization_id=membership.organization_id,credit_note_id=note.id,
+            invoice_line_id=source.id,quantity=qty,subtotal=line_sub,tax_amount=line_tax,total=line_total))
+    db.flush()
+    lines=[]
+    if invoice.invoice_type=="receivable":
+        for source,qty,line_sub,line_tax,line_total in allocations:
+            lines.append({"account_id":source.account_id,"description":"Credit "+note.credit_note_number+" · "+source.description,
+                "debit":line_sub,"credit":Decimal("0")})
+            if line_tax:
+                lines.append({"account_id":source.tax_account_id,"description":"Output tax credit "+note.credit_note_number,
+                    "debit":line_tax,"credit":Decimal("0")})
+        lines.append({"account_id":invoice.control_account_id,"description":"Accounts receivable credit "+note.credit_note_number,
+            "debit":Decimal("0"),"credit":total})
+    else:
+        lines.append({"account_id":invoice.control_account_id,"description":"Accounts payable credit "+note.credit_note_number,
+            "debit":total,"credit":Decimal("0")})
+        for source,qty,line_sub,line_tax,line_total in allocations:
+            lines.append({"account_id":source.account_id,"description":"Purchase credit "+note.credit_note_number+" · "+source.description,
+                "debit":Decimal("0"),"credit":line_sub})
+            if line_tax:
+                lines.append({"account_id":source.tax_account_id,"description":"Input tax credit "+note.credit_note_number,
+                    "debit":Decimal("0"),"credit":line_tax})
+    validate_journal_lines([type("Line",(),line)() for line in lines])
+    journal=_accounting_make_journal(db,membership,user,payload.issue_date,note.credit_note_number,
+        "Credit note "+note.credit_note_number,lines,invoice.branch_id)
+    note.status="posted";note.journal_id=journal.id;note.posted_by=user.id;note.posted_at=datetime.now(timezone.utc)
+    invoice.subtotal=Decimal(invoice.subtotal)-subtotal
+    invoice.tax_total=Decimal(invoice.tax_total)-tax_total
+    invoice.total=Decimal(invoice.total)-total
+    invoice.status="paid" if invoice.amount_paid==invoice.total else "partially_paid" if invoice.amount_paid>0 else "posted"
+    db.commit()
+    audit(db,user.id,membership.organization_id,"accounting.credit_note.posted","accounting_credit_note",note.id,note.credit_note_number)
+    return {"id":note.id,"credit_note_number":note.credit_note_number,"status":note.status,
+        "subtotal":str(note.subtotal),"tax_total":str(note.tax_total),"total":str(note.total),
+        "journal_id":journal.id,"invoice_balance":str(invoice.total-invoice.amount_paid)}
+
+
+@router.get("/accounting/credit-notes")
+def list_accounting_credit_notes(invoice_id:int|None=None,membership=Depends(active_membership),
+    db:Session=Depends(get_db),limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(AccountingCreditNote).filter_by(organization_id=membership.organization_id)
+    if invoice_id is not None:q=q.filter(AccountingCreditNote.invoice_id==invoice_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter((AccountingCreditNote.branch_id==None)|(AccountingCreditNote.branch_id.in_(allowed)))
+    rows=q.order_by(AccountingCreditNote.id.desc()).limit(limit).all()
+    return [{"id":x.id,"invoice_id":x.invoice_id,"credit_note_number":x.credit_note_number,
+        "issue_date":x.issue_date.date().isoformat(),"reason":x.reason,"subtotal":str(x.subtotal),
+        "tax_total":str(x.tax_total),"total":str(x.total),"currency":x.currency,"status":x.status,
+        "journal_id":x.journal_id} for x in rows]
 
 
 @router.post("/accounting/invoices/{invoice_id}/payments",status_code=201)
