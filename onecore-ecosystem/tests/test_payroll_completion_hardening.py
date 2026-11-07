@@ -94,3 +94,9 @@ def test_meal_benefit_is_non_cash_and_only_excess_over_kra_threshold_is_taxable(
     assert Decimal(with_meals["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("2000.00")
     assert Decimal(with_meals["net_pay"]) == Decimal(cash["net_pay"]) - Decimal(with_meals["paye"]) + Decimal(cash["paye"])
     assert Decimal(with_meals["total_employer_cost"]) == Decimal(cash["total_employer_cost"]) + Decimal("7000.00")
+
+
+def test_seeded_2026_rule_pack_passes_activation_parameter_validation():
+    _validate_rule_parameters(KENYA_2026_RULES["parameters"])
+    assert KENYA_2026_RULES["parameters"]["shif"]["salaried_minimum"] == "0"
+    assert KENYA_2026_RULES["parameters"]["shif"]["non_salaried_minimum"] == "300"
