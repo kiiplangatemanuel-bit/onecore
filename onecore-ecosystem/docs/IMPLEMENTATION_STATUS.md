@@ -859,3 +859,22 @@ Boundaries: disbursement and repayment are internal records only; no external
 cash transfer, bank/M-Pesa confirmation or payment callback exists. No arrears,
 late fees, collateral/guarantor workflow, restructuring, early-settlement rebate,
 variable rates, accounting journal, prudential reporting or production UAT.
+
+
+## School term report card increment (7 November 2026)
+
+- Added `GET /api/v1/school/learners/{learner_id}/report-card` for weighted term
+  results based only on published assessments.
+- Calculates subject and overall percentages using assessment weights and the
+  configured grade-band scale.
+- A missing mark in any published assessment marks the subject and overall report
+  incomplete; no final grade is issued until all published assessment marks exist.
+- Uses learner placement history to locate class(es) for a historical academic year.
+- Optional attendance date bounds add present/late/absent/excused totals and a
+  recorded attendance rate (present + late divided by recorded days).
+- Added a school report-card workspace with browser print support and tests.
+
+Boundaries: no PDF generation, guardian portal/email delivery, principal sign-off,
+class ranking across all learners, report-card templates, competency narrative,
+CBC strands/learning outcomes, fee-clearance gating, transcript certification or
+UAT. Historical results depend on retained learner placement records.

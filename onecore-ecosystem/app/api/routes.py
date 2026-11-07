@@ -21,6 +21,7 @@ from app.services.hr import business_days, worked_minutes, payroll_money, payrol
 from app.services.healthcare import validate_appointment_transition
 from app.services.pharmacy_lab import pharmacy_batch_hash, laboratory_order_hash
 from app.services.sacco import build_repayment_schedule, add_months, allocate_repayment, money as sacco_money
+from app.services.school_reports import build_learner_report_rows
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -5426,3 +5427,105 @@ def list_sacco_loan_repayments(loan_id: int,
         "principal_component": str(row.principal_component),
         "interest_component": str(row.interest_component), "reference": row.reference,
         "created_at": row.created_at.isoformat()} for row in rows]
+
+
+@router.get("/school/learners/{learner_id}/report-card")
+def get_school_learner_report_card(learner_id: int, academic_year: int,
+    term: str, attendance_start: date | None = None, attendance_end: date | None = None,
+    scale_name: str = "default", membership=Depends(active_membership),
+    db: Session=Depends(get_db)):
+    """Build a report card from published assessments only; drafts never leak."""
+    require_permission(membership, "read")
+    if academic_year < 2000 or academic_year > 2200 or not term.strip():
+        raise HTTPException(422, "A valid academic year and term are required")
+    if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,24}", term.strip()):
+        raise HTTPException(422, "Invalid term value")
+    term = term.strip()
+    learner = db.query(SchoolLearner).filter_by(
+        id=learner_id, organization_id=membership.organization_id
+    ).first()
+    if not learner or not can_access_branch(membership, learner.branch_id):
+        raise HTTPException(404, "Learner not found")
+    class_ids = {learner.class_id} if learner.class_id else set()
+    placement_history = db.query(SchoolEnrollmentHistory).filter_by(
+        organization_id=membership.organization_id, learner_id=learner.id
+    ).all()
+    for placement in placement_history:
+        class_ids.add(placement.from_class_id)
+        class_ids.add(placement.to_class_id)
+    class_ids.discard(None)
+    historical_classes = db.query(SchoolClass).filter(
+        SchoolClass.organization_id == membership.organization_id,
+        SchoolClass.id.in_(class_ids),
+        SchoolClass.academic_year == academic_year,
+    ).order_by(SchoolClass.name, SchoolClass.stream).all() if class_ids else []
+    if not historical_classes:
+        raise HTTPException(404, "No learner class placement found for the requested academic year")
+    if any(not can_access_branch(membership, item.branch_id) for item in historical_classes):
+        raise HTTPException(404, "Learner class placement not found")
+    report_class_ids = [item.id for item in historical_classes]
+    if (attendance_start is None) != (attendance_end is None):
+        raise HTTPException(422, "Provide both attendance_start and attendance_end")
+    if attendance_start and attendance_end and attendance_start > attendance_end:
+        raise HTTPException(422, "Attendance start date must not be after end date")
+    assessments = db.query(SchoolAssessment, SchoolSubject.name, SchoolMark.score).join(
+        SchoolSubject, and_(SchoolSubject.id == SchoolAssessment.subject_id,
+            SchoolSubject.organization_id == membership.organization_id)
+    ).outerjoin(SchoolMark, and_(
+        SchoolMark.assessment_id == SchoolAssessment.id,
+        SchoolMark.learner_id == learner.id,
+        SchoolMark.organization_id == membership.organization_id,
+    )).filter(
+        SchoolAssessment.organization_id == membership.organization_id,
+        SchoolAssessment.class_id.in_(report_class_ids),
+        SchoolAssessment.academic_year == academic_year,
+        SchoolAssessment.term == term,
+        SchoolAssessment.status == "published",
+        SchoolSubject.is_active.is_(True),
+    ).order_by(SchoolSubject.name, SchoolAssessment.created_at).all()
+    rows = [{
+        "assessment_id": assessment.id, "title": assessment.title,
+        "subject_id": assessment.subject_id, "subject_name": subject_name,
+        "maximum_score": assessment.maximum_score, "weight": assessment.weight,
+        "score": score,
+    } for assessment, subject_name, score in assessments]
+    grade_bands = db.query(SchoolGradeBand).filter_by(
+        organization_id=membership.organization_id, scale_name=scale_name
+    ).all()
+    try:
+        report = build_learner_report_rows(rows, grade_bands)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    attendance = None
+    if attendance_start and attendance_end:
+        start = datetime.combine(attendance_start, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(attendance_end, time.max, tzinfo=timezone.utc)
+        records = db.query(SchoolAttendance.status, func.count(SchoolAttendance.id)).filter(
+            SchoolAttendance.organization_id == membership.organization_id,
+            SchoolAttendance.learner_id == learner.id,
+            SchoolAttendance.attendance_date >= start,
+            SchoolAttendance.attendance_date <= end,
+        ).group_by(SchoolAttendance.status).all()
+        counts = {status: count for status, count in records}
+        total_days = sum(counts.values())
+        attendance = {"start_date": attendance_start.isoformat(),
+            "end_date": attendance_end.isoformat(), "total_recorded_days": total_days,
+            "present": counts.get("present", 0), "late": counts.get("late", 0),
+            "absent": counts.get("absent", 0), "excused": counts.get("excused", 0),
+            "attendance_rate": (str((Decimal(counts.get("present", 0) + counts.get("late", 0)) /
+                Decimal(total_days) * Decimal("100")).quantize(Decimal("0.01")))
+                if total_days else None)}
+    return {
+        "learner": {"id": learner.id, "admission_number": learner.admission_number,
+            "name": f"{learner.first_name} {learner.last_name}",
+            "guardian_name": learner.guardian_name},
+        "class": {"id": historical_classes[0].id if len(historical_classes) == 1 else None,
+            "name": " / ".join(f"{item.name} {item.stream}".strip() for item in historical_classes),
+            "stream": historical_classes[0].stream if len(historical_classes) == 1 else "Multiple placements",
+            "academic_year": academic_year},
+        "class_placements": [{"id": item.id, "name": item.name,
+            "stream": item.stream, "branch_id": item.branch_id} for item in historical_classes],
+        "academic_year": academic_year, "term": term,
+        "publication_basis": "Published assessments only",
+        **report, "attendance": attendance,
+    }
