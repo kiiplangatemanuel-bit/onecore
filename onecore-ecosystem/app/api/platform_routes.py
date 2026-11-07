@@ -112,17 +112,49 @@ def remove_domain(domain_id:int,membership=Depends(active_membership),user:User=
 
 @router.post("/admin/notices",status_code=201)
 def create_notice(payload:NoticeIn,user:User=Depends(require_platform_admin),db:Session=Depends(get_db)):
-    if payload.expires_at and payload.starts_at and payload.expires_at <= payload.starts_at:
+    starts=payload.starts_at or datetime.now(timezone.utc)
+    expires=payload.expires_at
+    if starts.tzinfo is None: starts=starts.replace(tzinfo=timezone.utc)
+    if expires is not None and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+    if expires and expires<=starts:
         raise HTTPException(422,"Expiry must be after publication time")
     if payload.organization_id and not db.get(Organization,payload.organization_id):
         raise HTTPException(404,"Organization not found")
     row=SystemNotice(title=payload.title,message=payload.message,severity=payload.severity,
-        audience=payload.audience,organization_id=payload.organization_id,status="published",
-        starts_at=payload.starts_at or datetime.now(timezone.utc),expires_at=payload.expires_at,
-        created_by=user.id,approved_by=user.id)
+        audience=payload.audience,organization_id=payload.organization_id,status="draft",
+        starts_at=starts,expires_at=expires,created_by=user.id)
     db.add(row);db.commit();db.refresh(row)
-    _audit(db,user.id,payload.organization_id,"notice.published","system_notice",row.id)
+    _audit(db,user.id,payload.organization_id,"notice.created","system_notice",row.id)
     return {"id":row.id,"status":row.status,"starts_at":row.starts_at.isoformat()}
+
+@router.put("/admin/notices/{notice_id}")
+def edit_notice(notice_id:int,payload:NoticeIn,user:User=Depends(require_platform_admin),db:Session=Depends(get_db)):
+    row=db.get(SystemNotice,notice_id)
+    if not row: raise HTTPException(404,"Notice not found")
+    if row.status!="draft": raise HTTPException(409,"Only draft notices can be edited")
+    starts=payload.starts_at or row.starts_at
+    expires=payload.expires_at
+    if starts.tzinfo is None: starts=starts.replace(tzinfo=timezone.utc)
+    if expires is not None and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+    if expires and expires<=starts: raise HTTPException(422,"Expiry must be after publication time")
+    if payload.organization_id and not db.get(Organization,payload.organization_id):
+        raise HTTPException(404,"Organization not found")
+    row.title=payload.title;row.message=payload.message;row.severity=payload.severity
+    row.audience=payload.audience;row.organization_id=payload.organization_id
+    row.starts_at=starts;row.expires_at=expires;row.updated_at=datetime.now(timezone.utc)
+    db.commit()
+    _audit(db,user.id,row.organization_id,"notice.edited","system_notice",row.id)
+    return {"id":row.id,"status":row.status}
+
+@router.post("/admin/notices/{notice_id}/publish")
+def publish_notice(notice_id:int,user:User=Depends(require_platform_admin),db:Session=Depends(get_db)):
+    row=db.get(SystemNotice,notice_id)
+    if not row or row.status!="draft": raise HTTPException(404,"Draft notice not found")
+    if row.created_by==user.id:
+        raise HTTPException(403,"A different platform administrator must approve and publish this notice")
+    row.status="published";row.approved_by=user.id;db.commit()
+    _audit(db,user.id,row.organization_id,"notice.published","system_notice",row.id)
+    return {"id":row.id,"status":row.status,"approved_by":user.id}
 
 @router.get("/notices")
 def active_notices(user:User=Depends(current_user),x_organization_id:int|None=Header(default=None,alias="X-Organization-ID"),db:Session=Depends(get_db)):
