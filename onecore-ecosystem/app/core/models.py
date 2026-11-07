@@ -303,3 +303,55 @@ class ProcurementPurchaseOrderLine(Base):
     quantity_received: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class POSShift(Base):
+    __tablename__ = "pos_shifts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    cashier_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    opening_cash: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    closing_cash: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class POSSale(Base):
+    __tablename__ = "pos_sales"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("pos_shifts.id"), index=True)
+    cashier_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    client_transaction_id: Mapped[str] = mapped_column(String(100))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(16), default="posted")
+    offline_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_pos_sale_org_client_txn", "organization_id", "client_transaction_id", unique=True),)
+
+
+class POSSaleLine(Base):
+    __tablename__ = "pos_sale_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("pos_sales.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+
+
+class POSPayment(Base):
+    __tablename__ = "pos_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("pos_sales.id"), index=True)
+    method: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    provider_reference: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(16), default="recorded")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
