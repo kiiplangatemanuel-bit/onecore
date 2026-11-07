@@ -11,7 +11,7 @@ from app.main import app
 
 def test_school_schemas_validate_admissions_and_assessment_limits():
     assert SchoolClassIn(name="Grade 4", academic_year=2026).academic_year == 2026
-    assert SchoolLearnerIn(admission_number="A-001", first_name="A", last_name="Learner").status if False else True
+    assert SchoolLearnerIn(admission_number="A-001", first_name="Ada", last_name="Learner").admission_number == "A-001"
     with pytest.raises(ValidationError):
         SchoolAssessmentIn(class_id=1, subject_id=1, title="Exam", academic_year=2026,
                            term="Term 1", maximum_score=0)
