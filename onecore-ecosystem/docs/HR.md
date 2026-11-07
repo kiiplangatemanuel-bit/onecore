@@ -107,3 +107,49 @@ instruction, bank file, M-Pesa payout, payslip PDF/email, payroll journal or
 accounting posting is generated. Validate applicable Kenyan and other local
 employment/tax rules with qualified professionals before using the figures for
 payment or statutory filing.
+
+
+## Kenya payroll completion
+
+### Statutory rule packs
+
+- `POST /api/v1/hr/payroll/statutory-rules/seed-kenya-2026` installs the effective-dated Kenya 2026 pack once per organization.
+- `GET /api/v1/hr/payroll/statutory-rules` lists all versions and their evidence sources.
+- `POST /api/v1/hr/payroll/statutory-rules` creates a new draft version. `POST /api/v1/hr/payroll/statutory-rules/{id}/activate` activates it only when its date range does not overlap another active version.
+- A payroll run selects exactly one active rule version using its period end date. The entire rule pack is copied into each immutable payroll calculation snapshot.
+- Current Kenya 2026 defaults: PAYE monthly bands 10%, 25%, 30%, 32.5%, 35%; resident personal relief KES 2,400/month; NSSF Year 4 effective 1 February 2026 at 6% employee and employer, LEL KES 9,000 and UEL KES 108,000; SHIF 2.75% of gross salary with KES 300 minimum and no employer match; Affordable Housing Levy 1.5% employee and 1.5% employer.
+- PAYE chargeable pay applies the configured eligible deductions, including SHIF, employee AHL, qualifying NSSF/registered pension contributions within the aggregate KES 30,000 monthly limit, mortgage interest within KES 30,000, and PRMF within KES 15,000. Insurance relief is 15% subject to KES 5,000/month. Resident personal relief is not applied to non-residents. Meal and disability exemptions require employee declarations/supporting evidence; the disability certificate details must be retained by HR.
+- Statutory rules are not silently overwritten. New rates must be introduced as a new effective-dated version with source evidence and activation audit.
+
+### Payroll calculation, approval and accounting
+
+- `POST /api/v1/hr/payroll/runs/{id}/calculate-kenya` calculates from approved payroll lines/items and supplied per-employee pay inputs. Per-employee inputs support employment proration, overtime hours/rate/multiplier, shift allowance, cash allowances, taxable benefits, meal benefits, employee pension, mortgage interest, PRMF and insurance premium.
+- Every employee calculation stores an immutable SHA-256 snapshot with the full statutory rule version and component breakdown. Recalculation of the same run is rejected; create a new run for corrected payroll.
+- `GET /api/v1/hr/payroll/runs/{id}/snapshots` provides the review view.
+- `POST /api/v1/hr/payroll/runs/{id}/approve-calculation` enforces maker-checker separation and validates snapshot integrity/count.
+- `POST /api/v1/hr/payroll/runs/{id}/post-journal` posts a balanced journal using explicit tenant-owned chart-of-account IDs. Map salary expense, PAYE, NSSF, SHIF, Housing Levy, pension and other deduction liabilities. A duplicate payroll journal is rejected.
+- `GET /api/v1/hr/payroll/my-history` returns only the signed-in employee's approved/paid payroll snapshots.
+
+### Payment processing and reconciliation
+
+- `POST /api/v1/hr/payroll/runs/{id}/payment-batches` prepares a bank or M-Pesa batch after payroll approval.
+- Bank CSV export is available from `GET /api/v1/hr/payroll/payment-batches/{id}/bank-file`; bank account identifiers are intentionally not invented or exported. A secure employee bank-detail capture/approval workflow and institution-specific file format must be configured before bank upload.
+- M-Pesa salary submission uses Safaricom Daraja B2C when integration is enabled and the OAuth, initiator/security credential, shortcode and result/timeout callback environment values are configured. It sends one employee instruction at a time and does not mark payment paid from an accepted/queued response. B2C amount must be whole KES; decimal salaries are rejected rather than silently rounded.
+- Provider callbacks must arrive through a trusted webhook gateway that validates Daraja's callback and forwards a normalized payload signed with `PAYROLL_PROVIDER_CALLBACK_SECRET`. The application verifies HMAC signatures, requires a provider transaction reference and prevents a settled payment from being downgraded.
+- Failed payments can be retried; verified payment reversals require an external reversal reference and reason. Bank reconciliation matches statement references and exact amounts, and reports unmatched rows.
+- Payment and reversal records are audited. No M-Pesa or bank credential is stored in payroll records.
+
+### Reports
+
+- `GET /api/v1/hr/payroll/reports/statutory?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD` produces employee-level snapshots and statutory totals.
+- `GET /api/v1/hr/payroll/reports/analytics` summarizes payroll runs and totals.
+- `GET /api/v1/hr/payroll/year-end/{year}` produces a year-end reconciliation workpaper.
+- `GET /api/v1/hr/payroll/my-history` is the employee self-service history endpoint; existing `/hr/payroll/my-payslips` remains available for approved payslip summaries.
+
+### Production boundaries and controls
+
+- Statutory rate values are sourced from KRA PAYE guidance, KRA PAYE amendment guidance, KRA Housing Levy notice, NSSF Year 4 (2026) notice and the Social Health Insurance Regulations 2024. See source links in the seeded rule pack. The pack must be revalidated by Kenyan payroll/tax professionals before each payroll year and before live use.
+- Payroll per-employee extras (residency, qualifying pension, mortgage, PRMF, insurance, meal benefit, disability certificate, proration, overtime and allowances) are supplied by authorized HR input and must be supported by employee documents and approval policy. The application does not infer attendance-based overtime automatically; it calculates supplied, approved hours/rates.
+- Daraja callback delivery requires a secure gateway because Daraja's B2C result callback is not natively an HMAC-signed webhook. Bank API execution, employee bank account vaulting, KRA iTax filing, SHA employer portal filing, NSSF filing, and remittance payment are not performed by this increment.
+- The accounting journal requires explicit account mapping and posts through the shared accounting ledger. A full statutory payment remittance clearing/reconciliation, payroll reversal journal, PostgreSQL load/concurrency tests, provider sandbox/UAT, pen test, data-protection review and customer signoff remain release gates.
+- Payroll data is highly sensitive. Deploy with HTTPS, least-privilege HR permissions, encrypted backups, key management, retention policy and access monitoring. This increment is not legal, tax or statutory certification.
