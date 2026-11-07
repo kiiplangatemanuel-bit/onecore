@@ -1,0 +1,519 @@
+"""Kenya payroll completion API.
+
+Rules are effective-dated and copied into immutable calculation snapshots. Payment
+providers are adapters only: no payment is considered successful without a verified
+provider/bank reference.
+"""
+import csv
+import hashlib
+import hmac
+import io
+import json
+import os
+import uuid
+from datetime import date, datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.models import Record, HRPayrollRun, HRPayrollLine, HRPayrollItem, HREmployee, AccountingAccount, AccountingJournal, AccountingJournalLine
+from app.core.security import current_user
+from app.core.tenancy import active_membership
+from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
+
+router = APIRouter(prefix="/api/v1")
+D = Decimal
+CENT = D("0.01")
+ZERO = D("0.00")
+MODULE = "hr-payroll"
+
+
+def money(v):
+    return D(str(v or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _record(db, org_id, kind, key=None):
+    q = db.query(Record).filter_by(organization_id=org_id, module_key=MODULE, record_type=kind)
+    if key is not None:
+        q = q.filter(Record.data["key"].as_string() == str(key))
+    return q
+
+
+def _audit(db, org_id, user_id, action, kind, rid, detail=""):
+    from app.core.models import AuditEvent
+    db.add(AuditEvent(organization_id=org_id, actor_user_id=user_id, action=action,
+                      resource_type=kind, resource_id=str(rid), detail=detail[:2000]))
+
+
+def _require_manage(membership):
+    require_permission(membership, "manage")
+
+
+def _active_rule(db, org_id, on_date):
+    rows = _record(db, org_id, "statutory_rule_set").all()
+    active = [r for r in rows if r.data.get("status") == "active"
+              and date.fromisoformat(r.data["effective_from"]) <= on_date
+              and (not r.data.get("effective_to") or date.fromisoformat(r.data["effective_to"]) >= on_date)]
+    if len(active) != 1:
+        raise HTTPException(409, "Exactly one active Kenya statutory rule set must cover the payroll period")
+    return active[0]
+
+
+def _progressive_tax(taxable, bands):
+    remaining = max(ZERO, money(taxable))
+    tax = ZERO
+    for band in bands:
+        width = None if band.get("upper") is None else D(str(band["upper"])) - D(str(band["lower"]))
+        slice_amount = remaining if width is None else min(remaining, width)
+        if slice_amount > 0:
+            tax += slice_amount * D(str(band["rate"]))
+            remaining -= slice_amount
+        if remaining <= 0:
+            break
+    return money(tax)
+
+
+def calculate_kenya_payroll(gross, employee, rule, extra=None):
+    """Monthly statutory calculation in KES. extra holds documented relief claims."""
+    gross = money(gross)
+    extra = extra or {}
+    cfg = rule["parameters"]
+    nssf_cfg = cfg["nssf"]
+    nssf_base = min(gross, D(str(nssf_cfg["upper_earnings_limit"])))
+    tier1 = min(nssf_base, D(str(nssf_cfg["lower_earnings_limit"])))
+    tier2 = max(ZERO, nssf_base - D(str(nssf_cfg["lower_earnings_limit"])))
+    nssf = money((tier1 + tier2) * D(str(nssf_cfg["rate"])))
+    shif = max(D(str(cfg["shif"]["minimum"])), money(gross * D(str(cfg["shif"]["rate"])))) if gross > 0 else ZERO
+    ahl = money(gross * D(str(cfg["housing_levy"]["employee_rate"])))
+    employer_nssf = nssf
+    employer_ahl = money(gross * D(str(cfg["housing_levy"]["employer_rate"])))
+
+    pension = min(money(extra.get("employee_pension", 0)), D(str(cfg["paye"]["pension_monthly_limit"])))
+    mortgage = min(money(extra.get("mortgage_interest", 0)), D(str(cfg["paye"]["mortgage_monthly_limit"])))
+    prmf = min(money(extra.get("post_retirement_medical_fund", 0)), D(str(cfg["paye"]["prmf_monthly_limit"])))
+    insurance_premium = money(extra.get("insurance_premium", 0))
+    insurance_relief = min(money(insurance_premium * D(str(cfg["paye"]["insurance_relief_rate"]))),
+                            D(str(cfg["paye"]["insurance_relief_monthly_limit"])))
+    deductible = money(ahl + shif + pension + mortgage + prmf + nssf)
+    taxable = max(ZERO, money(gross - deductible))
+    gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
+    personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
+    paye = max(ZERO, money(gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
+    other_deductions = money(extra.get("other_deductions", 0))
+    net = money(gross - nssf - shif - ahl - paye - pension - other_deductions)
+    if net < 0:
+        raise HTTPException(422, "Deductions exceed gross pay; review employee declarations and payroll items")
+    return {
+        "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
+        "personal_relief": str(personal_relief), "insurance_relief": str(insurance_relief),
+        "nssf_employee": str(nssf), "nssf_employer": str(employer_nssf),
+        "shif_employee": str(shif), "housing_levy_employee": str(ahl),
+        "housing_levy_employer": str(employer_ahl), "employee_pension": str(pension),
+        "mortgage_interest": str(mortgage), "post_retirement_medical_fund": str(prmf),
+        "other_deductions": str(other_deductions), "net_pay": str(net),
+        "employer_statutory_cost": str(money(employer_nssf + employer_ahl)),
+        "total_employer_cost": str(money(gross + employer_nssf + employer_ahl)),
+    }
+
+
+def _json_hash(data):
+    return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _save_record(db, org_id, user_id, kind, data, branch_id=None):
+    row = Record(organization_id=org_id, module_key=MODULE, record_type=kind,
+                 data=data, branch_id=branch_id, created_by=user_id)
+    db.add(row)
+    db.flush()
+    return row
+
+
+# Verified published parameters. Changes are new effective-dated records, never edits
+# to a rule set already used by a payroll snapshot.
+KENYA_2026_RULES = {
+    "country": "KE", "currency": "KES", "version": "KE-2026-02",
+    "effective_from": "2026-02-01", "effective_to": None,
+    "status": "active", "reviewed_on": "2026-11-08",
+    "sources": [
+        {"authority": "KRA", "url": "https://www.kra.go.ke/individual/filing-paying/types-of-taxes/paye", "verified_on": "2026-11-08"},
+        {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2157-amendments-to-paye-computation-pursuant-to-the-tax-laws-amendment-act%2C-2024", "verified_on": "2026-11-08"},
+        {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
+        {"authority": "NSSF", "url": "https://www.nssf.or.ke/notice-to-employers-year-4-2026-nssf-contribution-rates", "verified_on": "2026-11-08"},
+        {"authority": "SHA", "url": "https://new.sha.go.ke/wp-content/uploads/2025/07/PUBLIC_NOTICE_ON_EMPLOYER_REMITTENCES.pdf", "verified_on": "2026-11-08"}
+    ],
+    "parameters": {
+        "paye": {
+            "bands": [
+                {"lower": "0", "upper": "24000", "rate": "0.10"},
+                {"lower": "24000", "upper": "32333", "rate": "0.25"},
+                {"lower": "32333", "upper": "500000", "rate": "0.30"},
+                {"lower": "500000", "upper": "800000", "rate": "0.325"},
+                {"lower": "800000", "upper": None, "rate": "0.35"}
+            ],
+            "personal_relief_monthly": "2400", "insurance_relief_rate": "0.15",
+            "insurance_relief_monthly_limit": "5000", "pension_monthly_limit": "30000",
+            "mortgage_monthly_limit": "30000", "prmf_monthly_limit": "15000"
+        },
+        "nssf": {"rate": "0.06", "lower_earnings_limit": "9000", "upper_earnings_limit": "108000"},
+        "shif": {"rate": "0.0275", "minimum": "300"},
+        "housing_levy": {"employee_rate": "0.015", "employer_rate": "0.015"}
+    }
+}
+
+
+@router.post("/hr/payroll/statutory-rules/seed-kenya-2026", status_code=201)
+def seed_kenya_rules(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    existing = _record(db, membership.organization_id, "statutory_rule_set", KENYA_2026_RULES["version"]).first()
+    if existing:
+        return {"id": existing.id, "version": existing.data["version"], "status": existing.data["status"], "existing": True}
+    row = _save_record(db, membership.organization_id, user.id, "statutory_rule_set",
+                       {"key": KENYA_2026_RULES["version"], **KENYA_2026_RULES})
+    _audit(db, membership.organization_id, user.id, "hr.payroll.statutory_rules.seeded", "statutory_rule_set", row.id, KENYA_2026_RULES["version"])
+    db.commit()
+    return {"id": row.id, "version": KENYA_2026_RULES["version"], "status": "active"}
+
+
+@router.post("/hr/payroll/statutory-rules", status_code=201)
+def create_statutory_rules(payload: dict=Body(...), membership=Depends(active_membership),
+                           user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    required = {"version", "effective_from", "parameters", "sources"}
+    if not required.issubset(payload) or not payload["sources"]:
+        raise HTTPException(422, "Version, effective_from, parameters and authoritative sources are required")
+    try:
+        start = date.fromisoformat(payload["effective_from"])
+        end = date.fromisoformat(payload["effective_to"]) if payload.get("effective_to") else None
+    except Exception:
+        raise HTTPException(422, "Invalid effective date")
+    if end and end < start:
+        raise HTTPException(422, "Effective end date precedes start date")
+    data = {**payload, "key": payload["version"], "country": "KE", "currency": "KES",
+            "status": "draft", "created_by": user.id, "created_at": datetime.now(timezone.utc).isoformat()}
+    row = _save_record(db, membership.organization_id, user.id, "statutory_rule_set", data)
+    _audit(db, membership.organization_id, user.id, "hr.payroll.statutory_rules.created", "statutory_rule_set", row.id, data["version"])
+    db.commit()
+    return {"id": row.id, "version": data["version"], "status": "draft"}
+
+
+@router.post("/hr/payroll/statutory-rules/{rule_id}/activate")
+def activate_statutory_rules(rule_id: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    row = db.query(Record).filter_by(id=rule_id, organization_id=membership.organization_id,
+                                     module_key=MODULE, record_type="statutory_rule_set").with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Statutory rule set not found")
+    d = row.data
+    if not d.get("sources") or not d.get("version") or not d.get("parameters"):
+        raise HTTPException(422, "Rule set requires a version, parameters and evidence sources")
+    start = date.fromisoformat(d["effective_from"])
+    for other in _record(db, membership.organization_id, "statutory_rule_set").all():
+        if other.id == row.id or other.data.get("status") != "active":
+            continue
+        a = date.fromisoformat(other.data["effective_from"])
+        b = date.fromisoformat(other.data["effective_to"]) if other.data.get("effective_to") else date.max
+        c = date.fromisoformat(d["effective_to"]) if d.get("effective_to") else date.max
+        if a <= c and start <= b:
+            raise HTTPException(409, "Effective period overlaps another active statutory rule set")
+    d["status"] = "active"
+    d["activated_by"] = user.id
+    d["activated_at"] = datetime.now(timezone.utc).isoformat()
+    row.data = d
+    _audit(db, membership.organization_id, user.id, "hr.payroll.statutory_rules.activated", "statutory_rule_set", row.id, d["version"])
+    db.commit()
+    return {"id": row.id, "version": d["version"], "status": "active"}
+
+
+@router.get("/hr/payroll/statutory-rules")
+def list_statutory_rules(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    return [{"id": r.id, **r.data} for r in _record(db, membership.organization_id, "statutory_rule_set").order_by(Record.id.desc()).all()]
+
+
+@router.post("/hr/payroll/runs/{run_id}/calculate-kenya")
+def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depends(active_membership),
+                  user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
+    if not run:
+        raise HTTPException(404, "Payroll run not found")
+    if run.status != "draft":
+        raise HTTPException(409, "Only draft payroll runs can be calculated")
+    rule = _active_rule(db, membership.organization_id, run.period_end)
+    lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run.id).all()
+    if not lines:
+        raise HTTPException(409, "Payroll run has no employees")
+    snapshots = []
+    for line in lines:
+        items = db.query(HRPayrollItem).filter_by(organization_id=membership.organization_id, payroll_line_id=line.id).all()
+        earnings = sum((money(i.amount) for i in items if i.item_type == "earning"), ZERO)
+        deductions = sum((money(i.amount) for i in items if i.item_type == "deduction"), ZERO)
+        gross = money(line.base_pay + earnings)
+        employee = db.query(HREmployee).filter_by(id=line.employee_id, organization_id=membership.organization_id).first()
+        extras = (payload.get("employees") or {}).get(str(line.employee_id), {})
+        result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
+        snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
+                    "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
+                    "period_start": run.period_start.isoformat(), "period_end": run.period_end.isoformat(),
+                    "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
+                    "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
+                    "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
+                    "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+        snapshot["sha256"] = _json_hash(snapshot)
+        existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
+        if existing:
+            raise HTTPException(409, "Calculation snapshot already exists; create a new payroll run to recalculate")
+        _save_record(db, membership.organization_id, user.id, "calculation_snapshot",
+                     {"key": f"{run.id}:{line.employee_id}", **snapshot}, line.branch_id)
+        snapshots.append(snapshot)
+    gross_total = sum((D(x["calculation"]["gross_pay"]) for x in snapshots), ZERO)
+    deductions_total = sum((D(x["calculation"]["gross_pay"]) - D(x["calculation"]["net_pay"]) for x in snapshots), ZERO)
+    net_total = sum((D(x["calculation"]["net_pay"]) for x in snapshots), ZERO)
+    run.gross_total, run.deductions_total, run.net_total = gross_total, deductions_total, net_total
+    run.status = "calculated"
+    _audit(db, membership.organization_id, user.id, "hr.payroll.run.calculated", "hr_payroll_run", run.id,
+           f"employees:{len(snapshots)};rules:{rule.data['version']}")
+    db.commit()
+    return {"run_id": run.id, "status": run.status, "rule_version": rule.data["version"],
+            "employee_count": len(snapshots), "gross_total": str(gross_total),
+            "deductions_total": str(deductions_total), "net_total": str(net_total), "snapshots": snapshots}
+
+
+@router.get("/hr/payroll/runs/{run_id}/snapshots")
+def list_snapshots(run_id: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).first()
+    if not run:
+        raise HTTPException(404, "Payroll run not found")
+    return [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
+
+
+@router.post("/hr/payroll/runs/{run_id}/approve-calculation")
+def approve_calculation(run_id: int, payload: dict=Body(default={}), membership=Depends(active_membership),
+                        user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).with_for_update().first()
+    if not run or run.status != "calculated":
+        raise HTTPException(409, "Only a calculated run can be approved")
+    if run.created_by == user.id:
+        raise HTTPException(403, "Maker cannot approve own payroll")
+    snaps = [r for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
+    lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run_id).count()
+    if len(snaps) != lines or any(_json_hash({k:v for k,v in s.data.items() if k != "sha256"}) != s.data.get("sha256") for s in snaps):
+        raise HTTPException(409, "Payroll snapshot integrity or employee count check failed")
+    run.status = "approved"
+    run.approved_by, run.approved_at = user.id, datetime.now(timezone.utc)
+    run.approval_note = str(payload.get("note", ""))[:500]
+    _audit(db, membership.organization_id, user.id, "hr.payroll.run.calculation_approved", "hr_payroll_run", run.id)
+    db.commit()
+    return {"run_id": run.id, "status": run.status, "approved_by": user.id, "snapshot_count": len(snaps)}
+
+
+@router.post("/hr/payroll/runs/{run_id}/payment-batches", status_code=201)
+def create_payment_batch(run_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                         user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).first()
+    if not run or run.status != "approved":
+        raise HTTPException(409, "Payroll must be approved before payment preparation")
+    method = payload.get("method")
+    if method not in ("bank", "mpesa"):
+        raise HTTPException(422, "Payment method must be bank or mpesa")
+    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all() if r.data.get("run_id") == run_id]
+    if not snaps:
+        raise HTTPException(409, "Approved calculation snapshots are missing")
+    existing = _record(db, membership.organization_id, "payment_batch").filter(Record.data["run_id"].as_integer() == run_id).first()
+    if existing:
+        raise HTTPException(409, "A payment batch already exists for this payroll run")
+    rows = []
+    for s in snaps:
+        emp = db.query(HREmployee).filter_by(id=s["employee_id"], organization_id=membership.organization_id).first()
+        if not emp:
+            raise HTTPException(409, "Employee no longer exists")
+        rows.append({"employee_id": emp.id, "employee_number": emp.employee_number,
+                     "employee_name": s["employee_name"], "phone": emp.phone,
+                     "amount": s["calculation"]["net_pay"], "currency": run.currency,
+                     "status": "pending", "provider_reference": None})
+    batch = _save_record(db, membership.organization_id, user.id, "payment_batch",
+                         {"key": str(uuid.uuid4()), "run_id": run_id, "method": method,
+                          "status": "prepared", "rows": rows, "created_at": datetime.now(timezone.utc).isoformat()})
+    _audit(db, membership.organization_id, user.id, "hr.payroll.payment_batch.prepared", "payment_batch", batch.id, method)
+    db.commit()
+    return {"batch_id": batch.id, **batch.data}
+
+
+@router.get("/hr/payroll/payment-batches/{batch_id}/bank-file")
+def export_bank_file(batch_id: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
+                                       module_key=MODULE, record_type="payment_batch").first()
+    if not batch or batch.data["method"] != "bank":
+        raise HTTPException(404, "Bank payment batch not found")
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["employee_number", "employee_name", "account_reference", "currency", "amount", "payment_reference"])
+    for row in batch.data["rows"]:
+        emp = db.query(HREmployee).filter_by(id=row["employee_id"], organization_id=membership.organization_id).first()
+        writer.writerow([row["employee_number"], row["employee_name"], "", row["currency"], row["amount"], f"PAY-{batch.id}-{row['employee_id']}"])
+    return {"filename": f"payroll-{batch.id}.csv", "content_type": "text/csv", "content": output.getvalue()}
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/authorize")
+def authorize_batch(batch_id: int, payload: dict=Body(default={}), membership=Depends(active_membership),
+                    user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
+                                       module_key=MODULE, record_type="payment_batch").with_for_update().first()
+    if not batch or batch.data["status"] != "prepared":
+        raise HTTPException(409, "Only prepared payment batches can be authorized")
+    run = db.query(HRPayrollRun).filter_by(id=batch.data["run_id"], organization_id=membership.organization_id).first()
+    if not run or run.approved_by == user.id:
+        raise HTTPException(403, "Payment authorizer must be independent of payroll approver")
+    d = dict(batch.data); d["status"] = "authorized"; d["authorized_by"] = user.id
+    d["authorized_at"] = datetime.now(timezone.utc).isoformat(); batch.data = d
+    _audit(db, membership.organization_id, user.id, "hr.payroll.payment_batch.authorized", "payment_batch", batch.id)
+    db.commit()
+    return {"batch_id": batch.id, "status": "authorized"}
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/mpesa-submit")
+def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                 user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
+                                       module_key=MODULE, record_type="payment_batch").with_for_update().first()
+    if not batch or batch.data["method"] != "mpesa" or batch.data["status"] != "authorized":
+        raise HTTPException(409, "An authorized M-Pesa batch is required")
+    # Submission is deliberately delegated to a configured Daraja adapter. Never
+    # synthesize a successful payment or treat a queued request as settled.
+    if not os.getenv("MPESA_PAYROLL_ADAPTER_URL") or not os.getenv("MPESA_PAYROLL_ADAPTER_TOKEN"):
+        raise HTTPException(503, "M-Pesa payroll adapter is not configured")
+    raise HTTPException(501, "Connect a signed Daraja B2C adapter through the provider integration gateway")
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/provider-callback")
+def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Header(default="", alias="X-OneCore-Signature"),
+                     db: Session=Depends(get_db)):
+    secret = os.getenv("PAYROLL_PROVIDER_CALLBACK_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "Payment callback signing secret is not configured")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(401, "Invalid provider callback signature")
+    batch = db.query(Record).filter_by(id=batch_id, module_key=MODULE, record_type="payment_batch").with_for_update().first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    d = dict(batch.data)
+    item_id = int(payload.get("employee_id", 0))
+    row = next((x for x in d["rows"] if x["employee_id"] == item_id), None)
+    if not row:
+        raise HTTPException(404, "Payment instruction not found")
+    status = payload.get("status")
+    if status not in ("paid", "failed"):
+        raise HTTPException(422, "Callback status must be paid or failed")
+    if row["status"] == "paid" and status != "paid":
+        raise HTTPException(409, "A settled salary payment cannot be downgraded")
+    if status == "paid" and not payload.get("provider_reference"):
+        raise HTTPException(422, "Verified provider reference is required")
+    row.update({"status": status, "provider_reference": payload.get("provider_reference"),
+                "verified_at": datetime.now(timezone.utc).isoformat(), "callback_hash": hashlib.sha256(raw).hexdigest()})
+    d["status"] = "paid" if all(x["status"] == "paid" for x in d["rows"]) else ("partial" if any(x["status"] == "paid" for x in d["rows"]) else "failed")
+    batch.data = d
+    _audit(db, batch.organization_id, None, "hr.payroll.payment.callback", "payment_batch", batch.id, f"employee:{item_id};status:{status}")
+    db.commit()
+    return {"batch_id": batch.id, "status": d["status"]}
+
+
+@router.post("/hr/payroll/payment-batches/{batch_id}/retry")
+def retry_failed_payment(batch_id: int, payload: dict=Body(default={}), membership=Depends(active_membership),
+                         user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
+                                       module_key=MODULE, record_type="payment_batch").with_for_update().first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    d = dict(batch.data)
+    if d["status"] not in ("failed", "partial"):
+        raise HTTPException(409, "Only failed or partially paid batches can be retried")
+    failed = [x for x in d["rows"] if x["status"] == "failed"]
+    if not failed:
+        raise HTTPException(409, "No failed payments to retry")
+    for row in failed:
+        row["status"] = "pending"
+        row["retry_count"] = int(row.get("retry_count", 0)) + 1
+        row["last_retry_at"] = datetime.now(timezone.utc).isoformat()
+    d["status"] = "prepared"
+    d["last_retry_by"] = user.id
+    batch.data = d
+    _audit(db, membership.organization_id, user.id, "hr.payroll.payment_batch.retry", "payment_batch", batch.id, f"failed:{len(failed)}")
+    db.commit()
+    return {"batch_id": batch.id, "status": d["status"], "retry_count": len(failed)}
+
+
+@router.get("/hr/payroll/payment-batches/{batch_id}/reconciliation")
+def reconcile_payments(batch_id: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    batch = db.query(Record).filter_by(id=batch_id, organization_id=membership.organization_id,
+                                       module_key=MODULE, record_type="payment_batch").first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    rows = batch.data["rows"]
+    return {"batch_id": batch.id, "count": len(rows), "paid": sum(x["status"] == "paid" for x in rows),
+            "failed": sum(x["status"] == "failed" for x in rows), "pending": sum(x["status"] == "pending" for x in rows),
+            "paid_total": str(sum((D(x["amount"]) for x in rows if x["status"] == "paid"), ZERO)),
+            "unpaid_total": str(sum((D(x["amount"]) for x in rows if x["status"] != "paid"), ZERO)),
+            "rows": rows}
+
+
+@router.get("/hr/payroll/reports/statutory")
+def statutory_report(period_start: date, period_end: date, membership=Depends(active_membership),
+                     user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+             if period_start.isoformat() <= r.data.get("period_end", "") <= period_end.isoformat()]
+    totals = {}
+    for s in snaps:
+        for key in ("paye", "nssf_employee", "nssf_employer", "shif_employee", "housing_levy_employee", "housing_levy_employer"):
+            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"][key])))
+    return {"period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
+            "employee_count": len(snaps), "totals": totals, "snapshots": snaps}
+
+
+@router.get("/hr/payroll/reports/analytics")
+def payroll_analytics(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    runs = db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).all()
+    return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid")},
+            "gross_total": str(money(sum((D(r.gross_total or 0) for r in runs), ZERO))),
+            "net_total": str(money(sum((D(r.net_total or 0) for r in runs), ZERO)))}
+
+
+@router.get("/hr/payroll/year-end/{year}")
+def year_end_reconciliation(year: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    if year < 2000 or year > 2200:
+        raise HTTPException(422, "Invalid year")
+    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+             if r.data.get("period_end", "").startswith(str(year))]
+    totals = {}
+    for s in snaps:
+        for key in ("gross_pay","paye","nssf_employee","shif_employee","housing_levy_employee","net_pay"):
+            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"][key])))
+    return {"year": year, "months_covered": sorted({s["period_end"][:7] for s in snaps}),
+            "employee_months": len(snaps), "totals": totals,
+            "reconciliation_status": "workpaper_ready" if snaps else "no_payroll_data"}
+
+
+@router.get("/hr/payroll/my-history")
+def my_payroll_history(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    employee = db.query(HREmployee).filter_by(organization_id=membership.organization_id, user_id=user.id, status="active").first()
+    if not employee or not can_access_branch(membership, employee.branch_id):
+        return []
+    rows = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+            if r.data.get("employee_id") == employee.id]
+    return sorted(rows, key=lambda x: x["period_end"], reverse=True)
