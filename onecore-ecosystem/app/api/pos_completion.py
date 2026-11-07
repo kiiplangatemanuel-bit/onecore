@@ -380,8 +380,13 @@ def confirm_refund_execution(refund_id:int,payload:SettlementIn,membership=Depen
     refund.provider_reference=payload.provider_reference
     refund.status="recorded"
     _audit(db,user,membership.organization_id,"pos.refund.execution_confirmed","pos_refund",refund.id,payload.evidence_note.strip())
+    from app.api.accounting_pos import post_pos_source
+    accounting_link=post_pos_source(db,membership.organization_id,sale.branch_id,"return",ret.id,user.id)
     db.commit()
-    return {"refund_id":refund.id,"status":refund.status,"note":"Supervisor-confirmed physical/provider evidence recorded; no payment gateway is called by this endpoint."}
+    return {"refund_id":refund.id,"status":refund.status,
+        "accounting_status":accounting_link.status,"accounting_journal_id":accounting_link.journal_id,
+        "accounting_failure_reason":accounting_link.failure_reason,
+        "note":"Supervisor-confirmed physical/provider evidence recorded; no payment gateway is called by this endpoint."}
 
 @router.post("/devices/{device_id}/bind-shift")
 def bind_device_shift(device_id:int,shift_id:int=Query(gt=0),x_pos_device_token:str=Header(default=""),
