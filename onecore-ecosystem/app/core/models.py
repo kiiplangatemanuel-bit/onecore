@@ -357,3 +357,90 @@ class POSPayment(Base):
     provider_reference: Mapped[str] = mapped_column(String(120), default="")
     status: Mapped[str] = mapped_column(String(16), default="recorded")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SchoolClass(Base):
+    __tablename__ = "school_classes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    stream: Mapped[str] = mapped_column(String(40), default="")
+    academic_year: Mapped[int] = mapped_column()
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_class_org_year_name_stream", "organization_id", "academic_year", "name", "stream", unique=True),)
+
+
+class SchoolLearner(Base):
+    __tablename__ = "school_learners"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    class_id: Mapped[int | None] = mapped_column(ForeignKey("school_classes.id"), nullable=True, index=True)
+    admission_number: Mapped[str] = mapped_column(String(40))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    date_of_birth: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    guardian_name: Mapped[str] = mapped_column(String(180), default="")
+    guardian_phone: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(20), default="applicant")
+    admitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_learner_org_admission", "organization_id", "admission_number", unique=True),)
+
+
+class SchoolSubject(Base):
+    __tablename__ = "school_subjects"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(24))
+    name: Mapped[str] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_subject_org_code", "organization_id", "code", unique=True),)
+
+
+class SchoolAssessment(Base):
+    __tablename__ = "school_assessments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("school_classes.id"), index=True)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("school_subjects.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    academic_year: Mapped[int] = mapped_column()
+    term: Mapped[str] = mapped_column(String(24))
+    maximum_score: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    weight: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=Decimal("1"))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    published_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SchoolMark(Base):
+    __tablename__ = "school_marks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("school_assessments.id"), index=True)
+    learner_id: Mapped[int] = mapped_column(ForeignKey("school_learners.id"), index=True)
+    score: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    entered_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_school_mark_org_assessment_learner", "organization_id", "assessment_id", "learner_id", unique=True),)
+
+
+class SchoolGradeBand(Base):
+    __tablename__ = "school_grade_bands"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    scale_name: Mapped[str] = mapped_column(String(80), default="default")
+    grade: Mapped[str] = mapped_column(String(12))
+    minimum_percent: Mapped[Decimal] = mapped_column(Numeric(6, 3))
+    maximum_percent: Mapped[Decimal] = mapped_column(Numeric(6, 3))
+    points: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=Decimal("0"))
+    __table_args__ = (Index("ix_school_grade_org_scale_grade", "organization_id", "scale_name", "grade", unique=True),)
