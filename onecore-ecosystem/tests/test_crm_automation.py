@@ -5,7 +5,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from app.core.models import CRMMessageTemplate, CRMAudienceSegment, CRMCampaignSchedule, CRMCampaignRecipient
 from app.core.automation_healthcare_schemas import CRMTemplateIn, CRMSegmentIn, CRMCampaignScheduleIn
-from app.services.crm_automation import validate_segment_filters, matches_segment
+from app.services.crm_automation import validate_segment_filters, matches_segment, validate_template_content
+from app.services.crm_scheduler import _next_occurrence
 from app.services.crm_scheduler import render_message
 from app.main import app
 
@@ -70,3 +71,17 @@ def test_template_rendering_is_personalized_and_rejects_unknown_variables():
     assert render_message("Hello {{first_name}} at {{company}}",contact,"Launch")=="Hello Ada at Analytical Engines"
     with pytest.raises(ValueError):
         render_message("{{medical_record}}",contact,"Launch")
+
+
+def test_template_variables_are_allow_listed_before_save():
+    validate_template_content("Hello {{first_name}}","{{campaign_name}} for {{company}}")
+    with pytest.raises(HTTPException):
+        validate_template_content("{{account_password}}","Hello")
+
+
+def test_daily_schedule_preserves_local_wall_clock_across_dst():
+    # 09:00 New York changes from UTC-5 to UTC-4 on this DST boundary.
+    scheduled=datetime(2026,3,7,14,0,tzinfo=timezone.utc)
+    now=datetime(2026,3,7,15,0,tzinfo=timezone.utc)
+    next_run=_next_occurrence(scheduled,"daily",now,"America/New_York")
+    assert next_run==datetime(2026,3,8,13,0,tzinfo=timezone.utc)
