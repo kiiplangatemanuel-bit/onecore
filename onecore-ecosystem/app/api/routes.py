@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -1967,3 +1967,156 @@ def reconcile_accounting_bank_statement(statement_id:int,membership=Depends(acti
     db.commit();audit(db,user.id,membership.organization_id,"accounting.bank_statement.reconciled","bank_statement",statement.id)
     return {"id":statement.id,"status":statement.status,"opening_balance":str(opening),
         "closing_balance":str(closing),"reconciled_at":statement.reconciled_at.isoformat()}
+
+
+@router.post("/crm/quotes",status_code=201)
+def create_crm_quote(payload:CRMQuoteIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    if payload.valid_until<payload.issue_date: raise HTTPException(422,"Quote validity cannot end before issue date")
+    organization=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not organization or payload.currency!=organization.currency:
+        raise HTTPException(422,"Quote currency must match the organization's configured base currency")
+    _crm_branch_check(db,membership,payload.branch_id)
+    contact=db.query(CRMContact).filter_by(
+        id=payload.contact_id,organization_id=membership.organization_id).first()
+    if not contact or not can_access_branch(membership,contact.branch_id):
+        raise HTTPException(404,"Customer contact not found")
+    lead=None
+    if payload.lead_id:
+        lead=db.query(CRMLead).filter_by(
+            id=payload.lead_id,organization_id=membership.organization_id).first()
+        if not lead or not can_access_branch(membership,lead.branch_id):
+            raise HTTPException(404,"Sales lead not found")
+        if lead.contact_id and lead.contact_id!=contact.id:
+            raise HTTPException(422,"Quote contact must match the selected lead contact")
+        if payload.branch_id!=lead.branch_id:
+            raise HTTPException(422,"Quote and lead must belong to the same branch")
+    subtotal=Decimal("0.00");tax_total=Decimal("0.00");computed=[]
+    for item in payload.lines:
+        line_sub=(item.quantity*item.unit_price).quantize(Decimal("0.01"))
+        line_tax=(line_sub*item.tax_rate/Decimal("100")).quantize(Decimal("0.01"))
+        line_total=line_sub+line_tax
+        subtotal+=line_sub;tax_total+=line_tax;computed.append((item,line_sub,line_tax,line_total))
+    total=subtotal+tax_total
+    if total<=0: raise HTTPException(422,"Quote total must be greater than zero")
+    row=CRMQuote(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        contact_id=contact.id,lead_id=lead.id if lead else None,quote_number=payload.quote_number.strip().upper(),
+        currency=payload.currency,issue_date=datetime.combine(payload.issue_date,time.min,tzinfo=timezone.utc),
+        valid_until=datetime.combine(payload.valid_until,time.max,tzinfo=timezone.utc),
+        subtotal=subtotal,tax_total=tax_total,total=total,status="draft",created_by=user.id)
+    db.add(row);db.flush()
+    for item,line_sub,line_tax,line_total in computed:
+        db.add(CRMQuoteLine(organization_id=membership.organization_id,quote_id=row.id,
+            description=item.description.strip(),quantity=item.quantity,unit_price=item.unit_price,
+            tax_rate=item.tax_rate,subtotal=line_sub,tax_amount=line_tax,total=line_total))
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Quote number already exists in this organization")
+    db.refresh(row);audit(db,user.id,membership.organization_id,"crm.quote.created","crm_quote",row.id)
+    return {"id":row.id,"quote_number":row.quote_number,"subtotal":str(row.subtotal),
+        "tax_total":str(row.tax_total),"total":str(row.total),"status":row.status}
+
+
+@router.get("/crm/quotes")
+def list_crm_quotes(status:str|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(CRMQuote).filter_by(organization_id=membership.organization_id)
+    if status:
+        if status not in ("draft","issued","accepted","rejected","expired"): raise HTTPException(422,"Invalid quote status")
+        q=q.filter(CRMQuote.status==status)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(CRMQuote.branch_id.in_(allowed))
+    rows=q.order_by(CRMQuote.id.desc()).limit(200).all()
+    return [{"id":x.id,"quote_number":x.quote_number,"contact_id":x.contact_id,"lead_id":x.lead_id,
+        "currency":x.currency,"total":str(x.total),"valid_until":x.valid_until.date().isoformat(),
+        "status":x.status,"branch_id":x.branch_id} for x in rows]
+
+
+@router.get("/crm/quotes/{quote_id}")
+def get_crm_quote(quote_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    row=db.query(CRMQuote).filter_by(id=quote_id,organization_id=membership.organization_id).first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Quote not found")
+    lines=db.query(CRMQuoteLine).filter_by(
+        quote_id=row.id,organization_id=membership.organization_id).order_by(CRMQuoteLine.id).all()
+    return {"id":row.id,"quote_number":row.quote_number,"contact_id":row.contact_id,"lead_id":row.lead_id,
+        "currency":row.currency,"issue_date":row.issue_date.date().isoformat(),
+        "valid_until":row.valid_until.date().isoformat(),"subtotal":str(row.subtotal),
+        "tax_total":str(row.tax_total),"total":str(row.total),"status":row.status,
+        "lines":[{"id":x.id,"description":x.description,"quantity":str(x.quantity),
+            "unit_price":str(x.unit_price),"tax_rate":str(x.tax_rate),
+            "subtotal":str(x.subtotal),"tax_amount":str(x.tax_amount),"total":str(x.total)} for x in lines]}
+
+
+@router.post("/crm/quotes/{quote_id}/issue")
+def issue_crm_quote(quote_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"update")
+    row=db.query(CRMQuote).filter_by(
+        id=quote_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Quote not found")
+    if row.status!="draft": raise HTTPException(409,"Only draft quotes can be issued")
+    if row.valid_until.date()<datetime.now(timezone.utc).date():
+        row.status="expired";db.commit()
+        raise HTTPException(409,"Quote validity has expired")
+    row.status="issued";row.issued_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"crm.quote.issued","crm_quote",row.id)
+    return {"id":row.id,"status":row.status,"issued_at":row.issued_at.isoformat()}
+
+
+@router.post("/crm/quotes/{quote_id}/accept")
+def accept_crm_quote(quote_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"update")
+    row=db.query(CRMQuote).filter_by(
+        id=quote_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Quote not found")
+    if row.status!="issued": raise HTTPException(409,"Only issued quotes can be accepted")
+    if row.valid_until.date()<datetime.now(timezone.utc).date():
+        row.status="expired";db.commit()
+        raise HTTPException(409,"Quote validity has expired")
+    row.status="accepted";row.accepted_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"crm.quote.accepted","crm_quote",row.id)
+    return {"id":row.id,"status":row.status,"accepted_at":row.accepted_at.isoformat()}
+
+
+@router.post("/crm/quotes/{quote_id}/reject")
+def reject_crm_quote(quote_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"update")
+    row=db.query(CRMQuote).filter_by(
+        id=quote_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Quote not found")
+    if row.status!="issued": raise HTTPException(409,"Only issued quotes can be rejected")
+    row.status="rejected";row.rejected_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"crm.quote.rejected","crm_quote",row.id)
+    return {"id":row.id,"status":row.status}
+
+
+@router.get("/crm/forecast")
+def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(CRMLead).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return {"currency":None,"pipeline_total":"0","weighted_forecast":"0","stages":[]}
+        q=q.filter(CRMLead.branch_id.in_(allowed))
+    rows=q.all()
+    probabilities={"new":Decimal("0.10"),"qualified":Decimal("0.25"),
+        "proposal":Decimal("0.50"),"negotiation":Decimal("0.75"),"won":Decimal("1.00"),"lost":Decimal("0")}
+    currencies={}
+    for row in rows:
+        bucket=currencies.setdefault(row.currency,{"pipeline":Decimal("0"),"weighted":Decimal("0"),"stages":{}})
+        value=Decimal(row.estimated_value);weighted=value*probabilities[row.stage]
+        bucket["pipeline"]+=value;bucket["weighted"]+=weighted
+        stage=bucket["stages"].setdefault(row.stage,{"count":0,"value":Decimal("0"),"weighted":Decimal("0")})
+        stage["count"]+=1;stage["value"]+=value;stage["weighted"]+=weighted
+    return {"forecasts":[{"currency":currency,"pipeline_total":str(data["pipeline"]),
+        "weighted_forecast":str(data["weighted"]),
+        "stages":[{"stage":stage,"count":v["count"],"value":str(v["value"]),
+            "weighted_value":str(v["weighted"])} for stage,v in sorted(data["stages"].items())]}
+        for currency,data in sorted(currencies.items())],
+        "method":"Fixed stage probability assumptions; not a statistical prediction"}
