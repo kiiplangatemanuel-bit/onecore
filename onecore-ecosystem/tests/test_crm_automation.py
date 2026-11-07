@@ -20,6 +20,8 @@ def test_crm_automation_models_and_routes_are_registered():
     assert "/api/v1/crm/templates" in paths
     assert "/api/v1/crm/templates/{template_id}" in paths
     assert "/api/v1/crm/segments" in paths
+    assert "/api/v1/crm/segments/{segment_id}" in paths
+    assert "/api/v1/crm/segments/{segment_id}/deactivate" in paths
     assert "/api/v1/crm/segments/{segment_id}/preview" in paths
     assert "/api/v1/crm/campaigns/{campaign_id}/schedule" in paths
     assert "/api/v1/crm/schedules" in paths
