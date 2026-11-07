@@ -5548,6 +5548,22 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
 
 
 # Pharmacy prescription, dispensing, patient safety and traceability operations.
+def _require_pharmacy_role(membership):
+    allowed={"pharmacist","pharmacy_manager","hospital_admin","clinic_admin","org_admin","owner","root_superadmin"}
+    if membership.role not in allowed:
+        raise HTTPException(403,"A pharmacist or authorized pharmacy supervisor role is required")
+
+
+def _require_lab_role(membership, validation=False):
+    allowed={"lab_technician","lab_scientist","medical_laboratory_scientist","pathologist",
+             "lab_manager","lab_supervisor","doctor","physician","hospital_admin","clinic_admin","org_admin","owner"}
+    if validation:
+        allowed={"pathologist","lab_manager","lab_supervisor","doctor","physician",
+                 "hospital_admin","clinic_admin","org_admin","owner"}
+    if membership.role not in allowed:
+        raise HTTPException(403,"An authorized laboratory professional role is required")
+
+
 def _pharm_lab_record(db, membership, user, record_type, key, payload, parent_id=None,
                       branch_id=None, status="pending"):
     if key:
@@ -5655,6 +5671,8 @@ def create_pharmacy_prescription(payload: PharmacyPrescriptionIn,
         raise HTTPException(404, "Signed encounter not found")
     if encounter.provider_user_id != user.id:
         raise HTTPException(403, "Only the encounter's assigned prescriber may issue a prescription")
+    if membership.role not in {"doctor","physician","medical_officer","clinician","hospital_admin","clinic_admin","org_admin","owner"}:
+        raise HTTPException(403,"An authorized prescriber role is required")
     if payload.valid_until < date.today():
         raise HTTPException(422, "Prescription validity date cannot be in the past")
     if len({x.medicine_id for x in payload.lines}) != len(payload.lines):
@@ -5759,6 +5777,7 @@ def get_pharmacy_prescription(prescription_id:int,membership=Depends(active_memb
 def dispense_pharmacy_prescription(prescription_id:int,payload:PharmacyDispenseIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_pharmacy_role(membership)
     rx=_prescription_or_404(db,membership,prescription_id,lock=True)
     if rx.status not in {"active","partially_dispensed"} or rx.valid_until<date.today():
         raise HTTPException(409,"Prescription is not valid for dispensing")
@@ -5768,8 +5787,8 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:PharmacyDispenseI
     if not line: raise HTTPException(404,"Prescription line not found")
     verifier=db.query(Membership).filter_by(
         organization_id=membership.organization_id,user_id=payload.verifier_id,is_active=True).first()
-    if not verifier or payload.verifier_id==user.id:
-        raise HTTPException(403,"A second active organization member must verify dispensing")
+    if not verifier or payload.verifier_id==user.id or verifier.role not in {"pharmacist","pharmacy_manager","hospital_admin","clinic_admin","org_admin","owner"}:
+        raise HTTPException(403,"A second pharmacist or pharmacy supervisor must verify dispensing")
     med=db.query(PharmacyMedicine).filter_by(
         id=line.medicine_id,organization_id=membership.organization_id,is_active=True).first()
     if not med: raise HTTPException(404,"Medicine not found")
@@ -6203,8 +6222,8 @@ def reverse_pharmacy_dispense(dispense_id:int,payload:PharmacyDispenseReversalIn
     require_permission(membership,"manage")
     verifier=db.query(Membership).filter_by(organization_id=membership.organization_id,
         user_id=payload.verifier_id,is_active=True).first()
-    if not verifier or payload.verifier_id==user.id:
-        raise HTTPException(403,"A second active organization member must authorize reversal")
+    if not verifier or payload.verifier_id==user.id or verifier.role not in {"pharmacist","pharmacy_manager","hospital_admin","clinic_admin","org_admin","owner"}:
+        raise HTTPException(403,"A second pharmacist or pharmacy supervisor must authorize reversal")
     disp=db.query(PharmacyDispense).filter_by(id=dispense_id,
         organization_id=membership.organization_id,status="dispensed").with_for_update().first()
     if not disp:raise HTTPException(404,"Active dispense not found")
@@ -6258,8 +6277,8 @@ def adjust_pharmacy_batch(batch_id:int,payload:PharmacyStockAdjustmentIn,
     require_permission(membership,"manage")
     verifier=db.query(Membership).filter_by(organization_id=membership.organization_id,
         user_id=payload.verifier_id,is_active=True).first()
-    if not verifier or payload.verifier_id==user.id:
-        raise HTTPException(403,"A second member must verify stock adjustment")
+    if not verifier or payload.verifier_id==user.id or verifier.role not in {"pharmacist","pharmacy_manager","hospital_admin","clinic_admin","org_admin","owner"}:
+        raise HTTPException(403,"A second pharmacist or pharmacy supervisor must verify stock adjustment")
     batch=_pharmacy_batch_or_404(db,membership,batch_id,lock=True)
     if batch.status!="active" or batch.expiry_date<date.today():
         raise HTTPException(409,"Only active unexpired batches may be adjusted")
