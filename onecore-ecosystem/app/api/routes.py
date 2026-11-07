@@ -1,13 +1,14 @@
 import json, re
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Organization, Membership, Record, AuditEvent
-from app.core.schemas import LoginIn, OrganizationIn, RecordIn
-from app.core.security import current_user, verify_password, create_access_token, require_platform_admin, hash_password
+from app.core.schemas import OrganizationIn, RecordIn
+from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
+from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.integrations.registry import public_provider_status
 
 router = APIRouter(prefix="/api/v1")
@@ -17,6 +18,10 @@ def audit(db, user_id, org_id, action, resource_type="", resource_id="", detail=
     db.add(AuditEvent(actor_user_id=user_id, organization_id=org_id, action=action,
                       resource_type=resource_type, resource_id=str(resource_id), detail=detail))
     db.commit()
+
+def validate_module_key(module_key: str):
+    if not re.fullmatch(r"[a-z0-9-]{2,100}", module_key):
+        raise HTTPException(400, "Invalid module key")
 
 @router.post("/auth/login")
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -55,25 +60,74 @@ def integrations(user: User = Depends(current_user)):
     return public_provider_status()
 
 @router.get("/records/{module_key}")
-def list_records(module_key: str, membership=Depends(active_membership), db: Session = Depends(get_db), limit: int = 100):
-    if not re.match(r"^[a-z0-9-]{2,100}$", module_key):
-        raise HTTPException(400, "Invalid module key")
-    rows = db.query(Record).filter_by(organization_id=membership.organization_id, module_key=module_key).order_by(Record.id.desc()).limit(min(limit, 500)).all()
-    return [{"id": r.id, "module_key": r.module_key, "record_type": r.record_type, "data": r.data, "branch_id": r.branch_id} for r in rows]
+def list_records(module_key: str, membership=Depends(active_membership), db: Session = Depends(get_db),
+                 limit: int = Query(default=100, ge=1, le=500)):
+    validate_module_key(module_key)
+    require_permission(membership, "read")
+    query = db.query(Record).filter_by(organization_id=membership.organization_id, module_key=module_key)
+    allowed_branches = branch_scope_ids(membership)
+    if allowed_branches is not None:
+        if not allowed_branches:
+            return []
+        query = query.filter(Record.branch_id.in_(allowed_branches))
+    rows = query.order_by(Record.id.desc()).limit(limit).all()
+    return [{"id": r.id, "module_key": r.module_key, "record_type": r.record_type, "data": r.data,
+             "branch_id": r.branch_id, "created_at": r.created_at.isoformat(),
+             "updated_at": r.updated_at.isoformat()} for r in rows]
 
 @router.post("/records/{module_key}", status_code=201)
-def create_record(module_key: str, payload: RecordIn, membership=Depends(active_membership), user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if not re.match(r"^[a-z0-9-]{2,100}$", module_key):
-        raise HTTPException(400, "Invalid module key")
+def create_record(module_key: str, payload: RecordIn, membership=Depends(active_membership),
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    validate_module_key(module_key)
+    require_permission(membership, "create")
+    if not can_access_branch(membership, payload.branch_id):
+        raise HTTPException(403, "Your membership is not authorized for this branch")
     row = Record(organization_id=membership.organization_id, module_key=module_key, record_type=payload.record_type,
                  data=payload.data, branch_id=payload.branch_id, created_by=user.id)
     db.add(row); db.commit(); db.refresh(row)
     audit(db, user.id, membership.organization_id, "record.created", module_key, row.id)
-    return {"id": row.id, "module_key": row.module_key, "record_type": row.record_type, "data": row.data}
+    return {"id": row.id, "module_key": row.module_key, "record_type": row.record_type,
+            "data": row.data, "branch_id": row.branch_id}
+
+@router.put("/records/{module_key}/{record_id}")
+def update_record(module_key: str, record_id: int, payload: RecordIn,
+                  membership=Depends(active_membership), user: User = Depends(current_user),
+                  db: Session = Depends(get_db)):
+    validate_module_key(module_key)
+    require_permission(membership, "update")
+    row = db.query(Record).filter_by(id=record_id, organization_id=membership.organization_id,
+                                     module_key=module_key).first()
+    if not row:
+        raise HTTPException(404, "Record not found")
+    if not can_access_branch(membership, row.branch_id) or not can_access_branch(membership, payload.branch_id):
+        raise HTTPException(404, "Record not found")
+    row.record_type = payload.record_type
+    row.data = payload.data
+    row.branch_id = payload.branch_id
+    db.commit(); db.refresh(row)
+    audit(db, user.id, membership.organization_id, "record.updated", module_key, row.id)
+    return {"id": row.id, "module_key": row.module_key, "record_type": row.record_type,
+            "data": row.data, "branch_id": row.branch_id}
+
+@router.delete("/records/{module_key}/{record_id}", status_code=204)
+def delete_record(module_key: str, record_id: int, membership=Depends(active_membership),
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    validate_module_key(module_key)
+    require_permission(membership, "delete")
+    row = db.query(Record).filter_by(id=record_id, organization_id=membership.organization_id,
+                                     module_key=module_key).first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Record not found")
+    resource_id = row.id
+    db.delete(row); db.commit()
+    audit(db, user.id, membership.organization_id, "record.deleted", module_key, resource_id)
 
 @router.get("/operations/audit")
-def audit_log(membership=Depends(active_membership), db: Session = Depends(get_db), limit: int = 100):
-    rows = db.query(AuditEvent).filter_by(organization_id=membership.organization_id).order_by(AuditEvent.id.desc()).limit(min(limit, 500)).all()
+def audit_log(membership=Depends(active_membership), db: Session = Depends(get_db),
+              limit: int = Query(default=100, ge=1, le=500)):
+    require_permission(membership, "read")
+    rows = db.query(AuditEvent).filter_by(organization_id=membership.organization_id).order_by(
+        AuditEvent.id.desc()).limit(limit).all()
     return [{"id": x.id, "actor_user_id": x.actor_user_id, "action": x.action, "resource_type": x.resource_type,
              "resource_id": x.resource_id, "detail": x.detail, "created_at": x.created_at.isoformat()} for x in rows]
 
