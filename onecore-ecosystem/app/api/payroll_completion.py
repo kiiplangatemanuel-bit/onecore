@@ -191,7 +191,7 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
-    paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
+    paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief))
     other_deductions = money(extra.get("other_deductions", 0))
     net = money(gross - nssf - shif - ahl - paye - pension - prmf - other_deductions)
     if net < 0:
@@ -375,9 +375,8 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         if not isinstance(extras, dict):
             raise HTTPException(422, "Each employee payroll input must be an object")
         extras = {**extras, "as_at_date": run.period_end.isoformat()}
-        if "resident_for_tax" in extras and not isinstance(extras["resident_for_tax"], bool):
-            raise HTTPException(422, "resident_for_tax must be a verified boolean employee tax status")
-        extras.setdefault("resident_for_tax", True)
+        if "resident_for_tax" not in extras or not isinstance(extras["resident_for_tax"], bool):
+            raise HTTPException(422, f"Employee {line.employee_number} requires an explicitly verified resident_for_tax boolean before PAYE calculation")
         period_days = (run.period_end - run.period_start).days + 1
         employment_start = max(run.period_start, employee.start_date)
         employment_end = min(run.period_end, employee.end_date or run.period_end)
