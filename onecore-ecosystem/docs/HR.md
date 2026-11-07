@@ -119,7 +119,9 @@ payment or statutory filing.
 
 ### Payroll calculation, approval and accounting
 
-- `POST /api/v1/hr/payroll/runs/{id}/calculate-kenya` calculates from approved payroll lines/items and supplied per-employee pay inputs. Per-employee inputs support employment proration, overtime hours/rate/multiplier, shift allowance, cash allowances, taxable benefits, meal benefits, employee pension, mortgage interest, PRMF and insurance premium.
+- `POST /api/v1/hr/payroll/runs/{id}/calculate-kenya` calculates from approved payroll lines/items and supplied per-employee pay inputs. It accepts complete calendar-month payroll periods because the configured PAYE bands, NSSF ceilings and SHIF minimum are monthly.
+- Per-employee inputs support employment proration, overtime hours/rate/multiplier, shift allowance, cash allowances, taxable benefits, meal benefits, employee pension, mortgage interest, PRMF and insurance premium.
+- Statutory contribution bases are separate from total cash gross: NSSF pensionable earnings, SHIF gross salary/wage and Housing Levy gross monthly salary default to prorated base pay plus the explicitly supplied `regular_cash_allowances`. One-off earnings, overtime and bonuses are excluded from these default bases; employers can supply the three explicit contribution-base overrides when the employee's approved fixed-pay structure requires it. `regular_cash_allowances` is a separate pay component included in cash gross, not merely a tax-only amount.
 - Every employee calculation stores an immutable SHA-256 snapshot with the full statutory rule version and component breakdown. Recalculation of the same run is rejected; create a new run for corrected payroll.
 - `GET /api/v1/hr/payroll/runs/{id}/snapshots` provides the review view.
 - `POST /api/v1/hr/payroll/runs/{id}/approve-calculation` enforces maker-checker separation and validates snapshot integrity/count.
