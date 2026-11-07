@@ -241,6 +241,41 @@ def create_bed(room_id: int, payload: dict, m=Depends(active_membership), u: Use
 
 
 
+
+@router.put("/wards/{ward_id}")
+def update_ward(ward_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    row=_resource(db,m,ward_id,"ward",lock=True);_need(db,m,u,"hospital.manage",row.branch_id)
+    data=_payload(row)
+    if "name" in payload: data["name"]=_required_text(payload,"name")
+    if "specialty" in payload: data["specialty"]=str(payload["specialty"])[:80]
+    row.encrypted_payload=encrypt(data);row.updated_by=u.id;row.updated_at=NOW()
+    db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="healthcare.ward.updated",resource_type="healthcare_resource",resource_id=str(row.id)))
+    db.commit();return _view(row)
+
+
+@router.put("/rooms/{room_id}")
+def update_room(room_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    row=_resource(db,m,room_id,"room",lock=True);_need(db,m,u,"hospital.manage",row.branch_id)
+    data=_payload(row)
+    if "name" in payload: data["name"]=_required_text(payload,"name")
+    if "room_type" in payload: data["room_type"]=str(payload["room_type"])[:40]
+    if "floor" in payload: data["floor"]=str(payload["floor"])[:30]
+    row.encrypted_payload=encrypt(data);row.updated_by=u.id;row.updated_at=NOW()
+    db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="healthcare.room.updated",resource_type="healthcare_resource",resource_id=str(row.id)))
+    db.commit();return _view(row)
+
+
+@router.post("/beds/{bed_id}/status")
+def update_bed_status(bed_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    bed=_resource(db,m,bed_id,"bed",lock=True);_need(db,m,u,"hospital.manage",bed.branch_id)
+    status=payload.get("status")
+    if status not in {"available","blocked","maintenance"}: raise HTTPException(422,"Bed status must be available, blocked or maintenance")
+    if bed.status=="occupied": raise HTTPException(409,"Occupied beds cannot be blocked or set available")
+    bed.status=status;bed.updated_by=u.id;bed.updated_at=NOW()
+    db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="healthcare.bed.status_changed",resource_type="healthcare_resource",resource_id=str(bed.id),detail=f"status:{status};reason:{str(payload.get('reason',''))[:200]}"))
+    db.commit();return _view(bed)
+
+
 @router.get("/wards")
 def list_wards(branch_id: str, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     _need(db,m,u,"hospital.manage",branch_id)
