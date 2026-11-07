@@ -15,9 +15,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db, SessionLocal
 from app.core.models import (
     AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournalLine,
+    AccountingInvoiceLine, AccountingCreditNote, AccountingCreditNoteLine, AccountingProcurementLink,
     AccountingBankStatementLine, ProcurementSupplier, ProcurementPurchaseOrder,
     ProcurementPurchaseOrderLine, ProcurementApprovalRule, ProcurementApprovalAction,
-    ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, AccountingCreditNote,
+    ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine,
+    ProcurementSupplierReturn, ProcurementSupplierReturnLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine,
+    ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine,
     ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, Record, Membership, User,
 )
 from app.core.procurement_workflow_models import (
@@ -114,6 +117,14 @@ class DiscrepancyIn(BaseModel):
 
 class DiscrepancyResolveIn(BaseModel):
     resolution_note: str = Field(min_length=5, max_length=500)
+
+
+class SupplierReturnCreditNoteIn(BaseModel):
+    accounting_invoice_id: int = Field(gt=0)
+    credit_note_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
+    issue_date: date
+    reason: str = Field(min_length=5, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
 
 
 def _visible_invoice(db, membership, invoice_id, lock=False):
@@ -985,6 +996,164 @@ def reconcile_supplier_statement(statement_id: int, membership=Depends(active_me
           "supplier_statement", row.id)
     return {"id": row.id, "status": row.status, "matched_lines": len(lines),
             "closing_balance": str(calculated)}
+
+
+
+
+@router.post("/supplier-returns/{return_id}/post-credit-note", status_code=201)
+def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCreditNoteIn,
+                                     membership=Depends(active_membership), user: User = Depends(current_user),
+                                     db: Session = Depends(get_db)):
+    """Convert returned accepted goods into a posted AP credit note, tied to the source matched invoice."""
+    require_permission(membership, "manage")
+    duplicate = db.query(AccountingCreditNote).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if duplicate:
+        if duplicate.credit_note_number != payload.credit_note_number.strip().upper():
+            raise HTTPException(409, "Credit-note idempotency key was used for different data")
+        return {"id": duplicate.id, "status": "already_posted" if duplicate.status == "posted" else duplicate.status,
+                "journal_id": duplicate.journal_id, "total": str(duplicate.total)}
+    ret = db.query(ProcurementSupplierReturn).filter_by(
+        id=return_id, organization_id=membership.organization_id, status="posted"
+    ).with_for_update().first()
+    if not ret:
+        raise HTTPException(404, "Posted supplier return not found")
+    receipt = db.query(ProcurementGoodsReceipt).filter_by(
+        id=ret.goods_receipt_id, organization_id=membership.organization_id, status="inspected"
+    ).first()
+    if not receipt:
+        raise HTTPException(409, "Supplier return does not reference an inspected goods receipt")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=receipt.purchase_order_id, organization_id=membership.organization_id, supplier_id=ret.supplier_id
+    ).first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Purchase order not found")
+    link = db.query(AccountingProcurementLink).filter_by(
+        organization_id=membership.organization_id,
+    ).join(ProcurementSupplierInvoice,
+           ProcurementSupplierInvoice.id == AccountingProcurementLink.procurement_invoice_id).filter(
+        ProcurementSupplierInvoice.purchase_order_id == order.id,
+        ProcurementSupplierInvoice.supplier_id == ret.supplier_id,
+    ).first()
+    if not link:
+        raise HTTPException(409, "No matched supplier invoice has been integrated into AP for this purchase order")
+    invoice = db.query(AccountingInvoice).filter_by(
+        id=link.accounting_invoice_id, organization_id=membership.organization_id,
+        invoice_type="payable", supplier_id=ret.supplier_id,
+    ).with_for_update().first()
+    if not invoice or invoice.status not in {"posted", "partially_paid", "paid"}:
+        raise HTTPException(409, "Source AP invoice must be posted before supplier credit-note posting")
+    if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
+        raise HTTPException(404, "Supplier invoice not found")
+    _accounting_assert_period_open(db, membership.organization_id, payload.issue_date)
+    return_lines = db.query(ProcurementSupplierReturnLine, ProcurementGoodsReceiptLine).join(
+        ProcurementGoodsReceiptLine,
+        ProcurementGoodsReceiptLine.id == ProcurementSupplierReturnLine.receipt_line_id
+    ).filter(
+        ProcurementSupplierReturnLine.organization_id == membership.organization_id,
+        ProcurementSupplierReturnLine.return_id == ret.id,
+    ).all()
+    if not return_lines:
+        raise HTTPException(409, "Supplier return has no return lines")
+    prepared = []
+    total_sub = Decimal("0.00")
+    total_tax = Decimal("0.00")
+    for return_line, receipt_line in return_lines:
+        po_line_id = receipt_line.purchase_order_line_id
+        ap_lines = db.query(AccountingInvoiceLine).filter(
+            AccountingInvoiceLine.organization_id == membership.organization_id,
+            AccountingInvoiceLine.invoice_id == invoice.id,
+            AccountingInvoiceLine.description.contains(f"PO line {po_line_id}"),
+        ).order_by(AccountingInvoiceLine.id).with_for_update().all()
+        remaining_return = Decimal(return_line.quantity)
+        for ap_line in ap_lines:
+            if remaining_return <= 0:
+                break
+            prior_credited = db.query(func.coalesce(func.sum(AccountingCreditNoteLine.quantity), 0)).join(
+                AccountingCreditNote, AccountingCreditNote.id == AccountingCreditNoteLine.credit_note_id
+            ).filter(
+                AccountingCreditNote.organization_id == membership.organization_id,
+                AccountingCreditNote.invoice_id == invoice.id,
+                AccountingCreditNote.status == "posted",
+                AccountingCreditNoteLine.invoice_line_id == ap_line.id,
+            ).scalar() or Decimal("0")
+            available = Decimal(ap_line.quantity) - Decimal(prior_credited)
+            take = min(remaining_return, available)
+            if take <= 0:
+                continue
+            if take == available:
+                sub = Decimal(ap_line.subtotal) - sum(
+                    (Decimal(x.subtotal) for x in db.query(AccountingCreditNoteLine).join(
+                        AccountingCreditNote, AccountingCreditNote.id == AccountingCreditNoteLine.credit_note_id
+                    ).filter(AccountingCreditNote.invoice_id == invoice.id,
+                             AccountingCreditNote.status == "posted",
+                             AccountingCreditNoteLine.invoice_line_id == ap_line.id).all()), Decimal("0.00"))
+                tax = Decimal(ap_line.tax_amount) - sum(
+                    (Decimal(x.tax_amount) for x in db.query(AccountingCreditNoteLine).join(
+                        AccountingCreditNote, AccountingCreditNote.id == AccountingCreditNoteLine.credit_note_id
+                    ).filter(AccountingCreditNote.invoice_id == invoice.id,
+                             AccountingCreditNote.status == "posted",
+                             AccountingCreditNoteLine.invoice_line_id == ap_line.id).all()), Decimal("0.00"))
+            else:
+                sub = (Decimal(ap_line.subtotal) * take / Decimal(ap_line.quantity)).quantize(CENT)
+                tax = (Decimal(ap_line.tax_amount) * take / Decimal(ap_line.quantity)).quantize(CENT)
+            prepared.append((ap_line, take, sub, tax))
+            total_sub += sub
+            total_tax += tax
+            remaining_return -= take
+        if remaining_return > 0:
+            raise HTTPException(409, f"Returned quantity for PO line {po_line_id} exceeds invoiced quantity not yet credited")
+    total = total_sub + total_tax
+    if total <= 0:
+        raise HTTPException(409, "Supplier return has no remaining invoice value to credit")
+    note = AccountingCreditNote(
+        organization_id=membership.organization_id, invoice_id=invoice.id, branch_id=invoice.branch_id,
+        credit_note_number=payload.credit_note_number.strip().upper(),
+        issue_date=datetime.combine(payload.issue_date, time.min, tzinfo=timezone.utc),
+        reason=payload.reason.strip(), currency=invoice.currency, subtotal=total_sub, tax_total=total_tax,
+        total=total, status="draft", idempotency_key=payload.idempotency_key,
+        created_by=user.id,
+    )
+    db.add(note)
+    db.flush()
+    journal_lines = [{"account_id": invoice.control_account_id,
+                      "description": "Accounts payable reduction " + note.credit_note_number,
+                      "debit": total, "credit": Decimal("0.00")}]
+    for ap_line, quantity, subtotal, tax in prepared:
+        db.add(AccountingCreditNoteLine(
+            organization_id=membership.organization_id, credit_note_id=note.id,
+            invoice_line_id=ap_line.id, quantity=quantity, subtotal=subtotal,
+            tax_amount=tax, total=subtotal+tax,
+        ))
+        journal_lines.append({"account_id": ap_line.account_id,
+                              "description": "Purchase return credit " + note.credit_note_number,
+                              "debit": Decimal("0.00"), "credit": subtotal})
+        if tax:
+            if not ap_line.tax_account_id:
+                raise HTTPException(409, "Source AP invoice line has tax but no input-tax account mapping")
+            journal_lines.append({"account_id": ap_line.tax_account_id,
+                                  "description": "Input tax reversal " + note.credit_note_number,
+                                  "debit": Decimal("0.00"), "credit": tax})
+    journal = _accounting_make_journal(
+        db, membership, user, payload.issue_date, note.credit_note_number,
+        "Supplier credit note " + note.credit_note_number, journal_lines, invoice.branch_id,
+    )
+    note.status = "posted"
+    note.journal_id = journal.id
+    note.posted_by = user.id
+    note.posted_at = datetime.now(timezone.utc)
+    invoice.total = Decimal(invoice.total) - total
+    invoice.status = "paid" if Decimal(invoice.amount_paid) >= Decimal(invoice.total) else (
+        "partially_paid" if Decimal(invoice.amount_paid) > 0 else "posted"
+    )
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.supplier_return.credit_note_posted",
+          "accounting_credit_note", note.id, f"return:{ret.id};total:{total}")
+    return {"id": note.id, "credit_note_number": note.credit_note_number, "status": note.status,
+            "supplier_return_id": ret.id, "accounting_invoice_id": invoice.id,
+            "subtotal": str(note.subtotal), "tax_total": str(note.tax_total),
+            "total": str(note.total), "journal_id": journal.id}
 
 
 @router.post("/supplier-invoices/{supplier_invoice_id}/discrepancies", status_code=201)
