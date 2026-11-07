@@ -292,11 +292,27 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
     elif branch_scope_ids(membership) == []:
         raise HTTPException(403, "No branch access is assigned")
 
+    if payload.warehouse_id:
+        warehouse = db.query(InventoryWarehouse).filter_by(id=payload.warehouse_id,
+            organization_id=membership.organization_id,is_active=True).first()
+        if not warehouse or not can_access_branch(membership,warehouse.branch_id):
+            raise HTTPException(404,"Warehouse not found")
+        if payload.branch_id and payload.branch_id != warehouse.branch_id:
+            raise HTTPException(422,"Warehouse does not belong to the selected branch")
+        payload.branch_id = warehouse.branch_id
+    elif payload.branch_id:
+        warehouse_rows = db.query(InventoryWarehouse).filter_by(
+            organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True).all()
+        if len(warehouse_rows) == 1:
+            payload.warehouse_id = warehouse_rows[0].id
+        elif len(warehouse_rows) > 1:
+            raise HTTPException(422,"Select a warehouse when the branch has multiple warehouses")
+
     duplicate = db.query(InventoryStockMovement).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
     if duplicate:
-        if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id
+        if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id or duplicate.warehouse_id != payload.warehouse_id
                 or duplicate.quantity_delta != payload.quantity_delta
                 or duplicate.movement_type != payload.movement_type or duplicate.reference != payload.reference):
             raise HTTPException(409, "Idempotency key was already used for a different movement")
@@ -308,11 +324,18 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
     ).with_for_update().first()
     if not product:
         raise HTTPException(404, "Product not found")
-    current = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+    balance_query = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
         InventoryStockMovement.organization_id == membership.organization_id,
         InventoryStockMovement.product_id == product.id,
-        InventoryStockMovement.branch_id == payload.branch_id
-    ).scalar()
+        InventoryStockMovement.branch_id == payload.branch_id)
+    if payload.warehouse_id:
+        warehouse_count = db.query(InventoryWarehouse).filter_by(
+            organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True).count()
+        if warehouse_count == 1:
+            balance_query = balance_query.filter((InventoryStockMovement.warehouse_id == payload.warehouse_id) | (InventoryStockMovement.warehouse_id.is_(None)))
+        else:
+            balance_query = balance_query.filter(InventoryStockMovement.warehouse_id == payload.warehouse_id)
+    current = balance_query.scalar()
     new_balance = resulting_balance(Decimal(str(current or 0)), payload.quantity_delta)
     if payload.quantity_delta < 0 and payload.branch_id:
         reserved_rows = db.query(InventoryReservation).join(InventoryWarehouse,
@@ -321,6 +344,8 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
                 InventoryReservation.product_id == product.id,
                 InventoryWarehouse.branch_id == payload.branch_id,
                 InventoryReservation.status == "active").all()
+        if payload.warehouse_id:
+            reserved_rows = [r for r in reserved_rows if r.warehouse_id == payload.warehouse_id]
         reserved = Decimal("0")
         now_utc = datetime.now(timezone.utc)
         for reservation in reserved_rows:
@@ -331,7 +356,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
             raise HTTPException(409, "Movement would consume stock reserved for sales or POS orders")
     row = InventoryStockMovement(
         organization_id=membership.organization_id, product_id=product.id,
-        branch_id=payload.branch_id, warehouse_id=None, quantity_delta=payload.quantity_delta,
+        branch_id=payload.branch_id, warehouse_id=payload.warehouse_id, quantity_delta=payload.quantity_delta,
         movement_type=payload.movement_type, reference=payload.reference,
         idempotency_key=payload.idempotency_key, created_by=user.id
     )
@@ -343,7 +368,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
         duplicate = db.query(InventoryStockMovement).filter_by(
             organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
         ).first()
-        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type and duplicate.reference == payload.reference:
+        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.warehouse_id == payload.warehouse_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type and duplicate.reference == payload.reference:
             return {"id": duplicate.id, "status": "already_applied",
                     "quantity_delta": str(duplicate.quantity_delta)}
         raise HTTPException(409, "Stock movement conflicts with an existing request")
