@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OneCore Inventory</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#172438;background:#f4f7fb}body{margin:0}header,main,footer{max-width:1050px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center;background:#10243d;color:white;max-width:none}header strong{max-width:1050px;margin:auto}main{display:grid;gap:18px}.panel{background:white;border:1px solid #dbe3ed;border-radius:12px;padding:18px}form{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}label{display:grid;gap:5px;font-weight:600}input,select,button{font:inherit;padding:10px;border:1px solid #aebdce;border-radius:7px}button{background:#155a9c;color:white;border:0;cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #f0b429;outline-offset:2px}.muted{color:#5a6878}#status{min-height:1.5em}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #e2e8f0}footer{text-align:center;color:#5a6878}@media(max-width:600px){header{display:block}table{font-size:14px}}
+</style>
+</head>
+<body>
+<header><strong>ONECORE TECHNOLOGIES LTD · Inventory</strong><span>Tenant-scoped stock control</span></header>
+<main>
+<section class="panel" aria-labelledby="login-title"><h1 id="login-title">Sign in</h1><p class="muted">Use your OneCore account and organization ID. The access token is kept in page memory only.</p>
+<form id="login"><label>Email<input name="username" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><label>Organization ID<input name="organization" inputmode="numeric" required></label><div><button type="submit">Sign in</button></div></form></section>
+<section class="panel" aria-labelledby="product-title"><h2 id="product-title">Add product</h2><form id="product"><label>SKU<input name="sku" maxlength="80" required></label><label>Product name<input name="name" maxlength="180" required></label><label>Unit<input name="unit" value="unit" maxlength="24" required></label><label>Description<input name="description" maxlength="4000"></label><div><button type="submit">Create product</button></div></form></section>
+<section class="panel" aria-labelledby="movement-title"><h2 id="movement-title">Record stock movement</h2><form id="movement"><label>Product<select name="product_id" required><option value="">Load products after sign-in</option></select></label><label>Movement<select name="movement_type"><option value="receipt">Receive stock</option><option value="issue">Issue stock</option><option value="adjustment">Adjustment</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" required></label><label>Branch ID (optional)<input name="branch_id" maxlength="36"></label><label>Reference<input name="reference" maxlength="120"></label><div><button type="submit">Post movement</button></div></form><p class="muted">Receipts add stock; issues subtract stock. A unique request key prevents duplicate posting on retries.</p></section>
+<section class="panel" aria-labelledby="stock-title"><h2 id="stock-title">Stock balances</h2><button id="refresh" type="button">Refresh balances</button><div style="overflow-x:auto"><table><thead><tr><th>SKU</th><th>Product</th><th>Branch</th><th>Quantity</th></tr></thead><tbody id="stock"><tr><td colspan="4">Sign in to view stock.</td></tr></tbody></table></div></section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<footer>Powered by OneCore Technologies Ltd</footer>
+<script>
+(()=> {
+let token=null, organization=null;
+const $=id=>document.getElementById(id);
+const status=(message)=>$('status').textContent=message;
+async function api(path, options={}) {
+ const headers={...(options.headers||{}),Authorization:'Bearer '+token,'X-Organization-ID':organization};
+ if(options.body) headers['Content-Type']='application/json';
+ const response=await fetch('/api/v1'+path,{...options,headers});
+ const data=response.status===204?null:await response.json().catch(()=>null);
+ if(!response.ok) throw new Error(data?.detail||'Request failed ('+response.status+')');
+ return data;
+}
+async function refresh(){
+ const [products,stock]=await Promise.all([api('/inventory/products'),api('/inventory/stock')]);
+ const select=$('movement').elements.product_id;
+ select.replaceChildren(new Option('Select a product',''));
+ products.forEach(p=>select.add(new Option(p.sku+' — '+p.name,String(p.id))));
+ const body=$('stock');body.replaceChildren();
+ if(!stock.length){const tr=body.insertRow();const td=tr.insertCell();td.colSpan=4;td.textContent='No stock movements yet.';}
+ stock.forEach(row=>{const tr=body.insertRow();[row.sku,row.name,row.branch_id||'Unassigned',row.quantity].forEach(v=>{const td=tr.insertCell();td.textContent=String(v);});});
+}
+$('login').addEventListener('submit',async e=>{
+ e.preventDefault();const f=new FormData(e.currentTarget);
+ try{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:f.get('username'),password:f.get('password')})});
+ const data=await response.json();if(!response.ok)throw new Error(data.detail||'Sign-in failed');
+ token=data.access_token;organization=String(f.get('organization')).trim();
+ if(!/^\d+$/.test(organization))throw new Error('Organization ID must be numeric');
+ await refresh();status('Signed in. Inventory data is scoped to this organization and your branch permissions.');
+ }catch(err){token=null;status(err.message);}
+});
+$('product').addEventListener('submit',async e=>{e.preventDefault();if(!token)return status('Sign in first.');
+ const f=new FormData(e.currentTarget);try{await api('/inventory/products',{method:'POST',body:JSON.stringify({sku:f.get('sku'),name:f.get('name'),unit:f.get('unit'),description:f.get('description')})});e.currentTarget.reset();status('Product created.');await refresh();}catch(err){status(err.message);}
+});
+$('movement').addEventListener('submit',async e=>{e.preventDefault();if(!token)return status('Sign in first.');
+ const f=new FormData(e.currentTarget), qty=Number(f.get('quantity')), type=f.get('movement_type');
+ const delta=type==='issue'?-qty:type==='adjustment'?qty:qty;
+ try{await api('/inventory/movements',{method:'POST',body:JSON.stringify({product_id:Number(f.get('product_id')),branch_id:f.get('branch_id')||null,quantity_delta:delta.toFixed(3),movement_type:type,reference:f.get('reference'),idempotency_key:crypto.randomUUID()})});status('Stock movement posted.');e.currentTarget.elements.quantity.value='';await refresh();}catch(err){status(err.message);}
+});
+$('refresh').addEventListener('click',async()=>{if(!token)return status('Sign in first.');try{await refresh();status('Balances refreshed.');}catch(err){status(err.message);}});
+})();
+</script>
+</body></html>
