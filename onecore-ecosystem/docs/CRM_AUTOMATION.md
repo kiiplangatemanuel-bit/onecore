@@ -40,7 +40,8 @@ Schedule controls:
 Run from `onecore-ecosystem`:
 `python -m app.workers.crm_scheduler`.
 Docker Compose runs `crm-scheduler` alongside the API and mounts the same database
-volume. The worker polls every five seconds, claims due rows with leases, renews
+volume. Compose defaults to the shared SQLite file under `/app/data`; set
+`ONECORE_DATABASE_URL` in `.env` to use an external PostgreSQL database. The worker polls every five seconds, claims due rows with leases, renews
 leases between small provider batches, stores failure details and recovers stale
 running schedules. Daily/weekly recurrence preserves local wall-clock time across
 daylight-saving transitions. It snapshots at most 5,000 eligible contacts per
