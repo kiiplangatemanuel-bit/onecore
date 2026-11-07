@@ -5914,10 +5914,11 @@ def create_pharmacy_lab_bill(payload:PharmacyLabBillingIn,
         source=db.query(PharmacyDispense).filter_by(
             id=payload.source_id,organization_id=membership.organization_id,status="dispensed").first()
         if not source:raise HTTPException(404,"Dispense not found")
+        expected_amount=(source.quantity*source.unit_price).quantize(Decimal("0.01"))
+        if payload.amount!=expected_amount:raise HTTPException(422,"Pharmacy invoice amount must equal the dispensed quantity times the batch price")
         line=db.query(PharmacyPrescriptionLine).filter_by(id=source.prescription_line_id,
             organization_id=membership.organization_id).first()
-        rx=_prescription_or_404(db,membership,db.query(PharmacyPrescriptionLine).filter_by(
-            id=line.id).first().prescription_id)
+        rx=_prescription_or_404(db,membership,line.prescription_id)
         if rx.patient_id!=patient.id:raise HTTPException(422,"Billing patient does not match source")
     else:
         source=db.query(LaboratoryOrder).filter_by(
@@ -6041,13 +6042,13 @@ def receive_instrument_result(instrument_id:int,payload:LaboratoryInstrumentResu
     latest_qc=db.query(PharmacyLabWorkflowRecord).filter_by(
         organization_id=membership.organization_id,record_type="lab_qc",parent_id=instrument.id).order_by(
         PharmacyLabWorkflowRecord.created_at.desc(),PharmacyLabWorkflowRecord.id.desc()).first()
-    if latest_qc and latest_qc.status!="passed":
+    if not latest_qc or latest_qc.status!="passed":
         raise HTTPException(409,"Instrument is blocked by latest failed quality control")
     latest_cal=db.query(PharmacyLabWorkflowRecord).filter_by(
         organization_id=membership.organization_id,record_type="lab_calibration",parent_id=instrument.id).order_by(
         PharmacyLabWorkflowRecord.created_at.desc(),PharmacyLabWorkflowRecord.id.desc()).first()
-    if latest_cal and (latest_cal.status!="passed" or
-        date.fromisoformat(latest_cal.payload["next_due"])<date.today()):
+    if not latest_cal or latest_cal.status!="passed" or
+        date.fromisoformat(latest_cal.payload["next_due"])<date.today():
         raise HTTPException(409,"Instrument calibration is failed or overdue")
     line.result_value=payload.result_value.strip();line.result_notes=payload.result_notes.strip()
     line.entered_by=instrument.created_by;line.status="entered"
