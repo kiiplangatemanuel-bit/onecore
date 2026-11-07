@@ -1056,17 +1056,20 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
     ).all()
     if not return_lines:
         raise HTTPException(409, "Supplier return has no return lines")
+    returned_by_po_line = {}
+    for return_line, receipt_line in return_lines:
+        po_line_id = receipt_line.purchase_order_line_id
+        returned_by_po_line[po_line_id] = returned_by_po_line.get(po_line_id, Decimal("0.00")) + Decimal(return_line.quantity)
     prepared = []
     total_sub = Decimal("0.00")
     total_tax = Decimal("0.00")
-    for return_line, receipt_line in return_lines:
-        po_line_id = receipt_line.purchase_order_line_id
+    for po_line_id, returned_quantity in returned_by_po_line.items()
         ap_lines = db.query(AccountingInvoiceLine).filter(
             AccountingInvoiceLine.organization_id == membership.organization_id,
             AccountingInvoiceLine.invoice_id == invoice.id,
             AccountingInvoiceLine.description.contains(f"PO line {po_line_id}"),
         ).order_by(AccountingInvoiceLine.id).with_for_update().all()
-        remaining_return = Decimal(return_line.quantity)
+        remaining_return = returned_quantity
         for ap_line in ap_lines:
             if remaining_return <= 0:
                 break
