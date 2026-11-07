@@ -4649,6 +4649,7 @@ def enter_laboratory_result(order_id: int, line_id: int, payload: LaboratoryResu
     membership=Depends(active_membership), user: User=Depends(current_user),
     db: Session=Depends(get_db)):
     require_permission(membership, "manage")
+    _require_lab_role(membership)
     order = db.query(LaboratoryOrder).filter_by(
         id=order_id, organization_id=membership.organization_id
     ).with_for_update().first()
@@ -4656,6 +4657,10 @@ def enter_laboratory_result(order_id: int, line_id: int, payload: LaboratoryResu
         raise HTTPException(404, "Laboratory order not found")
     if order.status not in {"sample_collected", "processing"}:
         raise HTTPException(409, "Results can only be entered after sample collection and before validation")
+    sample=db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id,order_id=order.id,status="accepted").first()
+    if not sample:
+        raise HTTPException(409,"Sample must be accepted before result entry")
     line = db.query(LaboratoryOrderLine).filter_by(
         id=line_id, organization_id=membership.organization_id, order_id=order.id
     ).with_for_update().first()
@@ -4688,6 +4693,7 @@ def validate_laboratory_order(order_id: int, payload: LaboratoryValidateIn,
     membership=Depends(active_membership), user: User=Depends(current_user),
     db: Session=Depends(get_db)):
     require_permission(membership, "manage")
+    _require_lab_role(membership, validation=True)
     order = db.query(LaboratoryOrder).filter_by(
         id=order_id, organization_id=membership.organization_id
     ).with_for_update().first()
@@ -6000,6 +6006,7 @@ def list_laboratory_panels(membership=Depends(active_membership),db:Session=Depe
 def decide_laboratory_sample(sample_id:int,payload:LaboratorySampleDecisionIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_lab_role(membership)
     sample=db.query(LaboratorySample).filter_by(
         id=sample_id,organization_id=membership.organization_id).with_for_update().first()
     if not sample:raise HTTPException(404,"Sample not found")
@@ -6025,6 +6032,7 @@ def decide_laboratory_sample(sample_id:int,payload:LaboratorySampleDecisionIn,
 def register_laboratory_instrument(payload:LaboratoryInstrumentIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_lab_role(membership, validation=True)
     if payload.branch_id and not can_access_branch(membership,payload.branch_id):
         raise HTTPException(404,"Branch not found")
     secret=uuid.uuid4().hex+uuid.uuid4().hex
@@ -6097,6 +6105,7 @@ def receive_instrument_result(instrument_id:int,payload:LaboratoryInstrumentResu
 def record_laboratory_qc(instrument_id:int,payload:LaboratoryQCIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_lab_role(membership, validation=True)
     instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
         id=instrument_id,organization_id=membership.organization_id,
         record_type="lab_instrument",status="active").first()
@@ -6116,6 +6125,7 @@ def record_laboratory_qc(instrument_id:int,payload:LaboratoryQCIn,
 def record_laboratory_calibration(instrument_id:int,payload:LaboratoryCalibrationIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
+    _require_lab_role(membership, validation=True)
     instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
         id=instrument_id,organization_id=membership.organization_id,
         record_type="lab_instrument",status="active").first()
