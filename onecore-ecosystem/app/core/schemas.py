@@ -48,6 +48,7 @@ class InventoryProductIn(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     description: str = Field(default="", max_length=4000)
     unit: str = Field(default="unit", min_length=1, max_length=24)
+    sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
 
 
 class InventoryMovementIn(BaseModel):
@@ -159,3 +160,34 @@ class PurchaseOrderReceiptLineIn(BaseModel):
 
 class PurchaseOrderReceiptIn(BaseModel):
     lines: list[PurchaseOrderReceiptLineIn] = Field(min_length=1, max_length=200)
+
+
+class POSShiftOpenIn(BaseModel):
+    branch_id: str = Field(min_length=1, max_length=36)
+    opening_cash: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+
+
+class POSShiftCloseIn(BaseModel):
+    closing_cash: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+
+
+class POSSaleLineIn(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    unit_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+
+
+class POSPaymentIn(BaseModel):
+    method: str = Field(pattern=r"^(cash|card|bank|credit)$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"))
+    provider_reference: str = Field(default="", max_length=120)
+
+
+class POSSaleSyncIn(BaseModel):
+    client_transaction_id: str = Field(min_length=8, max_length=100)
+    shift_id: int = Field(gt=0)
+    branch_id: str = Field(min_length=1, max_length=36)
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    offline_created_at: datetime | None = None
+    lines: list[POSSaleLineIn] = Field(min_length=1, max_length=100)
+    payments: list[POSPaymentIn] = Field(min_length=1, max_length=20)
