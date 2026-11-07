@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 
@@ -42,7 +42,7 @@ class HealthcarePatientIn(BaseModel):
     patient_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
-    date_of_birth: str | None = None
+    date_of_birth: date | None = None
     phone: str | None = Field(default=None, min_length=7, max_length=32)
     email: EmailStr | None = None
     emergency_contact_name: str = Field(default="", max_length=180)
