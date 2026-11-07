@@ -262,3 +262,26 @@ workflow. Differences must be investigated and corrected through authorized sour
 transactions. It does not certify tax, statutory or audit compliance. Historical
 cutoff results rely on dated invoice, payment and credit-note records; imported
 opening balances or unlinked manual control-account entries may produce differences.
+
+
+## Reviewed fiscal year-end close
+
+- Added a read-only preview for a selected open fiscal period and an active
+  organization-owned retained-earnings equity account.
+- The preview totals posted revenue and expense account balances over the fiscal
+  period, calculates net income, and displays the debit/credit lines required to
+  close nominal accounts into retained earnings.
+- Posting requires organization-wide accounting access, manage permission, a clean
+  fiscal-period close checklist, a balanced close calculation and an exact
+  confirmation-code match to the fiscal period code.
+- The posting endpoint creates one immutable posted closing journal (when there
+  are nominal balances) and marks the fiscal period closed in the same database
+  transaction. A stable period reference prevents duplicate close journals.
+- API:
+  - GET /api/v1/accounting/fiscal-periods/{id}/year-end-close-preview?retained_earnings_account_id={id}
+  - POST /api/v1/accounting/fiscal-periods/{id}/year-end-close
+- The operation does not calculate tax, dividends, statutory reserves, prior-period
+  restatements, foreign-currency translation or consolidated group adjustments.
+  Finance must verify the chart-of-accounts mapping and preview before confirmation.
+  A close journal and period lock are consequential accounting actions; production
+  use requires database transaction, permissions, audit and finance UAT verification.
