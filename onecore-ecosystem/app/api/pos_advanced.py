@@ -313,6 +313,22 @@ def resolve_conflict(conflict_id:int,payload:ConflictResolveIn,membership=Depend
     return {"id":row.id,"status":row.status,"resolution":row.resolution}
 
 
+@router.get("/conflicts/by-transaction/{client_transaction_id}")
+def conflict_resolution_status(client_transaction_id:str,membership=Depends(active_membership),
+                               db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    row=db.query(POSSyncConflict).filter_by(
+        organization_id=membership.organization_id,
+        client_transaction_id=client_transaction_id
+    ).first()
+    if not row:
+        return {"exists":False,"status":"none"}
+    if not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404,"Conflict not found")
+    return {"exists":True,"id":row.id,"status":row.status,"resolution":row.resolution,
+            "resolution_note":row.resolution_note}
+
+
 @router.post("/sync-events", status_code=201)
 def record_sync_event(payload:SyncEventIn,membership=Depends(active_membership),
                       user:User=Depends(current_user),db:Session=Depends(get_db)):
