@@ -84,7 +84,7 @@ def test_pos_return_contracts_idempotency_and_routes():
         POSReturnIn(
             client_return_id="return-device-0003", reason="Invalid refund method",
             lines=[{"sale_line_id": 12, "quantity": "1"}],
-            refunds=[{"method": "mpesa", "amount": "75.00"}],
+            refunds=[{"method": "mobilemoney", "amount": "75.00"}],
         )
     assert POSReturn.__tablename__ == "pos_returns"
     assert POSReturnLine.__tablename__ == "pos_return_lines"
