@@ -519,6 +519,7 @@ class HealthcarePatientIn(BaseModel):
 
 
 class HealthcareAppointmentIn(BaseModel):
+    patient_id: int = Field(gt=0)
     appointment_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
     branch_id: str | None = Field(default=None, max_length=36)
     provider_user_id: int | None = Field(default=None, gt=0)
