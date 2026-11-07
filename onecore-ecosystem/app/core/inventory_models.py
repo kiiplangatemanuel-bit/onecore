@@ -67,7 +67,7 @@ class InventoryBatch(Base):
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("inventory_warehouses.id"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
     lot_number: Mapped[str] = mapped_column(String(100), default="")
-    serial_number: Mapped[str] = mapped_column(String(100), default="")
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     quantity_on_hand: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"))
