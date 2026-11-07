@@ -168,6 +168,13 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
                                user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Create an idempotent settlement instruction; money is not marked paid until independently verified."""
     require_permission(membership, "manage")
+    requested_phone = payload.provider_phone_number or ""
+    if payload.provider == "mpesa":
+        from app.api.mpesa import normalize_phone
+        try:
+            requested_phone = normalize_phone(requested_phone)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     existing = db.query(ProcurementSettlement).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
@@ -182,7 +189,9 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
                 and existing.reference == payload.reference.strip()
                 and existing.provider == payload.provider
                 and existing.payment_date.date() == payload.payment_date
-                and existing.provider_phone_number == (payload.provider_phone_number or "")
+                and existing.provider_phone_number == requested_phone
+                and existing.provider_reference == payload.provider_reference.strip()
+                and existing.currency == cash_currency(db, membership.organization_id)
                 and prior_map == requested_map)
         if not same:
             raise HTTPException(409, "Settlement idempotency key was used for different payment data")
@@ -244,10 +253,7 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
             raise HTTPException(503, "M-Pesa B2C initiator, encrypted credential and callback URLs are required")
         if not settings.mpesa_b2c_result_url.startswith("https://") or not settings.mpesa_b2c_timeout_url.startswith("https://"):
             raise HTTPException(503, "M-Pesa B2C result and timeout URLs must use public HTTPS")
-        try:
-            provider_phone = normalize_phone(payload.provider_phone_number)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        provider_phone = requested_phone
         callback_token = secrets.token_urlsafe(32)
     row = ProcurementSettlement(
         organization_id=membership.organization_id, supplier_id=supplier.id,
@@ -1213,6 +1219,7 @@ def post_supplier_return_credit_note(return_id: int, payload: SupplierReturnCred
            ProcurementSupplierInvoice.id == AccountingProcurementLink.procurement_invoice_id).filter(
         ProcurementSupplierInvoice.purchase_order_id == order.id,
         ProcurementSupplierInvoice.supplier_id == ret.supplier_id,
+        AccountingProcurementLink.accounting_invoice_id == payload.accounting_invoice_id,
     ).first()
     if not link:
         raise HTTPException(409, "No matched supplier invoice has been integrated into AP for this purchase order")
