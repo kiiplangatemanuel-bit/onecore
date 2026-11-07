@@ -57,6 +57,11 @@ def crm_ui():
     page = Path(__file__).resolve().parent / "web" / "crm.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
+@app.get("/sacco", response_class=HTMLResponse)
+def sacco_ui():
+    page = Path(__file__).resolve().parent / "web" / "sacco.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
 @app.get("/pharmacy-lab", response_class=HTMLResponse)
 def pharmacy_lab_ui():
     page = Path(__file__).resolve().parent / "web" / "pharmacy_lab.html"
