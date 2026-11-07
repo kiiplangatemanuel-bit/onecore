@@ -123,8 +123,8 @@ def test_hospital_operations_models_and_routes_are_registered():
     from app.api.healthcare_hospital import RESOURCE_TYPES, _money, _stable
     paths=set(app.openapi()["paths"])
     expected={
-        "/api/v1/healthcare/wards","/api/v1/healthcare/wards/{ward_id}/rooms","/api/v1/healthcare/wards/{ward_id}/rooms",
-        "/api/v1/healthcare/wards/{ward_id}/rooms","/api/v1/healthcare/rooms/{room_id}/beds",
+        "/api/v1/healthcare/wards","/api/v1/healthcare/wards/{ward_id}","/api/v1/healthcare/wards/{ward_id}/rooms",
+        "/api/v1/healthcare/wards/{ward_id}/rooms","/api/v1/healthcare/rooms/{room_id}","/api/v1/healthcare/rooms/{room_id}/beds","/api/v1/healthcare/beds/{bed_id}/status",
         "/api/v1/healthcare/beds","/api/v1/healthcare/occupancy","/api/v1/healthcare/admissions",
         "/api/v1/healthcare/admissions/{admission_id}/discharge",
         "/api/v1/healthcare/admissions/{admission_id}/transfer",
