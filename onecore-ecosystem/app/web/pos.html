@@ -49,16 +49,16 @@ async function loadReceipt(saleId){
 $('receiptLookup').addEventListener('submit',async e=>{e.preventDefault();try{await loadReceipt(e.currentTarget.elements.sale_id.value);status('Receipt loaded.');}catch(err){status(err.message);}});
 $('printReceipt').addEventListener('click',()=>window.print());
 $('returnForm').addEventListener('submit',async e=>{
- e.preventDefault();if(!currentReceipt)return;
+ e.preventDefault();const form=e.currentTarget;if(!currentReceipt)return;
  const lines=Array.from(document.querySelectorAll('.return-qty')).filter(input=>Number(input.value)>0).map(input=>({sale_line_id:Number(input.dataset.saleLineId),quantity:Number(input.value).toFixed(3)}));
  if(!lines.length)return status('Enter at least one return quantity.');
- const total=lines.reduce((sum,line)=>{const input=document.querySelector('[data-sale-line-id="'+line.sale_line_id+'"]');return sum+Number(input.dataset.unitPrice)*Number(line.quantity);},0);
+ const total=lines.reduce((sum,line)=>{const input=document.querySelector('[data-sale-line-id="'+line.sale_line_id+'"]');return sum+Math.round(Number(input.dataset.unitPrice)*Number(line.quantity)*100)/100;},0);
  if(!(total>0))return status('Return value must be greater than zero.');
- const body={client_return_id:crypto.randomUUID(),reason:e.currentTarget.elements.reason.value.trim(),lines,
-  refunds:[{method:e.currentTarget.elements.refund_method.value,amount:(Math.round(total*100)/100).toFixed(2)}]};
+ const body={client_return_id:crypto.randomUUID(),reason:form.elements.reason.value.trim(),lines,
+  refunds:[{method:form.elements.refund_method.value,amount:(Math.round(total*100)/100).toFixed(2)}]};
  try{const result=await api('/pos/sales/'+currentReceipt.id+'/returns',{method:'POST',body:JSON.stringify(body)});
   status('Return '+result.id+' recorded. Stock was returned; payment execution is not automated.');
-  await loadReceipt(currentReceipt.id);e.currentTarget.reset();
+  await loadReceipt(currentReceipt.id);form.reset();
  }catch(err){status(err.message);}
 });
 
