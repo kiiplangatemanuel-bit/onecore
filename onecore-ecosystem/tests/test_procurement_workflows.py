@@ -39,6 +39,7 @@ def test_procurement_workflow_routes_are_registered():
         "/api/v1/procurement/supplier-portal/invoices",
         "/api/v1/procurement/supplier-portal/delivery-updates",
         "/api/v1/procurement/supplier-statements",
+        "/api/v1/procurement/supplier-statements/{statement_id}/lines/{line_id}/match",
         "/api/v1/procurement/supplier-statements/{statement_id}/reconcile",
         "/api/v1/procurement/supplier-invoices/{supplier_invoice_id}/integrate-to-ap",
         "/api/v1/procurement/supplier-returns/{return_id}/post-credit-note",
