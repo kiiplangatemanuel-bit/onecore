@@ -38,7 +38,8 @@ def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_
         id=record_id, organization_id=m.organization_id,
         module_key=MODULE, record_type=kind
     ).first()
-    if not row or not can_access_branch(m, (row.data or {}).get(branch_field)):
+    branch_id = (row.data or {}).get(branch_field) if row else None
+    if not row or (branch_id is not None and not can_access_branch(m, branch_id)):
         raise HTTPException(404, f"{kind.replace('_', ' ').title()} not found")
     return row
 
@@ -451,13 +452,17 @@ def allocate_fee_payment(payment_id:int,payload:FeeAllocationIn,m=Depends(active
     except (InvalidOperation,KeyError): raise HTTPException(409,"Payment balance is invalid")
     charges={x.id:x for x in _rows(db,m,"fee_charge") if x.data.get("learner_id")==payment.data.get("learner_id")}
     allocations=[]; total=Decimal("0")
+    requested={}
     for item in payload.allocations:
         try:
             charge_id=int(item["charge_id"]); amount=Decimal(str(item["amount"]))
         except (KeyError,ValueError,TypeError,InvalidOperation):
             raise HTTPException(422,"Each allocation needs charge_id and a valid amount")
+        if amount<=0: raise HTTPException(422,"Allocation amounts must be positive")
+        requested[charge_id]=requested.get(charge_id,Decimal("0"))+amount
+    for charge_id,amount in requested.items():
         charge=charges.get(charge_id)
-        if not charge or amount<=0: raise HTTPException(422,"Allocation references an invalid charge or amount")
+        if not charge: raise HTTPException(422,"Allocation references an invalid charge")
         balance=Decimal(charge.data["balance"])
         if amount>balance: raise HTTPException(422,"Allocation exceeds the outstanding charge balance")
         total+=amount; allocations.append((charge,amount))
@@ -494,6 +499,8 @@ def link_guardian(payload:GuardianLinkIn,m=Depends(active_membership),
                   u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
     _learner(db,m,payload.learner_id)
+    guardian=db.query(User).filter_by(id=payload.guardian_user_id,is_active=True).first()
+    if not guardian: raise HTTPException(404,"Guardian user account not found")
     if payload.guardian_user_id==u.id: raise HTTPException(422,"Staff cannot link themselves as a guardian")
     if not set(payload.permissions).issubset({"academic","fees","attendance","communications"}):
         raise HTTPException(422,"Unsupported guardian permission")
@@ -563,6 +570,17 @@ class ReportCardIn(BaseModel):
     term: str = Field(min_length=1, max_length=40)
     summary: str = Field(default="", max_length=4000)
     grades: dict[str, Any] = Field(default_factory=dict)
+
+
+
+@router.get("/school/staff/portal")
+def staff_portal(m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(m,"read")
+    profiles=[x for x in _rows(db,m,"staff_profile") if x.data.get("user_id")==u.id]
+    if not profiles: raise HTTPException(403,"No staff profile is linked to this account")
+    return {"profiles":[_data(x) for x in profiles],
+            "pending_report_cards":sum(1 for x in _rows(db,m,"report_card") if x.data.get("status")=="submitted"),
+            "pending_moderation":sum(1 for x in _rows(db,m,"moderation_decision") if x.data.get("decision")=="return_for_revision")}
 
 
 @router.post("/school/report-cards",status_code=201)
