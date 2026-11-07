@@ -282,11 +282,18 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
                 "Occasion": f"SUP-{row.id}"[:20],
             })
             if response.get("ResponseCode") == "0":
-                row.provider_conversation_id = str(response.get("ConversationID") or "")[:100]
-                row.provider_originator_id = str(response.get("OriginatorConversationID") or "")[:100]
-                if not row.provider_conversation_id or not row.provider_originator_id:
-                    row.status = "unknown"
-                    row.provider_result_description = "Daraja accepted request without correlation IDs; reconcile before retrying"
+                response_conversation = str(response.get("ConversationID") or "")[:100]
+                response_originator = str(response.get("OriginatorConversationID") or "")[:100]
+                if row.provider_conversation_id and response_conversation and row.provider_conversation_id != response_conversation:
+                    row.status = "exception"
+                    row.provider_result_description = "Daraja response correlation does not match an earlier callback"
+                else:
+                    row.provider_conversation_id = row.provider_conversation_id or response_conversation
+                    row.provider_originator_id = row.provider_originator_id or response_originator
+                    if not row.provider_conversation_id or not row.provider_originator_id:
+                        if row.status != "provider_confirmed":
+                            row.status = "unknown"
+                            row.provider_result_description = "Daraja accepted request without correlation IDs; reconcile before retrying"
             else:
                 row.status = "failed"
                 row.provider_result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
@@ -403,8 +410,6 @@ def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = 
     ).with_for_update().first()
     if not settlement:
         return False
-    if settlement.status in {"settled", "provider_confirmed"}:
-        return True
     result = body.get("Result") or body
     conversation = str(result.get("ConversationID") or "")
     if not conversation:
@@ -414,6 +419,8 @@ def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = 
         settlement.provider_originator_id = str(result.get("OriginatorConversationID") or "")[:100]
     elif conversation != settlement.provider_conversation_id:
         return False
+    if settlement.status in {"settled", "provider_confirmed"}:
+        return True
     settlement.provider_result_code = str(result.get("ResultCode") if result.get("ResultCode") is not None else "")[:40]
     settlement.provider_result_description = str(result.get("ResultDesc") or ("Provider timeout" if timeout else ""))[:500]
     if timeout:
@@ -1014,6 +1021,8 @@ def import_supplier_statement(payload: SupplierStatementIn, membership=Depends(a
 def get_supplier_statement(statement_id: int, membership=Depends(active_membership),
                            db: Session = Depends(get_db)):
     require_permission(membership, "read")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier statement access requires organization-wide branch access")
     row = db.query(ProcurementSupplierStatement).filter_by(
         id=statement_id, organization_id=membership.organization_id
     ).first()
@@ -1037,6 +1046,8 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
                                   membership=Depends(active_membership), user: User = Depends(current_user),
                                   db: Session = Depends(get_db)):
     require_permission(membership, "manage")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier statement matching requires organization-wide branch access")
     statement = db.query(ProcurementSupplierStatement).filter_by(
         id=statement_id, organization_id=membership.organization_id, status="open"
     ).with_for_update().first()
@@ -1084,6 +1095,8 @@ def match_supplier_statement_line(statement_id: int, line_id: int, payload: Stat
 def reconcile_supplier_statement(statement_id: int, membership=Depends(active_membership),
                                  user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "manage")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier statement reconciliation requires organization-wide branch access")
     row = db.query(ProcurementSupplierStatement).filter_by(
         id=statement_id, organization_id=membership.organization_id
     ).with_for_update().first()
@@ -1382,7 +1395,29 @@ def auto_resolve_supplier_invoice_discrepancy(discrepancy_id: int,
     source_total = Decimal(source.subtotal) + Decimal(source.tax_total)
     if source.status == "accounted" and (not ap or Decimal(ap.total) != source_total):
         valid = False
+    if row.code == "currency" and source.currency != order.currency:
+        valid = False
     if row.code == "tax" and Decimal(source.tax_total) < 0:
+        valid = False
+    if row.code in {"quantity", "receipt"}:
+        for line in source_lines:
+            accepted = db.query(func.coalesce(func.sum(ProcurementGoodsReceiptLine.quantity_accepted), 0)).join(
+                ProcurementGoodsReceipt, ProcurementGoodsReceipt.id == ProcurementGoodsReceiptLine.goods_receipt_id
+            ).filter(ProcurementGoodsReceipt.organization_id == membership.organization_id,
+                     ProcurementGoodsReceipt.purchase_order_id == order.id,
+                     ProcurementGoodsReceipt.status == "inspected",
+                     ProcurementGoodsReceiptLine.purchase_order_line_id == line.purchase_order_line_id).scalar() or Decimal("0")
+            returned = db.query(func.coalesce(func.sum(ProcurementSupplierReturnLine.quantity), 0)).join(
+                ProcurementSupplierReturn, ProcurementSupplierReturn.id == ProcurementSupplierReturnLine.return_id
+            ).join(ProcurementGoodsReceiptLine,
+                   ProcurementGoodsReceiptLine.id == ProcurementSupplierReturnLine.receipt_line_id).filter(
+                ProcurementSupplierReturn.organization_id == membership.organization_id,
+                ProcurementSupplierReturn.status == "posted",
+                ProcurementGoodsReceiptLine.purchase_order_line_id == line.purchase_order_line_id).scalar() or Decimal("0")
+            if Decimal(line.quantity) > Decimal(accepted) - Decimal(returned):
+                valid = False
+                break
+    if row.code == "other":
         valid = False
     if row.code == "duplicate":
         duplicate_count = db.query(ProcurementSupplierInvoice).filter_by(
