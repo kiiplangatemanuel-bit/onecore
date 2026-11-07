@@ -3,25 +3,37 @@
 Master specification category: **9**
 
 ## Source scope
-Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock, suppliers, pricing and billing; lab catalogue, sample registration/tracking, processing, result validation, reports, doctor access, equipment, inventory and quality control.
+Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock,
+suppliers, pricing and billing; lab catalogue, sample registration/tracking,
+processing, result validation, reports, doctor access, equipment, inventory and
+quality control.
 
-## Implementation status
-Scaffold only. This folder reserves the domain boundary; it is not a claim of production implementation.
+## Current implementation status
+Partial foundation implemented on branch `feature/pharmacy-lab-workflows`:
 
-## Required implementation
-- Define domain entities, constraints, indexes and migrations.
-- Add domain services and versioned API routes.
-- Enforce tenant, branch and role authorization at the service layer.
-- Add validation, approval workflows, audit events and idempotency where needed.
-- Build responsive user/admin workflows and accessible states.
-- Add unit, integration, security and end-to-end tests.
-- Add monitoring, retention, backup/restore and operational documentation.
-- Complete sandbox/UAT and release approval for external dependencies.
+- Tenant-owned medicine catalogue entries linked to the shared inventory product
+  ledger.
+- Batch receipt with expiry dates, batch numbers, branch assignment, cost/selling
+  price, idempotent retries and append-only stock receipt movements.
+- Batch listing with expired/active/quarantined state and quarantine workflow.
+- Tenant-owned laboratory test catalogue with specimen type, unit, reference
+  range snapshot and turnaround target.
+- Laboratory orders tied to a signed clinical encounter and the assigned provider.
+- Single-specimen sample accession/collection tracking per order.
+- Result entry followed by independent second-person validation; result values and
+  reference-range snapshots are retained on the order lines.
+- Responsive `/pharmacy-lab` workspace, migration `0026_pharmacy_lab`, tests and
+  `docs/PHARMACY_LAB.md`.
 
-
-## Related clinical workflow foundation
-
-The shared application now contains a first patient registration, appointment,
-check-in and signed encounter slice documented in `docs/HEALTHCARE.md`.
-This does not implement pharmacy dispensing or laboratory processing; those
-requirements remain outstanding for this module.
+## Still required before production
+- Prescription creation and pharmacist dispensing with FEFO batch allocation,
+  quantity controls, controlled-medicine rules and returns.
+- Supplier procurement, purchase invoices, pharmacy pricing/insurance billing,
+  patient payment integration and dispensing receipts.
+- Multiple specimen containers per order, sample rejection/recollection,
+  processing stations, equipment/instrument integration, QC/calibration and
+  result correction/amendment workflows.
+- Result PDF/portal/clinician delivery, alerts, critical-value escalation and
+  clinical review/interpretation policies.
+- More granular pharmacy/laboratory role separation, clinical data protection,
+  audit/retention governance, concurrency/security tests and UAT.
