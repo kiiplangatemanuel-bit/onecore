@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolFeeStructureIn, SchoolFeePaymentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory, HealthcarePatient, HealthcareAppointment
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolFeeStructureIn, SchoolFeePaymentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HealthcarePatientIn, HealthcareAppointmentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -3262,6 +3262,168 @@ def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
     return {"id":campaign.id,"status":campaign.status,"recipient_count":prepared,
             "delivery_started":False,"message":"Recipients prepared; no messages were sent"}
 
+
+
+
+@router.post("/healthcare/patients",status_code=201)
+def create_healthcare_patient(payload:HealthcarePatientIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    _crm_branch_check(db,membership,payload.branch_id)
+    row=HealthcarePatient(organization_id=membership.organization_id,
+        branch_id=payload.branch_id,patient_number=payload.patient_number.strip().upper(),
+        first_name=payload.first_name,last_name=payload.last_name,
+        date_of_birth=payload.date_of_birth,phone=payload.phone.strip() if payload.phone else None,
+        email=str(payload.email).lower() if payload.email else None,
+        emergency_contact_name=payload.emergency_contact_name.strip(),
+        emergency_contact_phone=payload.emergency_contact_phone.strip(),
+        status="active",created_by=user.id)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Patient number already exists in this organization")
+    db.refresh(row)
+    audit(db,user.id,membership.organization_id,"healthcare.patient.created",
+          "healthcare_patient",row.id)
+    return {"id":row.id,"patient_number":row.patient_number,
+        "name":f"{row.first_name} {row.last_name}","branch_id":row.branch_id,
+        "status":row.status}
+
+
+@router.get("/healthcare/patients")
+def list_healthcare_patients(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(HealthcarePatient).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(HealthcarePatient.branch_id.in_(allowed))
+    rows=q.order_by(HealthcarePatient.id.desc()).limit(limit).all()
+    audit(db,user.id,membership.organization_id,"healthcare.patient.directory.viewed",
+          "healthcare_patient","",f"count:{len(rows)}")
+    return [{"id":x.id,"patient_number":x.patient_number,
+        "first_name":x.first_name,"last_name":x.last_name,
+        "date_of_birth":x.date_of_birth.isoformat() if x.date_of_birth else None,
+        "phone":x.phone,"email":x.email,"branch_id":x.branch_id,"status":x.status}
+        for x in rows]
+
+
+@router.post("/healthcare/appointments",status_code=201)
+def create_healthcare_appointment(payload:HealthcareAppointmentIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    patient=db.query(HealthcarePatient).filter_by(
+        id=payload.patient_id if hasattr(payload,"patient_id") else None,
+        organization_id=membership.organization_id).first()
+    # Patient ID is supplied as a path-independent request field; validation is
+    # performed below through the explicit route schema.
+    if not patient:
+        raise HTTPException(404,"Patient not found")
+    branch_id=payload.branch_id if payload.branch_id is not None else patient.branch_id
+    if not can_access_branch(membership,patient.branch_id) or not can_access_branch(membership,branch_id):
+        raise HTTPException(404,"Patient or appointment branch not found")
+    if patient.branch_id is not None and branch_id != patient.branch_id:
+        raise HTTPException(422,"Appointment branch must match the patient's registered branch")
+    _crm_branch_check(db,membership,branch_id)
+    if payload.provider_user_id and not db.query(Membership).filter_by(
+        user_id=payload.provider_user_id,organization_id=membership.organization_id,is_active=True
+    ).first():
+        raise HTTPException(404,"Provider is not an active member of this organization")
+    if payload.provider_user_id:
+        conflict=db.query(HealthcareAppointment).filter(
+            HealthcareAppointment.organization_id==membership.organization_id,
+            HealthcareAppointment.provider_user_id==payload.provider_user_id,
+            HealthcareAppointment.status=="scheduled",
+            HealthcareAppointment.starts_at < payload.ends_at,
+            HealthcareAppointment.ends_at > payload.starts_at
+        ).first()
+        if conflict:
+            raise HTTPException(409,"Provider already has an overlapping appointment")
+    row=HealthcareAppointment(organization_id=membership.organization_id,
+        branch_id=branch_id,patient_id=patient.id,
+        appointment_number=payload.appointment_number.strip().upper(),
+        provider_user_id=payload.provider_user_id,starts_at=payload.starts_at,
+        ends_at=payload.ends_at,reason=payload.reason.strip(),status="scheduled",
+        created_by=user.id)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Appointment number already exists or scheduling conflicts")
+    db.refresh(row)
+    audit(db,user.id,membership.organization_id,"healthcare.appointment.scheduled",
+          "healthcare_appointment",row.id,f"patient:{patient.id}")
+    return {"id":row.id,"appointment_number":row.appointment_number,
+        "patient_id":row.patient_id,"starts_at":row.starts_at.isoformat(),
+        "ends_at":row.ends_at.isoformat(),"status":row.status}
+
+
+@router.get("/healthcare/appointments")
+def list_healthcare_appointments(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db),
+    limit:int=Query(default=100,ge=1,le=500)):
+    require_permission(membership,"read")
+    q=db.query(HealthcareAppointment,HealthcarePatient).join(
+        HealthcarePatient,HealthcarePatient.id==HealthcareAppointment.patient_id
+    ).filter(HealthcareAppointment.organization_id==membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter(HealthcareAppointment.branch_id.in_(allowed))
+    rows=q.order_by(HealthcareAppointment.starts_at.desc()).limit(limit).all()
+    audit(db,user.id,membership.organization_id,"healthcare.appointments.viewed",
+          "healthcare_appointment","",f"count:{len(rows)}")
+    return [{"id":a.id,"appointment_number":a.appointment_number,
+        "patient_id":p.id,"patient_number":p.patient_number,
+        "patient_name":f"{p.first_name} {p.last_name}",
+        "provider_user_id":a.provider_user_id,"starts_at":a.starts_at.isoformat(),
+        "ends_at":a.ends_at.isoformat(),"reason":a.reason,"status":a.status}
+        for a,p in rows]
+
+
+@router.post("/healthcare/appointments/{appointment_id}/cancel")
+def cancel_healthcare_appointment(appointment_id:int,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(HealthcareAppointment).filter_by(
+        id=appointment_id,organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404,"Appointment not found")
+    if row.status!="scheduled":
+        raise HTTPException(409,"Only scheduled appointments can be cancelled")
+    row.status="cancelled"
+    db.commit()
+    audit(db,user.id,membership.organization_id,"healthcare.appointment.cancelled",
+          "healthcare_appointment",row.id)
+    return {"id":row.id,"status":row.status}
+
+
+@router.post("/healthcare/appointments/{appointment_id}/complete")
+def complete_healthcare_appointment(appointment_id:int,
+    membership=Depends(active_membership),user:User=Depends(current_user),
+    db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(HealthcareAppointment).filter_by(
+        id=appointment_id,organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404,"Appointment not found")
+    if row.status!="scheduled":
+        raise HTTPException(409,"Only scheduled appointments can be completed")
+    row.status="completed";row.completed_at=datetime.now(timezone.utc)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"healthcare.appointment.completed",
+          "healthcare_appointment",row.id)
+    return {"id":row.id,"status":row.status,"completed_at":row.completed_at.isoformat()}
 
 
 @router.post("/hr/employees",status_code=201)

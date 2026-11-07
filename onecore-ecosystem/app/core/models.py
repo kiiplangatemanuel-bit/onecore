@@ -609,6 +609,47 @@ class SchoolFeePaymentAllocation(Base):
         "organization_id", "payment_id", "charge_id", unique=True),)
 
 
+class HealthcarePatient(Base):
+    __tablename__ = "healthcare_patients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_number: Mapped[str] = mapped_column(String(50))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    emergency_contact_name: Mapped[str] = mapped_column(String(180), default="")
+    emergency_contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_patient_org_number",
+        "organization_id", "patient_number", unique=True),)
+
+
+class HealthcareAppointment(Base):
+    __tablename__ = "healthcare_appointments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    appointment_number: Mapped[str] = mapped_column(String(60))
+    provider_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("ix_healthcare_appointment_org_number",
+        "organization_id", "appointment_number", unique=True),
+        Index("ix_healthcare_appointment_provider_start",
+        "organization_id", "provider_user_id", "starts_at"))
+
+
 class AccountingInvoice(Base):
     """Tenant-owned AR/AP invoice; posted invoice lines are immutable."""
     __tablename__ = "accounting_invoices"

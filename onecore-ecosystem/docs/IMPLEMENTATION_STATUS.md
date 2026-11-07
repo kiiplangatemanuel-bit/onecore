@@ -752,3 +752,24 @@ Implemented on branch `feature/school-fees-payments`:
 Boundaries: no guardian portal, bursary/discount workflows, payment plan, refund or
 reversal process, M-Pesa/bank/card provider verification, payment settlement,
 accounting journal integration or UAT. Tender methods are manually recorded only.
+
+
+## Healthcare patient directory and appointments increment (7 November 2026)
+
+Implemented on branch `feature/healthcare-patients-appointments`:
+
+- Tenant/branch-scoped patient registration with organization-unique patient numbers.
+- Minimal patient demographics and emergency contact fields; no clinical diagnosis,
+  medication or treatment records are introduced in this slice.
+- Tenant/branch-scoped appointment scheduling, optional provider assignment to an
+  active organization member, and provider overlap prevention.
+- Appointment lifecycle transitions from scheduled to cancelled or completed,
+  with manager permission and audit events.
+- Migration `0025_healthcare_patients_appointments`, APIs, starter workspace,
+  tests and module documentation.
+
+Boundaries: no clinical encounter notes, diagnoses, prescriptions, allergies, lab,
+imaging, pharmacy, admission/bed management, insurance, billing, consent workflows,
+patient portal, clinical audit certification, interoperability or UAT. Sensitive
+healthcare data requires a jurisdiction-specific privacy/security review before
+production use.
