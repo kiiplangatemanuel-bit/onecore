@@ -149,7 +149,7 @@ def schedule_campaign(campaign_id:int,payload:CRMCampaignScheduleIn,
     if template and (template.channel!=campaign.channel or template.purpose!=campaign.purpose):
         raise HTTPException(422,"Template channel and purpose must match the campaign")
     if template and template.branch_id is not None and not can_access_branch(membership,template.branch_id):raise HTTPException(404,"Template not found")
-    if template and campaign.branch_id and template.branch_id and campaign.branch_id!=template.branch_id:
+    if template and template.branch_id and campaign.branch_id!=template.branch_id:
         raise HTTPException(422,"Campaign and template branches do not match")
     segment=_segment(db,payload.segment_id,membership.organization_id,membership) if payload.segment_id else None
     if segment and campaign.branch_id and segment.branch_id and campaign.branch_id!=segment.branch_id:
@@ -193,6 +193,8 @@ def pause_schedule(schedule_id:int,membership=Depends(active_membership),
     campaign=db.query(CRMCampaign).filter_by(id=row.campaign_id,organization_id=membership.organization_id).first()
     if not campaign or not can_access_branch(membership,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.status not in {"scheduled","failed"}:raise HTTPException(409,"Schedule cannot be paused in its current state")
+    if row.lease_until and as_utc(row.lease_until)>datetime.now(timezone.utc):
+        raise HTTPException(409,"A scheduled run is currently being processed; pause it after the run finishes")
     row.status="paused";row.next_run_at=None;row.lease_until=None;db.commit()
     db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
         action="crm.campaign.schedule_paused",resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
