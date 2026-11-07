@@ -15,7 +15,7 @@ def test_campaign_delivery_routes_and_models():
     assert "/api/v1/crm/delivery-events" in paths
     unsubscribe=paths["/api/v1/crm/unsubscribe/{token}"]
     assert "post" in unsubscribe
-    assert "get" not in unsubscribe
+    assert "get" in unsubscribe
 
 
 def test_unsubscribe_url_requires_public_https():
