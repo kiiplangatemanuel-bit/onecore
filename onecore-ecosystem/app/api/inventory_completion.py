@@ -300,7 +300,7 @@ def receive_batch(payload:BatchReceiptIn,membership=Depends(active_membership),u
     existing=db.query(InventoryStockMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if existing: raise HTTPException(409,"Receipt idempotency key already used")
     row=InventoryBatch(organization_id=membership.organization_id,warehouse_id=wh.id,product_id=product.id,lot_number=payload.lot_number,
-        serial_number=payload.serial_number,expiry_date=datetime.combine(payload.expiry_date,datetime.min.time(),tzinfo=timezone.utc) if payload.expiry_date else None,
+        serial_number=payload.serial_number or None,expiry_date=datetime.combine(payload.expiry_date,datetime.min.time(),tzinfo=timezone.utc) if payload.expiry_date else None,
         quantity_on_hand=payload.quantity.quantize(Q3),unit_cost=payload.unit_cost,status="available")
     db.add(row);db.flush()
     db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=product.id,branch_id=wh.branch_id,warehouse_id=wh.id,
@@ -445,7 +445,7 @@ def demand_forecast(days:int=Query(default=30,ge=7,le=365),membership=Depends(ac
     for product in products:
         issues=db.query(func.coalesce(func.sum(-InventoryStockMovement.quantity_delta),0)).filter(
             InventoryStockMovement.organization_id==membership.organization_id,InventoryStockMovement.product_id==product.id,
-            InventoryStockMovement.quantity_delta<0,InventoryStockMovement.created_at>=cutoff).scalar()
+            InventoryStockMovement.quantity_delta<0,InventoryStockMovement.movement_type.in_(["issue","batch_issue","pos_sale","sale"]),InventoryStockMovement.created_at>=cutoff).scalar()
         daily=dec(issues or 0)/Decimal(days)
         result.append({"product_id":product.id,"sku":product.sku,"name":product.name,"historical_daily_demand":str(daily.quantize(Q3)),
             "forecast_next_30_days":str((daily*Decimal(30)).quantize(Q3)),"method":"simple_moving_average"})
