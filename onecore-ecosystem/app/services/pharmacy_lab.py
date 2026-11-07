@@ -9,9 +9,9 @@ def _canonical_hash(payload: dict) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def pharmacy_batch_hash(payload) -> str:
+def pharmacy_batch_hash(payload, medicine_id: int) -> str:
     return _canonical_hash({
-        "medicine_id": payload.medicine_id,
+        "medicine_id": medicine_id,
         "branch_id": payload.branch_id,
         "batch_number": payload.batch_number.strip().upper(),
         "expiry_date": payload.expiry_date.isoformat(),
