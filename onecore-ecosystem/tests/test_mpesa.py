@@ -281,3 +281,169 @@ def test_idempotent_return_response_includes_original_refund_ids():
     )
     assert 'existing_refunds = db.query(POSRefund)' in routes
     assert '"refunds": [{"id": item.id, "method": item.method' in routes
+
+
+def test_b2c_success_callback_requires_amount_receipt_and_matching_conversation(monkeypatch):
+    from app.api.mpesa import _b2c_callback
+    db = _mpesa_test_session()
+    returned = POSReturn(
+        id=31, organization_id=1, sale_id=7, branch_id="branch-1",
+        client_return_id="return-000031", request_hash="c" * 64,
+        reason="Customer return", refund_total=Decimal("25.00"), created_by=10,
+    )
+    refund = POSRefund(
+        id=32, organization_id=1, return_id=31, method="mpesa",
+        amount=Decimal("25.00"), status="pending",
+    )
+    token = "strict-b2c-callback"
+    intent = MpesaRefundIntent(
+        id=33, organization_id=1, branch_id="branch-1", refund_id=32,
+        phone_number="254712345678", amount=Decimal("25.00"),
+        conversation_id="AG_331", originator_conversation_id="OR_331",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending",
+    )
+    db.add_all([returned, refund, intent])
+    db.commit()
+    # A callback for another provider conversation must not mutate the refund.
+    assert _b2c_callback(db, token, {"Result": {"ConversationID": "AG_WRONG", "ResultCode": 0}}) is False
+    # Success without the transaction amount is not proof of the requested payout.
+    body = {"Result": {
+        "ConversationID": "AG_331", "ResultCode": 0, "ResultDesc": "Success",
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QAB331B2C"},
+        ]},
+    }}
+    assert _b2c_callback(db, token, body) is True
+    db.refresh(refund)
+    db.refresh(intent)
+    assert refund.status == "pending"
+    assert refund.provider_reference == ""
+    assert intent.status == "exception"
+    assert "missing a valid transaction amount" in intent.result_description
+    db.close()
+
+
+def test_successful_stk_callback_rejects_duplicate_provider_receipt(monkeypatch):
+    from app.api.mpesa import _stk_callback
+    db = _mpesa_test_session()
+    sale = POSSale(
+        id=41, organization_id=1, branch_id="branch-1", shift_id=2,
+        cashier_user_id=10, client_transaction_id="txn-00000041",
+        request_hash="d" * 64, total_amount=Decimal("100.00"),
+        currency="KES", status="posted",
+    )
+    payment = POSPayment(
+        id=42, organization_id=1, sale_id=41, method="mpesa",
+        amount=Decimal("100.00"), status="unsettled",
+    )
+    duplicate = POSPayment(
+        id=43, organization_id=1, sale_id=41, method="mpesa",
+        amount=Decimal("100.00"), status="recorded", provider_reference="QABDUPLICATE",
+    )
+    token = "duplicate-stk-receipt"
+    intent = MpesaPaymentIntent(
+        id=44, organization_id=1, branch_id="branch-1", payment_id=42,
+        phone_number="254712345678", amount=Decimal("100.00"),
+        checkout_request_id="ws_CO_441",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(), status="pending",
+    )
+    db.add_all([sale, payment, duplicate, intent])
+    db.commit()
+    body = {"Body": {"stkCallback": {
+        "CheckoutRequestID": "ws_CO_441", "ResultCode": 0, "ResultDesc": "Success",
+        "CallbackMetadata": {"Item": [
+            {"Name": "Amount", "Value": 100},
+            {"Name": "MpesaReceiptNumber", "Value": "QABDUPLICATE"},
+            {"Name": "PhoneNumber", "Value": 254712345678},
+        ]},
+    }}}
+    assert _stk_callback(db, token, body) is True
+    db.refresh(payment)
+    db.refresh(intent)
+    assert payment.status == "unsettled"
+    assert intent.status == "exception"
+    db.close()
+
+
+
+def test_stk_callback_can_reconcile_provider_acceptance_when_initiation_response_was_lost(monkeypatch):
+    import app.api.accounting_pos as accounting_pos
+    from app.api.mpesa import _stk_callback
+    db = _mpesa_test_session()
+    sale = POSSale(
+        id=51, organization_id=1, branch_id="branch-1", shift_id=2,
+        cashier_user_id=10, client_transaction_id="txn-00000051",
+        request_hash="e" * 64, total_amount=Decimal("75.00"),
+        currency="KES", status="posted",
+    )
+    payment = POSPayment(
+        id=52, organization_id=1, sale_id=51, method="mpesa",
+        amount=Decimal("75.00"), status="unsettled",
+    )
+    token = "lost-stk-response"
+    intent = MpesaPaymentIntent(
+        id=53, organization_id=1, branch_id="branch-1", payment_id=52,
+        phone_number="254712345678", amount=Decimal("75.00"),
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(), status="unknown",
+    )
+    db.add_all([sale, payment, intent])
+    db.commit()
+    monkeypatch.setattr(accounting_pos, "post_pos_source",
+                        lambda *args, **kwargs: SimpleNamespace(status="posted"))
+    body = {"Body": {"stkCallback": {
+        "CheckoutRequestID": "ws_CO_RECOVERED", "MerchantRequestID": "merchant-recovered",
+        "ResultCode": 0, "ResultDesc": "Success",
+        "CallbackMetadata": {"Item": [
+            {"Name": "Amount", "Value": 75},
+            {"Name": "MpesaReceiptNumber", "Value": "QABRECOVERED"},
+            {"Name": "PhoneNumber", "Value": 254712345678},
+        ]},
+    }}}
+    assert _stk_callback(db, token, body) is True
+    db.refresh(payment)
+    db.refresh(intent)
+    assert payment.status == "recorded"
+    assert intent.checkout_request_id == "ws_CO_RECOVERED"
+    assert intent.status == "success"
+    db.close()
+
+
+def test_b2c_callback_can_complete_before_initiation_response_is_saved(monkeypatch):
+    import app.api.accounting_pos as accounting_pos
+    from app.api.mpesa import _b2c_callback
+    db = _mpesa_test_session()
+    returned = POSReturn(
+        id=61, organization_id=1, sale_id=7, branch_id="branch-1",
+        client_return_id="return-000061", request_hash="f" * 64,
+        reason="Customer return", refund_total=Decimal("30.00"), created_by=10,
+    )
+    refund = POSRefund(
+        id=62, organization_id=1, return_id=61, method="mpesa",
+        amount=Decimal("30.00"), status="pending",
+    )
+    token = "early-b2c-callback"
+    intent = MpesaRefundIntent(
+        id=63, organization_id=1, branch_id="branch-1", refund_id=62,
+        phone_number="254712345678", amount=Decimal("30.00"),
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(), status="initiating",
+    )
+    db.add_all([returned, refund, intent])
+    db.commit()
+    monkeypatch.setattr(accounting_pos, "post_pos_source",
+                        lambda *args, **kwargs: SimpleNamespace(status="posted"))
+    body = {"Result": {
+        "ConversationID": "AG_EARLY", "OriginatorConversationID": "OR_EARLY",
+        "ResultCode": 0, "ResultDesc": "Success",
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QABEARLY"},
+            {"Key": "TransactionAmount", "Value": 30},
+        ]},
+    }}
+    assert _b2c_callback(db, token, body) is True
+    db.refresh(refund)
+    db.refresh(intent)
+    assert refund.status == "recorded"
+    assert intent.status == "success"
+    assert intent.conversation_id == "AG_EARLY"
+    db.close()
