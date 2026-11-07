@@ -173,3 +173,14 @@ TLS provisioning or UAT approval is claimed.
   **25 passed, 5 warnings**.
 - The subsequent tracker-only commit may trigger another run; the above is the
   recorded code verification result for the inventory test correction.
+
+
+### Latest inventory UI and retry hardening verification
+
+- Added UI support for negative stock adjustments through an explicit increase /
+  decrease selector (`b080c5f`).
+- Idempotent movement replay now also compares the movement reference field
+  (`af299e4`).
+- GitHub Actions run `42361861523` for `af299e4c34f3eadd03efc61d4fc890e906a30e5a`
+  completed successfully: migration upgrade, downgrade/re-upgrade, compilation and
+  pytest all passed; **25 passed, 5 warnings**.
