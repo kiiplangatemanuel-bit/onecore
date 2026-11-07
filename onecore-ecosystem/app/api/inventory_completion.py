@@ -418,7 +418,8 @@ def update_batch_status(batch_id:int,payload:BatchStatusIn,membership=Depends(ac
     row=db.query(InventoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Batch not found")
     if row.status not in ("available","quarantined"): raise HTTPException(409,"Only available or quarantined batches can be dispositioned")
-    if payload.status=="expired" and row.expiry_date:
+    if payload.status=="expired":
+        if not row.expiry_date: raise HTTPException(422,"An expiry date is required before marking a batch expired")
         exp=row.expiry_date if row.expiry_date.tzinfo else row.expiry_date.replace(tzinfo=timezone.utc)
         if exp>datetime.now(timezone.utc): raise HTTPException(422,"Batch has not reached its expiry date")
     if row.status=="available" and payload.status in ("damaged","expired","quarantined") and dec(row.quantity_on_hand)>0:
@@ -474,6 +475,9 @@ def approve_stocktake(stocktake_id:int,membership=Depends(active_membership),use
     wh=get_warehouse(db,membership.organization_id,row.warehouse_id,membership)
     lines=db.query(InventoryStocktakeLine).filter_by(organization_id=membership.organization_id,stocktake_id=row.id).all()
     for line in lines:
+        current_quantity=warehouse_qty(db,membership.organization_id,wh,line.product_id)
+        if current_quantity != dec(line.expected_quantity):
+            raise HTTPException(409,f"Stock changed after count for product {line.product_id}; recount before approval")
         delta=dec(line.counted_quantity)-dec(line.expected_quantity)
         if delta:
             db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=wh.branch_id,warehouse_id=wh.id,
