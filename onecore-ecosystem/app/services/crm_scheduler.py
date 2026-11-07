@@ -61,8 +61,12 @@ def _execute_schedule(db,schedule_id,now):
     if child is None:
         template=db.query(CRMMessageTemplate).filter_by(
             id=schedule.template_id,organization_id=schedule.organization_id).first() if schedule.template_id else None
+        if schedule.template_id and template is None:
+            raise ValueError("Scheduled message template version is unavailable")
         segment=db.query(CRMAudienceSegment).filter_by(
             id=schedule.segment_id,organization_id=schedule.organization_id,is_active=True).first() if schedule.segment_id else None
+        if schedule.segment_id and segment is None:
+            raise ValueError("Scheduled audience segment is inactive or unavailable")
         child=CRMCampaign(organization_id=parent.organization_id,branch_id=parent.branch_id,
             campaign_number=child_number,name=f"{parent.name} · run {run_number}",
             channel=parent.channel,purpose=parent.purpose,
