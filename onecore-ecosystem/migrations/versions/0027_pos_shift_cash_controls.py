@@ -15,7 +15,7 @@ def upgrade():
             sa.Column("reconciliation_status",sa.String(20),nullable=False,server_default="open"),
             sa.Column("counted_denominations",sa.JSON(),nullable=False,server_default=sa.text("'{}'")),
             sa.Column("close_note",sa.String(500),nullable=False,server_default=""),
-            sa.Column("reviewed_by",sa.Integer(),sa.ForeignKey("users.id"),nullable=True),
+            sa.Column("reviewed_by",sa.Integer(),sa.ForeignKey("users.id",name="fk_pos_shifts_reviewed_by_users"),nullable=True),
             sa.Column("reviewed_at",sa.DateTime(timezone=True),nullable=True),
             sa.Column("review_note",sa.String(500),nullable=False,server_default="")]:
             batch.add_column(col)
