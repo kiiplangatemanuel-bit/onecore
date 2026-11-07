@@ -285,3 +285,25 @@ opening balances or unlinked manual control-account entries may produce differen
   Finance must verify the chart-of-accounts mapping and preview before confirmation.
   A close journal and period lock are consequential accounting actions; production
   use requires database transaction, permissions, audit and finance UAT verification.
+
+
+## General-ledger financial statements
+
+- Added a tenant- and branch-scoped financial statement endpoint:
+  `GET /api/v1/accounting/financial-statements`.
+- `statement_type=income_statement` requires `start_date` and supports an
+  optional `end_date`; revenue and expense balances include posted journals in
+  that date range.
+- `statement_type=balance_sheet` reports asset, liability and equity balances
+  cumulatively through `end_date`.
+- Account balances use normal debit/credit conventions. The response includes
+  account-level totals, revenue, expenses, net income, assets, liabilities, equity,
+  current-period earnings and an accounting-equation difference.
+- Reports use posted general-ledger journals only. Draft journals and operational
+  subledgers that have not been posted are excluded.
+- The balance sheet includes current-period net income alongside recorded equity;
+  it does not post a retained-earnings transfer or close revenue/expense accounts.
+  The balanced flag is a ledger arithmetic check, not an audit opinion or statutory
+  statement certification.
+- Currency is the organization's configured base currency; this report does not
+  perform multi-currency translation or consolidation.
