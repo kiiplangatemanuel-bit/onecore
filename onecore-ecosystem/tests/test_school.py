@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.core.models import SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand
-from app.core.schemas import SchoolClassIn, SchoolLearnerIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn
+from app.core.schemas import SchoolClassIn, SchoolLearnerIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.main import app
 
 
@@ -40,3 +40,27 @@ def test_school_api_routes_are_registered():
     assert "/api/v1/school/assessments/{assessment_id}/results" in paths
     assert "/api/v1/school/classes/{class_id}/report-cards" in paths
     assert "/school" in paths
+
+
+def test_school_attendance_payload_rejects_duplicate_learners_and_bad_status():
+    from pydantic import ValidationError
+    payload = SchoolAttendanceIn(
+        class_id=1, attendance_date="2026-11-07",
+        entries=[{"learner_id": 1, "status": "present"},
+                 {"learner_id": 2, "status": "late", "note": "Arrived after assembly"}])
+    assert len(payload.entries) == 2
+    with pytest.raises(ValidationError):
+        SchoolAttendanceIn(class_id=1, attendance_date="2026-11-07",
+            entries=[{"learner_id": 1, "status": "present"},
+                     {"learner_id": 1, "status": "absent"}])
+    with pytest.raises(ValidationError):
+        SchoolAttendanceIn(class_id=1, attendance_date="2026-11-07",
+            entries=[{"learner_id": 1, "status": "unknown"}])
+
+
+def test_school_attendance_model_and_api_routes_are_registered():
+    from app.core.models import SchoolAttendance
+    assert SchoolAttendance.__tablename__ == "school_attendance"
+    assert "/api/v1/school/attendance" in app.openapi()["paths"]
+    operation = app.openapi()["paths"]["/api/v1/school/attendance"]
+    assert "post" in operation and "get" in operation
