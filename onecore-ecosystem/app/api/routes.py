@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, HREmployee, HRLeaveRequest, HRAttendance, HRPayrollProfile, HRPayrollRun, HRPayrollLine, HRPayrollItem, HealthcarePatient, HealthcareAppointment, HealthcareEncounter, PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder, LaboratoryOrderLine, LaboratorySample, SaccoMember, SaccoAccount, SaccoTransaction, SaccoLoanProduct, SaccoLoanApplication, SaccoLoan, SaccoLoanSchedule, SaccoLoanRepayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn, HREmployeeIn, HRLeaveRequestIn, HRLeaveDecisionIn, HRPayrollProfileIn, HRPayrollRunIn, HRPayrollItemIn, HRPayrollApproveIn, HealthcarePatientIn, HealthcareAppointmentIn, HealthcareAppointmentStatusIn, HealthcareEncounterIn, HealthcareEncounterSignIn, PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn, LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, LaboratoryValidateIn, SaccoMemberIn, SaccoKYCDecisionIn, SaccoAccountIn, SaccoTransactionIn, SaccoLoanProductIn, SaccoLoanApplicationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -20,6 +20,7 @@ from app.services.hr import business_days, worked_minutes, payroll_money, payrol
 from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
 from app.services.healthcare import validate_appointment_transition
 from app.services.pharmacy_lab import pharmacy_batch_hash, laboratory_order_hash
+from app.services.sacco import build_repayment_schedule, add_months, allocate_repayment, money as sacco_money
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -5214,3 +5215,214 @@ def decide_sacco_loan_application(application_id: int, payload: SaccoLoanDecisio
     return {"id": row.id, "application_number": row.application_number,
         "status": row.status, "reviewed_by": row.reviewed_by,
         "review_note": row.review_note}
+
+
+@router.post("/sacco/loan-applications/{application_id}/disburse", status_code=201)
+def disburse_sacco_loan(application_id: int, payload: SaccoLoanDisbursementIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    """Record an approved loan disbursement and generate its contractual schedule."""
+    require_permission(membership, "manage")
+    application = db.query(SaccoLoanApplication).filter_by(
+        id=application_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not application or (application.branch_id and not can_access_branch(membership, application.branch_id)):
+        raise HTTPException(404, "Loan application not found")
+    existing = db.query(SaccoLoan).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).first()
+    if existing:
+        return {"id": existing.id, "loan_number": existing.loan_number,
+            "status": "already_disbursed", "funds_transfer_executed": False}
+    if application.status != "approved":
+        raise HTTPException(409, "Only approved loan applications may be disbursed")
+    if application.created_by == user.id:
+        raise HTTPException(403, "The loan applicant cannot disburse their own loan")
+    product = db.query(SaccoLoanProduct).filter_by(
+        id=application.loan_product_id, organization_id=membership.organization_id,
+        is_active=True).first()
+    if not product:
+        raise HTTPException(409, "The originating loan product is no longer active")
+    if product.requires_guarantor:
+        raise HTTPException(409, "Guarantor verification is not available for this product")
+    disbursed_at = datetime.now(timezone.utc)
+    first_due_date = add_months(disbursed_at.date(), 1)
+    try:
+        schedule = build_repayment_schedule(
+            application.requested_principal, product.annual_interest_rate,
+            application.term_months, product.interest_method, first_due_date)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    total_interest = sacco_money(sum((item["interest_due"] for item in schedule), Decimal("0.00")))
+    loan_number = f"LN-{membership.organization_id}-{uuid.uuid4().hex[:12].upper()}"
+    loan = SaccoLoan(organization_id=membership.organization_id,
+        application_id=application.id, member_id=application.member_id,
+        branch_id=application.branch_id, loan_number=loan_number,
+        principal=application.requested_principal,
+        annual_interest_rate=product.annual_interest_rate,
+        term_months=application.term_months, interest_method=product.interest_method,
+        total_interest=total_interest, outstanding_principal=application.requested_principal,
+        outstanding_interest=total_interest, status="active",
+        disbursement_reference=payload.reference, disbursed_at=disbursed_at,
+        created_by=user.id)
+    db.add(loan)
+    db.flush()
+    for item in schedule:
+        db.add(SaccoLoanSchedule(organization_id=membership.organization_id,
+            loan_id=loan.id, installment_number=item["installment_number"],
+            due_date=item["due_date"], principal_due=item["principal_due"],
+            interest_due=item["interest_due"], principal_paid=Decimal("0.00"),
+            interest_paid=Decimal("0.00"), status="pending"))
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan.disbursement_recorded", resource_type="sacco_loan",
+        resource_id=loan_number, detail=f"application:{application.application_number};principal:{loan.principal};reference:{payload.reference}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoLoan).filter_by(
+            organization_id=membership.organization_id, application_id=application.id).first()
+        if existing:
+            return {"id": existing.id, "loan_number": existing.loan_number,
+                "status": "already_disbursed", "funds_transfer_executed": False}
+        raise HTTPException(409, "Loan disbursement conflicted with another request")
+    db.refresh(loan)
+    return {"id": loan.id, "loan_number": loan.loan_number, "status": loan.status,
+        "principal": str(loan.principal), "total_interest": str(loan.total_interest),
+        "installments": len(schedule), "first_due_date": schedule[0]["due_date"].isoformat(),
+        "disbursement_reference": loan.disbursement_reference,
+        "funds_transfer_executed": False}
+
+
+@router.get("/sacco/loans")
+def list_sacco_loans(status: str | None = None,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(SaccoLoan).filter_by(organization_id=membership.organization_id)
+    if status:
+        if status not in {"active", "closed"}:
+            raise HTTPException(422, "Invalid loan status filter")
+        query = query.filter(SaccoLoan.status == status)
+    rows = query.order_by(SaccoLoan.disbursed_at.desc()).all()
+    return [{"id": row.id, "loan_number": row.loan_number, "member_id": row.member_id,
+        "application_id": row.application_id, "principal": str(row.principal),
+        "total_interest": str(row.total_interest),
+        "outstanding_principal": str(row.outstanding_principal),
+        "outstanding_interest": str(row.outstanding_interest),
+        "term_months": row.term_months, "interest_method": row.interest_method,
+        "status": row.status, "disbursed_at": row.disbursed_at.isoformat()}
+        for row in rows if not row.branch_id or can_access_branch(membership, row.branch_id)]
+
+
+@router.get("/sacco/loans/{loan_id}/schedule")
+def get_sacco_loan_schedule(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id).first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    rows = db.query(SaccoLoanSchedule).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanSchedule.installment_number).all()
+    return {"loan_id": loan.id, "loan_number": loan.loan_number,
+        "currency": "KES", "status": loan.status,
+        "outstanding_principal": str(loan.outstanding_principal),
+        "outstanding_interest": str(loan.outstanding_interest),
+        "installments": [{"number": row.installment_number, "due_date": row.due_date.isoformat(),
+            "principal_due": str(row.principal_due), "interest_due": str(row.interest_due),
+            "principal_paid": str(row.principal_paid), "interest_paid": str(row.interest_paid),
+            "status": row.status} for row in rows]}
+
+
+@router.post("/sacco/loans/{loan_id}/repayments", status_code=201)
+def record_sacco_loan_repayment(loan_id: int, payload: SaccoLoanRepaymentIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "create")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    amount = sacco_money(payload.amount)
+    request_data = {"loan_id": loan.id, "amount": str(amount), "reference": payload.reference.strip()}
+    request_hash = hashlib.sha256(json.dumps(request_data, sort_keys=True,
+        separators=(",", ":")).encode()).hexdigest()
+    existing = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Idempotency key was used for different repayment data")
+        return {"id": existing.id, "loan_id": loan.id, "status": "already_recorded",
+            "amount": str(existing.amount), "outstanding_principal": str(loan.outstanding_principal),
+            "outstanding_interest": str(loan.outstanding_interest)}
+    if loan.status != "active":
+        raise HTTPException(409, "Only active loans can receive repayments")
+    rows = db.query(SaccoLoanSchedule).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanSchedule.installment_number).with_for_update().all()
+    try:
+        principal_component, interest_component, allocations = allocate_repayment(amount, rows)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if not allocations:
+        raise HTTPException(409, "Loan has no outstanding installments")
+    for schedule_row, interest_part, principal_part in allocations:
+        schedule_row.interest_paid = sacco_money(Decimal(str(schedule_row.interest_paid)) + interest_part)
+        schedule_row.principal_paid = sacco_money(Decimal(str(schedule_row.principal_paid)) + principal_part)
+        if schedule_row.interest_paid >= schedule_row.interest_due and schedule_row.principal_paid >= schedule_row.principal_due:
+            schedule_row.status = "paid"
+        elif schedule_row.interest_paid > 0 or schedule_row.principal_paid > 0:
+            schedule_row.status = "partial"
+    loan.outstanding_principal = sacco_money(Decimal(str(loan.outstanding_principal)) - principal_component)
+    loan.outstanding_interest = sacco_money(Decimal(str(loan.outstanding_interest)) - interest_component)
+    if loan.outstanding_principal == 0 and loan.outstanding_interest == 0:
+        loan.status = "closed"
+    repayment = SaccoLoanRepayment(organization_id=membership.organization_id,
+        loan_id=loan.id, amount=amount, principal_component=principal_component,
+        interest_component=interest_component, reference=payload.reference.strip(),
+        idempotency_key=payload.idempotency_key, request_hash=request_hash,
+        created_by=user.id)
+    db.add(repayment)
+    db.add(AuditEvent(actor_user_id=user.id, organization_id=membership.organization_id,
+        action="sacco.loan.repayment_recorded", resource_type="sacco_loan",
+        resource_id=loan.loan_number, detail=f"amount:{amount};principal:{principal_component};interest:{interest_component}"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(SaccoLoanRepayment).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key).first()
+        if existing and existing.request_hash == request_hash:
+            loan = db.query(SaccoLoan).filter_by(id=loan_id, organization_id=membership.organization_id).first()
+            return {"id": existing.id, "loan_id": loan.id, "status": "already_recorded",
+                "amount": str(existing.amount), "outstanding_principal": str(loan.outstanding_principal),
+                "outstanding_interest": str(loan.outstanding_interest)}
+        raise HTTPException(409, "Concurrent repayment conflicts with this idempotency key")
+    db.refresh(repayment)
+    return {"id": repayment.id, "loan_id": loan.id, "amount": str(repayment.amount),
+        "principal_component": str(repayment.principal_component),
+        "interest_component": str(repayment.interest_component),
+        "outstanding_principal": str(loan.outstanding_principal),
+        "outstanding_interest": str(loan.outstanding_interest), "loan_status": loan.status,
+        "status": "recorded"}
+
+
+@router.get("/sacco/loans/{loan_id}/repayments")
+def list_sacco_loan_repayments(loan_id: int,
+    membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    loan = db.query(SaccoLoan).filter_by(
+        id=loan_id, organization_id=membership.organization_id).first()
+    if not loan or (loan.branch_id and not can_access_branch(membership, loan.branch_id)):
+        raise HTTPException(404, "SACCO loan not found")
+    rows = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id, loan_id=loan.id
+    ).order_by(SaccoLoanRepayment.created_at, SaccoLoanRepayment.id).all()
+    return [{"id": row.id, "amount": str(row.amount),
+        "principal_component": str(row.principal_component),
+        "interest_component": str(row.interest_component), "reference": row.reference,
+        "created_at": row.created_at.isoformat()} for row in rows]
