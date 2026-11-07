@@ -878,3 +878,17 @@ Boundaries: no PDF generation, guardian portal/email delivery, principal sign-of
 class ranking across all learners, report-card templates, competency narrative,
 CBC strands/learning outcomes, fee-clearance gating, transcript certification or
 UAT. Historical results depend on retained learner placement records.
+
+
+## CRM sales funnel and quote performance analytics
+
+Implemented on `feature/crm-pipeline-performance-analytics`:
+- Added read-only tenant- and branch-scoped `GET /api/v1/crm/analytics`.
+- Reports lead funnel counts, open pipeline and weighted open values, won/lost
+  values, closed-deal win rate, and quote lifecycle metrics.
+- Groups every monetary metric by currency and uses Decimal arithmetic.
+- Added unit and OpenAPI route-registration tests.
+
+Boundaries: descriptive analytics only; no cohort attribution, historical stage
+duration, configurable probability calibration, rep-level targets, predictive
+modelling or campaign delivery analytics. CI and finance/sales UAT remain required.
