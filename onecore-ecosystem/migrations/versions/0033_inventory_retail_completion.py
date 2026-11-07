@@ -66,7 +66,7 @@ def upgrade():
         sa.Column("warehouse_id", sa.Integer(), sa.ForeignKey("inventory_warehouses.id"), nullable=False),
         sa.Column("product_id", sa.Integer(), sa.ForeignKey("inventory_products.id"), nullable=False),
         sa.Column("lot_number", sa.String(100), nullable=False, server_default=""),
-        sa.Column("serial_number", sa.String(100), nullable=False, server_default=""),
+        sa.Column("serial_number", sa.String(100), nullable=True),
         sa.Column("expiry_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column("quantity_on_hand", sa.Numeric(18,3), nullable=False, server_default="0"),
         sa.Column("unit_cost", sa.Numeric(18,4), nullable=False, server_default="0"),
