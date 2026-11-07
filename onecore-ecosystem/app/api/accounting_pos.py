@@ -91,9 +91,8 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
             _line(lines, account_id, debit=amount, description="POS sale tender")
         _line(lines, mapping["sales_discount_account_id"],
               debit=sale.discount_amount, description="POS sales discounts")
-        net_sales = _money(Decimal(str(sale.subtotal_amount)) - Decimal(str(sale.discount_amount)))
-        _line(lines, mapping["sales_revenue_account_id"], credit=net_sales,
-              description="POS net sales revenue")
+        _line(lines, mapping["sales_revenue_account_id"], credit=sale.subtotal_amount,
+              description="POS gross sales revenue")
         if _money(sale.tax_amount):
             if not mapping["output_tax_account_id"]:
                 return None, None, "Output tax account is required for taxable POS sales"
@@ -111,9 +110,13 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
             organization_id=org_id, return_id=result.id
         ).all()
         returned_tax = _money(sum((Decimal(str(row.tax_amount)) for row in returned_lines), Decimal("0")))
+        returned_discount = _money(sum((Decimal(str(row.discount_amount)) for row in returned_lines), Decimal("0")))
         return_base = _money(Decimal(str(result.refund_total)) - returned_tax)
-        _line(lines, mapping["sales_returns_account_id"], debit=return_base,
-              description="POS sales returns")
+        gross_return = _money(return_base + returned_discount)
+        _line(lines, mapping["sales_returns_account_id"], debit=gross_return,
+              description="POS gross sales returns")
+        _line(lines, mapping["sales_discount_account_id"], credit=returned_discount,
+              description="Reversal of original POS discount")
         if returned_tax:
             if not mapping["output_tax_account_id"]:
                 return None, None, "Output tax account is required for taxable POS returns"
@@ -185,11 +188,12 @@ def post_pos_source(db: Session, organization_id: int, branch_id: str,
         return link
     created_at = source.created_at or datetime.now(timezone.utc)
     entry_date = created_at.date()
+    entry_datetime = datetime.combine(entry_date, datetime.min.time(), tzinfo=timezone.utc)
     closed_period = db.query(AccountingFiscalPeriod).filter(
         AccountingFiscalPeriod.organization_id == organization_id,
         AccountingFiscalPeriod.status == "closed",
-        AccountingFiscalPeriod.start_date <= entry_date,
-        AccountingFiscalPeriod.end_date >= entry_date,
+        AccountingFiscalPeriod.start_date <= entry_datetime,
+        AccountingFiscalPeriod.end_date >= entry_datetime,
     ).first()
     if closed_period:
         link.status = "pending"
@@ -200,7 +204,7 @@ def post_pos_source(db: Session, organization_id: int, branch_id: str,
         organization_id=organization_id, branch_id=branch_id,
         journal_number=f"POS-{prefix}-{source_id}", reference=f"POS-{source_type.upper()}:{source_id}",
         memo=f"Automatic POS {source_type} posting #{source_id}",
-        status="posted", entry_date=datetime.combine(entry_date, datetime.min.time(), tzinfo=timezone.utc),
+        status="posted", entry_date=entry_datetime,
         created_by=actor_user_id, posted_by=actor_user_id, posted_at=datetime.now(timezone.utc),
     )
     db.add(journal)
