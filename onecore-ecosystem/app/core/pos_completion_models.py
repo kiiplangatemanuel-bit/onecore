@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Numeric, Index
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Numeric, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -61,7 +61,11 @@ class POSCustomer(Base):
     lifetime_spend: Mapped[Decimal] = mapped_column(Numeric(18,2), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("uq_pos_customer_number", "organization_id", "customer_number", unique=True),)
+    __table_args__ = (
+        Index("uq_pos_customer_number", "organization_id", "customer_number", unique=True),
+        Index("uq_pos_customer_phone", "organization_id", "phone", unique=True,
+              postgresql_where=text("phone <> ''"), sqlite_where=text("phone <> ''")),
+    )
 
 class POSLoyaltyEntry(Base):
     __tablename__ = "pos_loyalty_entries"
