@@ -254,6 +254,21 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         gross = money(line.base_pay + earnings)
         employee = db.query(HREmployee).filter_by(id=line.employee_id, organization_id=membership.organization_id).first()
         extras = (payload.get("employees") or {}).get(str(line.employee_id), {})
+        period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
+        days_employed = int(extras.get("days_employed", period_days))
+        if period_days < 1 or days_employed < 0 or days_employed > period_days:
+            raise HTTPException(422, "Invalid payroll proration days")
+        prorated_base = money(D(str(line.base_pay)) * D(days_employed) / D(period_days))
+        hourly_rate = money(extras.get("hourly_rate", 0))
+        overtime_hours = D(str(extras.get("overtime_hours", 0)))
+        overtime_multiplier = D(str(extras.get("overtime_multiplier", "1.5")))
+        if overtime_hours < 0 or overtime_multiplier <= 0 or overtime_hours > D("744"):
+            raise HTTPException(422, "Invalid overtime hours or multiplier")
+        overtime_pay = money(hourly_rate * overtime_hours * overtime_multiplier)
+        shift_allowance = money(extras.get("shift_allowance", 0))
+        cash_allowances = money(extras.get("cash_allowances", 0))
+        taxable_benefits = money(extras.get("taxable_benefits", 0))
+        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + taxable_benefits)
         result = calculate_kenya_payroll(gross, extras, rule.data, {**extras, "other_deductions": money(deductions + money(extras.get("other_deductions", 0)))})
         snapshot = {"employee_id": line.employee_id, "employee_number": line.employee_number,
                     "employee_name": line.employee_name, "run_id": run.id, "run_number": run.run_number,
@@ -261,7 +276,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
-                    "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits)}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
