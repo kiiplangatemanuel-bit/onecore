@@ -674,3 +674,22 @@ Implemented on branch `feature/crm-sales-order-conversion`:
 
 Boundaries: sales orders do not reserve/deduct stock, generate invoices, collect deposits,
 dispatch or notify customers. CI and reviewer acceptance are required before merge.
+
+
+
+## CRM marketing consent and campaign preparation increment (7 November 2026)
+
+Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order branch):
+
+- Append-only channel-specific marketing consent grants/revocations with source,
+  actor, timestamps and optional expiry.
+- Draft email/SMS/WhatsApp campaign creation and manager-only recipient preparation.
+- Recipient selection uses the latest consent decision, excludes expired/revoked
+  consent and contacts without a usable channel address.
+- Tenant/branch filters, address snapshots, unique campaign-contact constraint and
+  idempotent ready state.
+- Migration `0021_crm_consent_campaigns`, APIs, tests and documentation.
+
+Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
+unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
+unimplemented. A dispatch worker must re-check current consent immediately before send.

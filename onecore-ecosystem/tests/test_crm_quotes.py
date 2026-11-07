@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine
-from app.core.schemas import CRMQuoteIn, CRMQuoteConvertIn
+from app.core.models import CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient
+from app.core.schemas import CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn
 from app.main import app
 
 
@@ -44,3 +44,24 @@ def test_crm_quote_conversion_contract_and_routes():
     assert "/api/v1/crm/orders/{order_id}" in paths
     with pytest.raises(ValidationError):
         CRMQuoteConvertIn(order_number="invalid order number with spaces")
+
+
+
+def test_crm_consent_and_campaign_contracts_and_routes():
+    consent = CRMContactConsentIn(channel="email", decision="granted", source="website signup")
+    assert consent.purpose == "marketing"
+    with pytest.raises(ValidationError):
+        CRMContactConsentIn(channel="email", decision="granted", source=" ")
+    with pytest.raises(ValidationError):
+        CRMContactConsentIn(channel="sms", decision="allowed", source="website")
+    campaign = CRMCampaignIn(
+        campaign_number="CMP-2026-001", name="November update",
+        channel="email", message="Our November product update")
+    assert campaign.channel == "email"
+    assert CRMContactConsent.__tablename__ == "crm_contact_consents"
+    assert CRMCampaign.__tablename__ == "crm_campaigns"
+    assert CRMCampaignRecipient.__tablename__ == "crm_campaign_recipients"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/crm/contacts/{contact_id}/consents" in paths
+    assert "/api/v1/crm/campaigns" in paths
+    assert "/api/v1/crm/campaigns/{campaign_id}/prepare" in paths
