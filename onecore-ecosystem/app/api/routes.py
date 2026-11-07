@@ -1,9 +1,9 @@
-import json, re, uuid, hashlib
+import json, re, uuid, hashlib, secrets
 from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -1574,9 +1574,30 @@ def review_pos_shift(shift_id:int,payload:POSShiftReviewIn,membership=Depends(ac
     return {"id":shift.id,"reconciliation_status":shift.reconciliation_status,"reviewed_by":user.id}
 
 
+def _record_pos_sync_conflict(db, membership, user, payload, shift, conflict_type, server_snapshot):
+    """Persist a device-bound sync conflict before returning the corresponding 409."""
+    if not shift or not getattr(shift,"device_id",None):
+        return None
+    from app.core.pos_completion_models import POSOfflineConflict
+    existing=db.query(POSOfflineConflict).filter_by(
+        organization_id=membership.organization_id,device_id=shift.device_id,
+        client_transaction_id=payload.client_transaction_id).first()
+    if existing:
+        return existing.id
+    row=POSOfflineConflict(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        device_id=shift.device_id,shift_id=shift.id,client_transaction_id=payload.client_transaction_id,
+        conflict_type=conflict_type,server_snapshot=server_snapshot or {},
+        client_snapshot=payload.model_dump(mode="json"),status="pending")
+    db.add(row)
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="pos.offline_conflict.detected",resource_type="pos_offline_conflict",
+        resource_id="pending",detail=conflict_type+":"+payload.client_transaction_id))
+    db.commit()
+    return row.id
+
 @router.post("/pos/sync", status_code=201)
 def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
-                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+                  user: User = Depends(current_user), db: Session = Depends(get_db), x_pos_device_token: str | None = Header(default=None)):
     require_permission(membership, "create")
     _crm_branch_check(db, membership, payload.branch_id)
     request_hash = canonical_request_hash(payload)
@@ -1586,6 +1607,9 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).first()
     if existing:
         if existing.request_hash != request_hash:
+            prior_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+            _record_pos_sync_conflict(db,membership,user,payload,prior_shift,"duplicate_transaction",
+                {"existing_sale_id":existing.id,"existing_request_hash":existing.request_hash})
             raise HTTPException(409, "Client transaction ID was already used for different sale data")
         existing_payments = db.query(POSPayment).filter_by(
             organization_id=membership.organization_id, sale_id=existing.id
@@ -1599,7 +1623,22 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         branch_id=payload.branch_id, cashier_user_id=user.id, status="open"
     ).with_for_update().first()
     if not shift:
+        prior_shift=db.query(POSShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,branch_id=payload.branch_id).first()
+        _record_pos_sync_conflict(db,membership,user,payload,prior_shift,"shift_closed",
+            {"shift_status":prior_shift.status if prior_shift else "missing","shift_id":payload.shift_id})
         raise HTTPException(409, "An open cashier shift for this branch is required to sync sales")
+    if shift.device_id:
+        from app.core.pos_completion_models import POSDevice
+        device=db.query(POSDevice).filter_by(id=shift.device_id,organization_id=membership.organization_id,branch_id=shift.branch_id).first()
+        if not device or device.status!="active" or not x_pos_device_token or not secrets.compare_digest(
+            device.credential_hash,hashlib.sha256(x_pos_device_token.encode()).hexdigest()):
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"device_revoked",
+                {"device_status":device.status if device else "missing"})
+            raise HTTPException(401,"Trusted POS device authentication failed")
+        if device.offline_until and device.offline_until < datetime.now(timezone.utc):
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"offline_expired",
+                {"offline_until":device.offline_until.isoformat()})
+            raise HTTPException(409,"Trusted device offline authorization expired; supervisor review is required")
     product_ids = {line.product_id for line in payload.lines}
     products = db.query(InventoryProduct).filter(
         InventoryProduct.organization_id == membership.organization_id,
@@ -1607,6 +1646,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).with_for_update().all()
     product_map = {p.id: p for p in products}
     if set(product_map) != product_ids:
+        _record_pos_sync_conflict(db,membership,user,payload,shift,"unknown_product",
+            {"available_product_ids":sorted(product_map.keys()),"requested_product_ids":sorted(product_ids)})
         raise HTTPException(404, "One or more POS products were not found")
     if any(Decimal(str(line.discount_percent)) > 0 for line in payload.lines):
         require_permission(membership, "manage")
@@ -1675,6 +1716,9 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             take=min(available,remaining)
             if take>0: allocations.append([None,take]);remaining-=take
         if remaining>0:
+            _record_pos_sync_conflict(db,membership,user,payload,shift,"stale_stock",
+                {"product_id":product_id,"sku":product_map[product_id].sku,"requested_quantity":str(quantity),
+                 "available_quantity":str(quantity-remaining),"unavailable_quantity":str(remaining)})
             raise HTTPException(409, f"Insufficient unreserved stock for product {product_map[product_id].sku}")
         warehouse_allocations[product_id]=allocations
     sale = POSSale(
