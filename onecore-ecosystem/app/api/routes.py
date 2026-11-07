@@ -5143,6 +5143,8 @@ def create_sacco_loan_application(payload: SaccoLoanApplicationIn,
     ).first()
     if not product:
         raise HTTPException(404, "Active loan product not found")
+    if product.requires_guarantor:
+        raise HTTPException(422, "This product requires guarantor capture, which is not yet supported")
     principal = Decimal(str(payload.requested_principal)).quantize(Decimal("0.01"))
     if principal < product.minimum_principal or principal > product.maximum_principal:
         raise HTTPException(422, "Requested principal is outside loan product limits")
