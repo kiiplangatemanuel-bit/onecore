@@ -48,7 +48,7 @@ def test_rule_validation_rejects_non_contiguous_or_unlimited_middle_tax_band():
             "insurance_relief_monthly_limit": "5000",
         },
         "nssf": {"rate": "0.06", "lower_earnings_limit": "9000", "upper_earnings_limit": "108000"},
-        "shif": {"rate": "0.0275", "minimum": "300"},
+        "shif": {"rate": "0.0275", "salaried_minimum": "0", "non_salaried_minimum": "300"},
         "housing_levy": {"employee_rate": "0.015", "employer_rate": "0.015"},
     }
     with pytest.raises(HTTPException):
