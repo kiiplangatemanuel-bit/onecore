@@ -1604,11 +1604,18 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
         InventoryProduct, InventoryProduct.id == POSSaleLine.product_id
     ).filter(POSSaleLine.organization_id == membership.organization_id,
              POSSaleLine.sale_id == sale.id).order_by(POSSaleLine.id).all()
-    returned = db.query(POSReturnLine.sale_line_id, func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
-        POSReturn, POSReturn.id == POSReturnLine.return_id
-    ).filter(POSReturn.organization_id == membership.organization_id,
-             POSReturn.sale_id == sale.id).group_by(POSReturnLine.sale_line_id).all()
-    returned_map = {line_id: quantity for line_id, quantity in returned}
+    returned = db.query(
+        POSReturnLine.sale_line_id,
+        func.coalesce(func.sum(POSReturnLine.quantity), 0),
+        func.coalesce(func.sum(POSReturnLine.line_total), 0),
+    ).join(POSReturn, POSReturn.id == POSReturnLine.return_id).filter(
+        POSReturn.organization_id == membership.organization_id,
+        POSReturn.sale_id == sale.id
+    ).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {
+        line_id: (Decimal(str(quantity)), Decimal(str(value)))
+        for line_id, quantity, value in returned
+    }
     payments = db.query(POSPayment).filter_by(
         organization_id=membership.organization_id, sale_id=sale.id
     ).order_by(POSPayment.id).all()
@@ -1622,8 +1629,10 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
         "created_at": sale.created_at.isoformat(),
         "lines": [{
             "id": line.id, "product_id": line.product_id, "sku": sku, "name": name,
-            "quantity": str(line.quantity), "returned_quantity": str(returned_map.get(line.id, 0)),
-            "returnable_quantity": str(Decimal(str(line.quantity)) - Decimal(str(returned_map.get(line.id, 0)))),
+            "quantity": str(line.quantity),
+            "returned_quantity": str(returned_map.get(line.id, (Decimal("0"), Decimal("0")))[0]),
+            "returnable_quantity": str(Decimal(str(line.quantity)) - returned_map.get(line.id, (Decimal("0"), Decimal("0")))[0]),
+            "returnable_value": str(Decimal(str(line.line_total)) - returned_map.get(line.id, (Decimal("0"), Decimal("0")))[1]),
             "unit_price": str(line.unit_price),
             "discount_percent": str(line.discount_percent),
             "discount_amount": str(line.discount_amount),
