@@ -6,6 +6,9 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+import csv
+from io import StringIO
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func
 from sqlalchemy.exc import IntegrityError
@@ -73,6 +76,11 @@ class ProvisionPolicyIn(BaseModel):
     rate_31_60: Decimal = Field(ge=0, le=100)
     rate_61_90: Decimal = Field(ge=0, le=100)
     rate_over_90: Decimal = Field(ge=0, le=100)
+
+
+class RefinanceIn(BaseModel):
+    replacement_loan_id: int = Field(gt=0)
+    reason: str = Field(min_length=5, max_length=500)
 
 
 class JournalPostIn(BaseModel):
@@ -696,3 +704,181 @@ def reverse_settled_collection(collection_id: int, payload: DecisionIn, membersh
     db.commit()
     return {"id": row.id, "status": row.status, "reversal_id": reversal.id,
             "ledger_reversal_required": True}
+
+
+@router.get("/members/{member_id}/statement.csv")
+def download_member_statement(member_id: int, membership=Depends(active_membership),
+                              db: Session=Depends(get_db), start_date: date | None = None,
+                              end_date: date | None = None):
+    require_permission(membership, "read")
+    member = db.query(SaccoMember).filter_by(
+        id=member_id, organization_id=membership.organization_id).first()
+    if not member or not _visible_branch(membership, member.branch_id):
+        raise HTTPException(404, "Member not found")
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "End date must not precede start date")
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["date", "transaction_type", "account_or_loan", "reference", "debit", "credit", "currency"])
+    accounts = db.query(SaccoAccount).filter_by(
+        organization_id=membership.organization_id, member_id=member.id).all()
+    for account in accounts:
+        txs = db.query(SaccoTransaction).filter_by(
+            organization_id=membership.organization_id, account_id=account.id).order_by(
+            SaccoTransaction.created_at, SaccoTransaction.id).all()
+        for tx in txs:
+            if start_date and tx.created_at.date() < start_date: continue
+            if end_date and tx.created_at.date() > end_date: continue
+            withdrawal = tx.transaction_type == "withdrawal"
+            writer.writerow([tx.created_at.isoformat(), tx.transaction_type, account.account_number,
+                tx.reference, str(tx.amount) if withdrawal else "0.00",
+                "0.00" if withdrawal else str(tx.amount), account.currency])
+    repayments = db.query(SaccoLoanRepayment, SaccoLoan).join(
+        SaccoLoan, SaccoLoan.id == SaccoLoanRepayment.loan_id).filter(
+        SaccoLoan.organization_id == membership.organization_id, SaccoLoan.member_id == member.id).all()
+    for tx, loan in repayments:
+        if start_date and tx.created_at.date() < start_date: continue
+        if end_date and tx.created_at.date() > end_date: continue
+        writer.writerow([tx.created_at.isoformat(), "loan_repayment", loan.loan_number,
+            tx.reference, "0.00", str(tx.amount), "KES"])
+    return Response(output.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="sacco-statement-{member.member_number}.csv"'})
+
+
+@router.post("/loans/{loan_id}/refinance")
+def request_refinance(loan_id: int, payload: RefinanceIn, membership=Depends(active_membership),
+                      user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    source = _loan_or_404(db, membership, loan_id, lock=True)
+    replacement = _loan_or_404(db, membership, payload.replacement_loan_id, lock=True)
+    if source.id == replacement.id or source.member_id != replacement.member_id:
+        raise HTTPException(422, "Replacement loan must be a different loan owned by the same member")
+    if source.status != "active" or replacement.status != "active":
+        raise HTTPException(409, "Both source and replacement loans must be active")
+    quote = loan_settlement_quote(loan_id, membership, db, datetime.now(timezone.utc).date())
+    settlement = Decimal(quote["settlement_amount"])
+    if replacement.principal < settlement:
+        raise HTTPException(422, "Replacement loan principal is below the source loan settlement amount")
+    pending = db.query(SaccoFinanceRecord).filter_by(
+        organization_id=membership.organization_id, record_type="loan_refinance",
+        loan_id=source.id, status="pending").first()
+    if pending: raise HTTPException(409, "A refinance request is already pending")
+    row, _ = _record(db, membership, user, "loan_refinance",
+        f"refinance:{source.id}:{replacement.id}",
+        {"replacement_loan_id": replacement.id, "settlement_amount": str(settlement),
+         "reason": payload.reason.strip()}, member_id=source.member_id, loan_id=source.id,
+        amount=settlement, branch_id=source.branch_id, status="pending")
+    _audit(db, membership, user, "sacco.loan.refinance.requested", "sacco_finance_record", row.id)
+    db.commit()
+    return {"request_id": row.id, "status": row.status, "source_loan_id": source.id,
+            "replacement_loan_id": replacement.id, "settlement_amount": str(settlement)}
+
+
+@router.post("/refinances/{request_id}/decision")
+def decide_refinance(request_id: int, payload: DecisionIn, membership=Depends(active_membership),
+                     user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(SaccoFinanceRecord).filter_by(
+        id=request_id, organization_id=membership.organization_id,
+        record_type="loan_refinance", status="pending").with_for_update().first()
+    if not row or not _visible_branch(membership, row.branch_id):
+        raise HTTPException(404, "Pending refinance request not found")
+    if row.created_by == user.id and payload.decision == "approved":
+        raise HTTPException(403, "Maker cannot approve their own refinance request")
+    source = _loan_or_404(db, membership, row.loan_id, lock=True)
+    replacement = _loan_or_404(db, membership, row.data["replacement_loan_id"], lock=True)
+    if payload.decision == "approved":
+        if replacement.member_id != source.member_id or replacement.status != "active":
+            raise HTTPException(409, "Replacement loan is no longer eligible")
+        schedules = db.query(SaccoLoanSchedule).filter_by(
+            organization_id=membership.organization_id, loan_id=source.id).order_by(
+            SaccoLoanSchedule.installment_number).with_for_update().all()
+        amount = money(row.amount)
+        try:
+            principal, interest, allocations = allocate_repayment(amount, schedules)
+        except ValueError as exc:
+            raise HTTPException(409, "Source loan balance changed; obtain a new settlement quote") from exc
+        key = f"refinance-repayment:{row.id}"
+        digest = hashlib.sha256(f"{source.id}:{replacement.id}:{amount}".encode()).hexdigest()
+        db.add(SaccoLoanRepayment(organization_id=membership.organization_id, loan_id=source.id,
+            amount=amount, principal_component=principal, interest_component=interest,
+            reference=f"REFINANCE-{replacement.loan_number}", idempotency_key=key,
+            request_hash=digest, created_by=user.id))
+        for schedule, ip, pp in allocations:
+            schedule.interest_paid = money(schedule.interest_paid + ip)
+            schedule.principal_paid = money(schedule.principal_paid + pp)
+            if schedule.interest_paid >= schedule.interest_due and schedule.principal_paid >= schedule.principal_due:
+                schedule.status = "paid"
+        source.outstanding_principal = money(source.outstanding_principal-principal)
+        source.outstanding_interest = money(source.outstanding_interest-interest)
+        if source.outstanding_principal == 0 and source.outstanding_interest == 0:
+            source.status = "closed"
+        row.data = {**(row.data or {}), "settled_by_replacement_loan": replacement.id,
+                    "principal_component": str(principal), "interest_component": str(interest)}
+    row.status = payload.decision
+    row.data = {**(row.data or {}), "decision_note": payload.note.strip(),
+                "decided_by": user.id, "decided_at": datetime.now(timezone.utc).isoformat()}
+    _audit(db, membership, user, "sacco.loan.refinance.decided", "sacco_finance_record", row.id, payload.decision)
+    db.commit()
+    return {"request_id": row.id, "status": row.status, "source_loan_status": source.status}
+
+
+@router.post("/arrears/notifications/queue")
+def queue_arrears_notifications(membership=Depends(active_membership),
+                                user: User=Depends(current_user), db: Session=Depends(get_db),
+                                as_of: date | None = None):
+    require_permission(membership, "manage")
+    cutoff = as_of or datetime.now(timezone.utc).date()
+    rows = db.query(SaccoLoan, SaccoLoanSchedule).join(
+        SaccoLoanSchedule, and_(SaccoLoanSchedule.loan_id == SaccoLoan.id,
+                                SaccoLoanSchedule.organization_id == SaccoLoan.organization_id)).filter(
+        SaccoLoan.organization_id == membership.organization_id, SaccoLoan.status == "active",
+        SaccoLoanSchedule.status != "paid", SaccoLoanSchedule.due_date < cutoff).all()
+    queued = []
+    for loan, inst in rows:
+        if not _visible_branch(membership, loan.branch_id): continue
+        days = (cutoff-inst.due_date).days
+        due = max(Decimal("0"), Decimal(inst.principal_due)-Decimal(inst.principal_paid)) + max(
+            Decimal("0"), Decimal(inst.interest_due)-Decimal(inst.interest_paid))
+        if due <= 0: continue
+        member = db.query(SaccoMember).filter_by(
+            id=loan.member_id, organization_id=membership.organization_id).first()
+        bucket = "1_30" if days <= 30 else "31_60" if days <= 60 else "61_90" if days <= 90 else "90_plus"
+        key = f"arrears-notice:{loan.id}:{inst.id}:{cutoff.isoformat()}"
+        data = {"channel": "sms", "phone": member.phone if member else None,
+            "member_name": member.full_name if member else "", "loan_number": loan.loan_number,
+            "installment_id": inst.id, "days_past_due": days, "ageing_bucket": bucket,
+            "message": f"Your SACCO loan {loan.loan_number} has an overdue installment. Please contact the SACCO to arrange payment.",
+            "delivery_status": "queued"}
+        notice, created = _record(db, membership, user, "arrears_notification", key, data,
+            member_id=loan.member_id, loan_id=loan.id, amount=money(due),
+            branch_id=loan.branch_id, status="queued")
+        if created: queued.append(notice.id)
+    _audit(db, membership, user, "sacco.arrears.notifications.queued", "sacco_finance", cutoff,
+           f"queued:{len(queued)}")
+    db.commit()
+    return {"as_of": cutoff.isoformat(), "queued_count": len(queued), "notification_ids": queued,
+            "delivery": "queued_only_provider_delivery_not_configured"}
+
+
+@router.get("/reports/regulatory")
+def regulatory_report(membership=Depends(active_membership), db: Session=Depends(get_db),
+                      as_of: date | None = None):
+    require_permission(membership, "read")
+    cutoff = as_of or datetime.now(timezone.utc).date()
+    summary = sacco_finance_summary(membership, db)
+    overdue_rows = db.query(SaccoLoan, SaccoLoanSchedule).join(
+        SaccoLoanSchedule, and_(SaccoLoanSchedule.loan_id == SaccoLoan.id,
+                                SaccoLoanSchedule.organization_id == SaccoLoan.organization_id)).filter(
+        SaccoLoan.organization_id == membership.organization_id, SaccoLoan.status == "active",
+        SaccoLoanSchedule.status != "paid", SaccoLoanSchedule.due_date < cutoff).all()
+    overdue = Decimal("0.00")
+    for loan, inst in overdue_rows:
+        if _visible_branch(membership, loan.branch_id):
+            overdue += max(Decimal("0"), Decimal(inst.principal_due)-Decimal(inst.principal_paid))
+            overdue += max(Decimal("0"), Decimal(inst.interest_due)-Decimal(inst.interest_paid))
+    return {"as_of": cutoff.isoformat(), "currency": "KES", "portfolio": summary,
+        "overdue_exposure": str(money(overdue)),
+        "portfolio_at_risk_30_plus": str(money(overdue)),
+        "classification_basis": "past_due_scheduled_installments",
+        "regulatory_status": "management_workpaper_not_a_filed_or_certified_regulatory_return"}
