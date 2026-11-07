@@ -22,7 +22,7 @@ by an organization or branch administrator:
 - healthcare_admin: full patient, clinical, consent, access and audit administration
 - clinician: patient read, clinical read/write, appointments and break-glass
 - nurse: patient read, clinical read, appointments and break-glass (no clinical write)
-- receptionist: patient registration/read and appointment management (no clinical notes)
+- receptionist: patient registration and appointment management (no patient/clinical PHI read)
 - privacy_officer: patient access/consent governance and access audit, without PHI read
 - clinical_auditor: patient/clinical read with a recorded reason and audit access
 - lab_technician and pharmacist: limited patient/clinical read
