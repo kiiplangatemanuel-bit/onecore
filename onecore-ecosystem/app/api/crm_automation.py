@@ -118,6 +118,19 @@ def list_templates(m=Depends(active_membership),db:Session=Depends(get_db)):
         "branch_id":x.branch_id} for x in q.order_by(CRMCommunicationTemplate.name,CRMCommunicationTemplate.version.desc()).all()]
 
 
+@router.get("/templates/{template_id}/versions")
+def template_versions(template_id:int,m=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(m,"read")
+    current=db.query(CRMCommunicationTemplate).filter_by(
+        id=template_id,organization_id=m.organization_id).first()
+    if not current or not _asset_branch_ok(m,current.branch_id):raise HTTPException(404,"Template not found")
+    rows=db.query(CRMCommunicationTemplate).filter_by(
+        organization_id=m.organization_id,name=current.name).order_by(
+        CRMCommunicationTemplate.version.desc()).all()
+    return [{"id":x.id,"version":x.version,"channel":x.channel,"purpose":x.purpose,
+        "is_active":x.is_active,"created_at":x.created_at.isoformat()} for x in rows]
+
+
 @router.post("/templates",status_code=201)
 def create_template(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
