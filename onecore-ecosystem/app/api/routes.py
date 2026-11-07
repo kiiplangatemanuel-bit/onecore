@@ -16,7 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
+from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -211,7 +211,8 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
         raise HTTPException(409, "SKU already exists in this organization")
     row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
                            name=payload.name.strip(), description=payload.description,
-                           unit=payload.unit, sale_price=payload.sale_price, created_by=user.id)
+                           unit=payload.unit, sale_price=payload.sale_price,
+                           tax_rate=payload.tax_rate, created_by=user.id)
     db.add(row)
     try:
         db.commit()
@@ -221,7 +222,8 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
     db.refresh(row)
     audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
     return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
-            "unit": row.unit, "sale_price": str(row.sale_price), "is_active": row.is_active}
+            "unit": row.unit, "sale_price": str(row.sale_price),
+            "tax_rate": str(row.tax_rate), "is_active": row.is_active}
 
 
 @router.get("/inventory/stock")
@@ -1472,19 +1474,32 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     product_map = {p.id: p for p in products}
     if set(product_map) != product_ids:
         raise HTTPException(404, "One or more POS products were not found")
+    if any(Decimal(str(line.discount_percent)) > 0 for line in payload.lines):
+        require_permission(membership, "manage")
+    subtotal_total = Decimal("0.00")
+    discount_total = Decimal("0.00")
+    tax_total = Decimal("0.00")
     total = Decimal("0.00")
     prepared = []
     aggregate_qty = {}
     for line in payload.lines:
         product = product_map[line.product_id]
         unit_price = money(Decimal(str(product.sale_price)))
-        line_total = money(unit_price * line.quantity)
+        if Decimal(str(product.tax_rate)) < 0 or Decimal(str(product.tax_rate)) > 100:
+            raise HTTPException(409, f"Product {product.sku} has an invalid configured tax rate")
+        subtotal, discount, tax, line_total = calculate_pos_line(
+            unit_price, line.quantity, Decimal(str(line.discount_percent)),
+            Decimal(str(product.tax_rate)))
         if line_total <= 0:
-            raise HTTPException(409, f"Product {product.sku} has no configured sale price")
+            raise HTTPException(409, f"Product {product.sku} has no configured sale price after discount")
+        subtotal_total += subtotal
+        discount_total += discount
+        tax_total += tax
         total += line_total
         aggregate_qty[line.product_id] = aggregate_qty.get(line.product_id, Decimal("0")) + line.quantity
-        prepared.append((line, unit_price, line_total))
-    total = money(total)
+        prepared.append((line, unit_price, subtotal, discount, Decimal(str(product.tax_rate)), tax, line_total))
+    subtotal_total, discount_total, tax_total, total = map(
+        money, (subtotal_total, discount_total, tax_total, total))
     validate_payment_total(total, payload.payments)
     for product_id, quantity in aggregate_qty.items():
         stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
@@ -1498,15 +1513,19 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         organization_id=membership.organization_id, branch_id=payload.branch_id,
         shift_id=shift.id, cashier_user_id=user.id,
         client_transaction_id=payload.client_transaction_id, request_hash=request_hash,
-        total_amount=total, currency=payload.currency, status="posted",
+        total_amount=total, subtotal_amount=subtotal_total,
+        discount_amount=discount_total, tax_amount=tax_total,
+        currency=payload.currency, status="posted",
         offline_created_at=payload.offline_created_at
     )
     db.add(sale)
     db.flush()
-    for index, (line, unit_price, line_total) in enumerate(prepared):
+    for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
                            product_id=line.product_id, quantity=line.quantity,
-                           unit_price=unit_price, line_total=line_total))
+                           unit_price=unit_price, discount_percent=line.discount_percent,
+                           discount_amount=discount, tax_rate=tax_rate,
+                           tax_amount=tax, line_total=line_total))
         db.add(InventoryStockMovement(
             organization_id=membership.organization_id, product_id=line.product_id,
             branch_id=payload.branch_id, quantity_delta=-line.quantity,
@@ -1565,12 +1584,20 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
     return {
         "id": sale.id, "branch_id": sale.branch_id, "shift_id": sale.shift_id,
         "currency": sale.currency, "status": sale.status,
-        "total_amount": str(sale.total_amount), "created_at": sale.created_at.isoformat(),
+        "total_amount": str(sale.total_amount),
+        "subtotal_amount": str(sale.subtotal_amount),
+        "discount_amount": str(sale.discount_amount),
+        "tax_amount": str(sale.tax_amount),
+        "created_at": sale.created_at.isoformat(),
         "lines": [{
             "id": line.id, "product_id": line.product_id, "sku": sku, "name": name,
             "quantity": str(line.quantity), "returned_quantity": str(returned_map.get(line.id, 0)),
             "returnable_quantity": str(Decimal(str(line.quantity)) - Decimal(str(returned_map.get(line.id, 0)))),
-            "unit_price": str(line.unit_price), "line_total": str(line.line_total),
+            "unit_price": str(line.unit_price),
+            "discount_percent": str(line.discount_percent),
+            "discount_amount": str(line.discount_amount),
+            "tax_rate": str(line.tax_rate), "tax_amount": str(line.tax_amount),
+            "line_total": str(line.line_total),
         } for line, name, sku in lines],
         "payments": [{"method": p.method, "amount": str(p.amount), "status": p.status,
                       "provider_reference": p.provider_reference} for p in payments],
