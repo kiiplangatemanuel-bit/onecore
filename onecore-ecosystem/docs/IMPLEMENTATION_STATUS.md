@@ -822,3 +822,10 @@ secret rotation, centralized tamper-evident audit, backup/PITR restore drills,
 metrics/tracing/alerts, production ingress/database/secret-manager configuration,
 penetration testing, load testing, privacy review and production UAT. This baseline
 is not a security certification or evidence of a live production deployment.
+
+
+## CRM forecasting and attribution delivery (7 November 2026)
+
+Feature branch \`feature/crm-forecasting-targets-attribution\` adds tenant-configurable stage probabilities, per-opportunity probability overrides and expected close dates; monthly/quarterly/annual representative forecasts; team/representative quotas; immutable forecast snapshots and historical variance; explicit campaign-to-contact/lead/order attribution; currency-aware campaign ROI; scheduler polling worker, heartbeat and queue health; a starter forecast workspace; migration \`0031_crm_forecast_attribution\`; and focused calculation/API registration tests.
+
+Do not mark production-ready until CI and migration downgrade/re-upgrade pass, provider UAT is completed, accounting invoice/payment events are connected, actual close timestamps are captured for all lead transitions, and production scheduler secrets/monitoring are configured.
