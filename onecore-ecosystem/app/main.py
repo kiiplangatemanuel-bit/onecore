@@ -79,7 +79,7 @@ def inventory_ui():
     page = Path(__file__).resolve().parent / "web" / "inventory.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
-@app.get("/health")
+@app.get("/crm/automation", response_class=HTMLResponse)\ndef crm_automation_ui():\n    page = Path(__file__).resolve().parent / "web" / "crm_automation.html"\n    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})\n\n@app.get("/healthcare", response_class=HTMLResponse)\ndef healthcare_ui():\n    page = Path(__file__).resolve().parent / "web" / "healthcare.html"\n    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})\n\n@app.middleware("http")\nasync def healthcare_no_store(request, call_next):\n    response = await call_next(request)\n    if request.url.path.startswith("/api/v1/healthcare/"):\n        response.headers["Cache-Control"] = "no-store, private"\n        response.headers["Pragma"] = "no-cache"\n    return response\n\n@app.get("/health")
 def health():
     return {"status": "ok", "service": "onecore-api", "environment": settings.app_env}
 
