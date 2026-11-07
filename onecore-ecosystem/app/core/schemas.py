@@ -52,6 +52,10 @@ class InventoryProductIn(BaseModel):
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
 
+class InventoryProductTaxRateIn(BaseModel):
+    tax_rate: Decimal = Field(ge=0, le=100)
+
+
 class InventoryMovementIn(BaseModel):
     product_id: int = Field(gt=0)
     branch_id: str | None = Field(default=None, min_length=1, max_length=36)
