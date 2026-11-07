@@ -882,6 +882,8 @@ class CRMCampaignRecipient(Base):
     address_snapshot: Mapped[str] = mapped_column(String(320))
     status: Mapped[str] = mapped_column(String(16), default="prepared")
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    subject_snapshot: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    message_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         Index("ix_crm_campaign_recipient_unique", "campaign_id", "contact_id", unique=True),
@@ -1253,7 +1255,9 @@ class CRMCommunicationTemplate(Base):
     __tablename__ = "crm_communication_templates"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(180))
+    version: Mapped[int] = mapped_column(default=1)
     channel: Mapped[str] = mapped_column(String(16))
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     subject: Mapped[str] = mapped_column(String(240), default="")
@@ -1263,12 +1267,13 @@ class CRMCommunicationTemplate(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
-    __table_args__ = (Index("ix_crm_template_org_name", "organization_id", "name", unique=True),)
+    __table_args__ = (Index("ix_crm_template_org_name_version", "organization_id", "name", "version", unique=True),)
 
 class CRMAudienceSegment(Base):
     __tablename__ = "crm_audience_segments"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(180))
     description: Mapped[str] = mapped_column(String(500), default="")
     rules: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -1285,6 +1290,14 @@ class CRMCampaignSchedule(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("crm_campaigns.id"), index=True, unique=True)
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     timezone_name: Mapped[str] = mapped_column(String(80), default="Africa/Nairobi")
+    recurrence: Mapped[str] = mapped_column(String(12), default="once")
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("crm_communication_templates.id"), nullable=True)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("crm_audience_segments.id"), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    run_count: Mapped[int] = mapped_column(default=0)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="scheduled")
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(String(1000), default="")
@@ -1327,6 +1340,7 @@ class HealthcarePatientAccess(Base):
     granted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reason: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_health_access_patient_user", "organization_id", "patient_id", "user_id"),)
 
@@ -1339,6 +1353,8 @@ class HealthcareConsent(Base):
     decision: Mapped[str] = mapped_column(String(16))
     recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     notes: Mapped[str] = mapped_column(String(500), default="")
+    evidence_reference: Mapped[str] = mapped_column(String(180), default="")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class HealthcareAccessAudit(Base):
@@ -1347,6 +1363,46 @@ class HealthcareAccessAudit(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    action: Mapped[str] = mapped_column(String(32))
+    action: Mapped[str] = mapped_column(String(80))
     reason: Mapped[str] = mapped_column(String(500), default="")
+    emergency: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class HealthcareRoleAssignment(Base):
+    __tablename__ = "healthcare_role_assignments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    assigned_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_role_org_user_branch", "organization_id", "user_id", "branch_id", "role", unique=True),)
+
+
+class HealthcareBreakGlassSession(Base):
+    __tablename__ = "healthcare_break_glass_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    justification: Mapped[str] = mapped_column(String(1000))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HealthcareAppointment(Base):
+    __tablename__ = "healthcare_appointments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    provider_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
