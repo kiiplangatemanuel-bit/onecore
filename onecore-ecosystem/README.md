@@ -22,7 +22,9 @@ docker compose up --build
 API: http://localhost:8000  
 Interactive API docs: http://localhost:8000/docs  
 Health: http://localhost:8000/health  
-Public site: http://localhost:8000/
+Public site: http://localhost:8000/  
+CRM automation: http://localhost:8000/crm/automation  
+Healthcare privacy: http://localhost:8000/healthcare
 
 For local non-Docker development:
 ```bash
@@ -53,6 +55,14 @@ The application starts with adapters disabled. No real payment, tax, health, mes
 - `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)
 - `/api/v1/operations` — audit events and operational overview
 - `/health` — liveness/readiness information
+
+## CRM campaign automation and healthcare privacy
+
+- CRM includes versioned email/SMS/WhatsApp templates, nested AND/OR audience segmentation, one-time/daily/weekly campaign schedules, personalized per-recipient snapshots, consent revalidation and retry-safe worker execution.
+- Docker Compose starts a dedicated `crm-scheduler` worker sharing the API database. For non-Docker deployments run `python -m app.workers.crm_scheduler` from `onecore-ecosystem`. Run one worker with SQLite; use PostgreSQL for multiple workers.
+- Healthcare adds branch-scoped healthcare roles, patient-level read/write grants, expiry/revocation, append-only consent history, 15-minute justified break-glass access, appointments, encrypted patient profiles/clinical notes and an audited access trail.
+- Set `HEALTHCARE_PHI_ENCRYPTION_KEY` to a dedicated Fernet key before registering patient data. See `docs/HEALTHCARE_PRIVACY.md` and `docs/CRM_AUTOMATION.md`.
+- These are technical controls, not regulatory certification. MFA/step-up, managed key rotation, retention/data-subject workflows, penetration testing, clinical/legal governance and live provider UAT remain production requirements.
 
 ## Architecture and extension points
 See `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, `docs/MODULE_DELIVERY.md`, and `docs/SPEC_TRACEABILITY.md`.
