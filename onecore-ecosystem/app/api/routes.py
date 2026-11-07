@@ -599,6 +599,7 @@ def update_crm_lead_stage(lead_id: int, payload: CRMLeadStageIn,
     row.stage = payload.stage
     row.next_step = payload.next_step
     row.actual_closed_at = datetime.now(timezone.utc) if payload.stage == "won" else None
+    row.actual_value = row.estimated_value if payload.stage == "won" else None
     db.commit()
     audit(db, user.id, membership.organization_id, "crm.lead.stage_changed",
           "crm_lead", row.id, f"{previous}->{row.stage}")
