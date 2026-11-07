@@ -218,6 +218,7 @@ class POSSaleSyncIn(BaseModel):
     client_transaction_id: str = Field(min_length=8, max_length=100)
     shift_id: int = Field(gt=0)
     branch_id: str = Field(min_length=1, max_length=36)
+    customer_ref: str | None = Field(default=None, min_length=1, max_length=100)
     currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
     offline_created_at: datetime | None = None
     lines: list[POSSaleLineIn] = Field(min_length=1, max_length=100)
