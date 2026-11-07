@@ -32,9 +32,10 @@ def upgrade():
     op.add_column("crm_campaign_schedules", sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_campaign_schedules", sa.Column("run_count", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("crm_campaign_schedules", sa.Column("last_run_campaign_id", sa.Integer(), nullable=True))
-    op.create_foreign_key("fk_crm_schedule_template", "crm_campaign_schedules", "crm_communication_templates", ["template_id"], ["id"])
-    op.create_foreign_key("fk_crm_schedule_segment", "crm_campaign_schedules", "crm_audience_segments", ["segment_id"], ["id"])
-    op.create_foreign_key("fk_crm_schedule_last_run_campaign", "crm_campaign_schedules", "crm_campaigns", ["last_run_campaign_id"], ["id"])
+    with op.batch_alter_table("crm_campaign_schedules") as batch:
+        batch.create_foreign_key("fk_crm_schedule_template", "crm_communication_templates", ["template_id"], ["id"])
+        batch.create_foreign_key("fk_crm_schedule_segment", "crm_audience_segments", ["segment_id"], ["id"])
+        batch.create_foreign_key("fk_crm_schedule_last_run_campaign", "crm_campaigns", ["last_run_campaign_id"], ["id"])
     op.create_index("ix_crm_campaign_schedules_next_run_at", "crm_campaign_schedules", ["next_run_at"])
     op.execute("UPDATE crm_campaign_schedules SET next_run_at = scheduled_at WHERE next_run_at IS NULL")
 
@@ -46,7 +47,8 @@ def upgrade():
     op.add_column("healthcare_consents", sa.Column("evidence_reference", sa.String(180), nullable=False, server_default=""))
     op.add_column("healthcare_consents", sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("healthcare_access_audits", sa.Column("emergency", sa.Boolean(), nullable=False, server_default=sa.false()))
-    op.alter_column("healthcare_access_audits", "action", existing_type=sa.String(32), type_=sa.String(80), existing_nullable=False)
+    with op.batch_alter_table("healthcare_access_audits") as batch:
+        batch.alter_column("action", existing_type=sa.String(32), type_=sa.String(80), existing_nullable=False)
 
     op.create_table(
         "healthcare_role_assignments",
@@ -110,7 +112,8 @@ def downgrade():
     op.drop_index("ix_healthcare_role_assignments_organization_id", table_name="healthcare_role_assignments")
     op.drop_table("healthcare_role_assignments")
 
-    op.alter_column("healthcare_access_audits", "action", existing_type=sa.String(80), type_=sa.String(32), existing_nullable=False)
+    with op.batch_alter_table("healthcare_access_audits") as batch:
+        batch.alter_column("action", existing_type=sa.String(80), type_=sa.String(32), existing_nullable=False)
     op.drop_column("healthcare_access_audits", "emergency")
     op.drop_column("healthcare_consents", "expires_at")
     op.drop_column("healthcare_consents", "evidence_reference")
@@ -120,9 +123,10 @@ def downgrade():
     op.drop_column("crm_campaign_recipients", "subject_snapshot")
 
     op.drop_index("ix_crm_campaign_schedules_next_run_at", table_name="crm_campaign_schedules")
-    op.drop_constraint("fk_crm_schedule_last_run_campaign", "crm_campaign_schedules", type_="foreignkey")
-    op.drop_constraint("fk_crm_schedule_segment", "crm_campaign_schedules", type_="foreignkey")
-    op.drop_constraint("fk_crm_schedule_template", "crm_campaign_schedules", type_="foreignkey")
+    with op.batch_alter_table("crm_campaign_schedules") as batch:
+        batch.drop_constraint("fk_crm_schedule_last_run_campaign", type_="foreignkey")
+        batch.drop_constraint("fk_crm_schedule_segment", type_="foreignkey")
+        batch.drop_constraint("fk_crm_schedule_template", type_="foreignkey")
     op.drop_column("crm_campaign_schedules", "last_run_campaign_id")
     op.drop_column("crm_campaign_schedules", "run_count")
     op.drop_column("crm_campaign_schedules", "lease_until")
