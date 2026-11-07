@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMContactSegment, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
+from app.services.crm_audience import apply_segment
 from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
@@ -3419,6 +3420,14 @@ def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
         if allowed is not None:
             if not allowed:q=q.filter(CRMContact.id==-1)
             else:q=q.filter(CRMContact.branch_id.in_(allowed))
+    if campaign.segment_id:
+        segment=db.query(CRMContactSegment).filter_by(
+            id=campaign.segment_id,organization_id=membership.organization_id,is_active=True).first()
+        if not segment:
+            raise HTTPException(409,"The campaign audience segment is no longer available")
+        if segment.branch_id and campaign.branch_id and segment.branch_id!=campaign.branch_id:
+            raise HTTPException(409,"Campaign and audience segment branches do not match")
+        q=apply_segment(q,segment.definition)
     contacts=q.order_by(CRMContact.id).limit(5000).all()
     prepared=0
     for contact,consent in contacts:
