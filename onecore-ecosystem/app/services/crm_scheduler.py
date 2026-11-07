@@ -110,6 +110,7 @@ def _execute_schedule(db,schedule_id,now):
                 break
     db.refresh(child)
     schedule.last_run_at=now
+    schedule.last_error=None
     schedule.last_run_campaign_id=child.id
     schedule.run_count=run_number
     next_run=_next_occurrence(schedule.next_run_at or schedule.scheduled_at,schedule.recurrence,now,schedule.timezone)
@@ -145,6 +146,6 @@ def run_due_schedules(db,limit=10):
             db.rollback()
             row=db.query(CRMCampaignSchedule).filter_by(id=schedule_id).first()
             if row:
-                row.status="failed";row.lease_until=None;db.commit()
+                row.status="failed";row.lease_until=None;row.last_error=str(__import__("sys").exc_info()[1])[:1000];db.commit()
         processed+=1
     return processed
