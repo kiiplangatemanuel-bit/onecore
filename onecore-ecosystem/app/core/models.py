@@ -235,6 +235,7 @@ class CRMLead(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
+    source_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id", name="fk_crm_lead_source_campaign"), nullable=True)
     title: Mapped[str] = mapped_column(String(180))
     source: Mapped[str] = mapped_column(String(60), default="other")
     stage: Mapped[str] = mapped_column(String(24), default="new")
@@ -242,10 +243,14 @@ class CRMLead(Base):
     currency: Mapped[str] = mapped_column(String(3), default="KES")
     assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     next_step: Mapped[str] = mapped_column(String(500), default="")
+    expected_close_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    probability_override: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    actual_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    actual_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
-    __table_args__ = (Index("ix_crm_lead_org_stage", "organization_id", "stage"),)
+    __table_args__ = (Index("ix_crm_lead_org_stage", "organization_id", "stage"), Index("ix_crm_lead_source_campaign", "organization_id", "source_campaign_id"))
 
 
 class CRMActivity(Base):
@@ -862,6 +867,8 @@ class CRMCampaign(Base):
     channel: Mapped[str] = mapped_column(String(16))
     purpose: Mapped[str] = mapped_column(String(24), default="marketing")
     message: Mapped[str] = mapped_column(Text)
+    budget_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    budget_currency: Mapped[str] = mapped_column(String(3), default="KES")
     status: Mapped[str] = mapped_column(String(16), default="draft")
     prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -1407,3 +1414,70 @@ class HealthcareAppointment(Base):
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class CRMForecastSetting(Base):
+    __tablename__ = "crm_forecast_settings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), unique=True, index=True)
+    stage_probabilities: Mapped[dict] = mapped_column(JSON, default=dict)
+    scenario_multipliers: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+class CRMSalesTarget(Base):
+    __tablename__ = "crm_sales_targets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    period_type: Mapped[str] = mapped_column(String(12))
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    rep_key: Mapped[str] = mapped_column(String(32), default="team")
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_crm_target_org_period_rep_currency", "organization_id", "period_type", "period_start", "rep_key", "currency", unique=True),)
+
+class CRMForecastSnapshot(Base):
+    __tablename__ = "crm_forecast_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    period_type: Mapped[str] = mapped_column(String(12))
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    rep_key: Mapped[str] = mapped_column(String(32), default="team")
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    scenario: Mapped[str] = mapped_column(String(16))
+    forecast_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    opportunity_count: Mapped[int] = mapped_column(default=0)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    snapshot_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+class CRMCampaignAttribution(Base):
+    __tablename__ = "crm_campaign_attributions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("crm_campaigns.id"))
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"))
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True)
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(20))
+    revenue_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    currency: Mapped[str] = mapped_column(String(3))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    __table_args__ = (Index("ix_crm_attribution_org_idempotency", "organization_id", "idempotency_key", unique=True),)
+
+class CRMWorkerHeartbeat(Base):
+    __tablename__ = "crm_worker_heartbeats"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    worker_name: Mapped[str] = mapped_column(String(80))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_processed: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    __table_args__ = (Index("ix_crm_worker_org_name", "organization_id", "worker_name", unique=True),)
