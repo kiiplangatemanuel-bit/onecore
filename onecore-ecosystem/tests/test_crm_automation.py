@@ -25,6 +25,8 @@ def test_crm_automation_models_and_routes_are_registered():
     assert "/api/v1/crm/schedules" in paths
     assert "/api/v1/crm/schedules/{schedule_id}/pause" in paths
     assert "/api/v1/crm/schedules/{schedule_id}/resume" in paths
+    assert "/api/v1/crm/schedules/{schedule_id}/cancel" in paths
+    assert hasattr(CRMCampaignSchedule,"last_error")
 
 
 def test_template_schema_limits_channels_and_content():
