@@ -1375,11 +1375,12 @@ class HealthcareRoleAssignment(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    scope_key: Mapped[str] = mapped_column(String(36), default="*")
     role: Mapped[str] = mapped_column(String(32))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     assigned_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("ix_healthcare_role_org_user_branch", "organization_id", "user_id", "branch_id", "role", unique=True),)
+    __table_args__ = (Index("ix_healthcare_role_org_user_scope", "organization_id", "user_id", "scope_key", "role", unique=True),)
 
 
 class HealthcareBreakGlassSession(Base):
