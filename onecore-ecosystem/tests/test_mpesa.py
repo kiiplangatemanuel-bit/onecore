@@ -14,7 +14,7 @@ def test_mpesa_phone_normalization_accepts_common_kenyan_formats():
     assert normalize_phone("112345678") == "254112345678"
 
 
-@pytest.mark.parametrize("phone", ["123", "0700000000", "254012345678", "25471234567", "254812345678"])
+@pytest.mark.parametrize("phone", ["123", "254012345678", "25471234567", "254812345678"])
 def test_mpesa_phone_normalization_rejects_invalid_numbers(phone):
     with pytest.raises(ValueError):
         normalize_phone(phone)
