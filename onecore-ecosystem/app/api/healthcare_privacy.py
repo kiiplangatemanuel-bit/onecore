@@ -73,9 +73,9 @@ def _authorize(db,membership,user,permission,branch_id=None,patient_id=None,allo
     if not any(permission in ROLE_PERMISSIONS.get(role,set()) for role in roles):
         raise HTTPException(403,"Healthcare role does not grant this action")
     emergency=False
+    if patient_id is not None and allow_breakglass and "breakglass" in set.union(*(ROLE_PERMISSIONS.get(r,set()) for r in roles)):
+        emergency=_breakglass(db,membership.organization_id,user,patient_id) is not None
     if patient_id is not None and "healthcare_admin" not in roles:
-        if allow_breakglass and "breakglass" in set.union(*(ROLE_PERMISSIONS.get(r,set()) for r in roles)):
-            emergency=_breakglass(db,membership.organization_id,user,patient_id) is not None
         if not emergency and not _has_grant(db,membership.organization_id,user,patient_id,permission):
             raise HTTPException(403,"No active patient-specific access grant for this action")
     return emergency,roles
@@ -161,7 +161,7 @@ def revoke_healthcare_role(role_id:int,membership=Depends(active_membership),
 @router.post("/patients",status_code=201)
 def register_patient(payload:HealthcarePatientIn,membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
-    branch_id=payload.branch_id
+    branch_id=payload.branch_id or None
     _authorize(db,membership,user,"patient.register",branch_id)
     identity={"first_name":payload.first_name,"last_name":payload.last_name,
         "date_of_birth":payload.date_of_birth.isoformat() if payload.date_of_birth else None,
