@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -335,6 +335,9 @@ class POSShift(Base):
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_note: Mapped[str] = mapped_column(String(500), default="")
+    __table_args__ = (Index("uq_pos_shift_open_device", "organization_id", "device_id", unique=True,
+        postgresql_where=text("status = 'open' AND device_id IS NOT NULL"),
+        sqlite_where=text("status = 'open' AND device_id IS NOT NULL")),)
 
 
 class POSCashMovement(Base):
