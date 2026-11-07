@@ -138,13 +138,11 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         raise HTTPException(404, "M-Pesa tender allocation not found")
     existing = db.query(MpesaPaymentIntent).filter_by(
         organization_id=membership.organization_id, payment_id=payment.id
-    ).first()
-    if existing:
-        if existing.status in {"initiated", "pending", "success"}:
-            return {"intent_id": existing.id, "status": existing.status,
-                    "checkout_request_id": existing.checkout_request_id,
-                    "message": "An M-Pesa request already exists for this tender"}
-        raise HTTPException(409, "This tender already has a terminal M-Pesa attempt; create a new POS tender to retry")
+    ).order_by(MpesaPaymentIntent.id.desc()).first()
+    if existing and existing.status in {"initiating", "pending", "success"}:
+        return {"intent_id": existing.id, "status": existing.status,
+                "checkout_request_id": existing.checkout_request_id,
+                "message": "An M-Pesa request already exists for this tender"}
     amount = Decimal(str(payment.amount))
     if amount != amount.quantize(Decimal("1")):
         raise HTTPException(422, "Daraja STK Push accepts whole KES amounts; split or adjust the tender to whole shillings")
@@ -210,6 +208,12 @@ def _stk_callback(db: Session, token: str, body: dict):
             paid = Decimal(str(metadata.get("Amount"))).quantize(CENT)
         except Exception:
             return False
+        callback_phone = metadata.get("PhoneNumber")
+        if callback_phone is not None and str(callback_phone) != intent.phone_number:
+            intent.status = "exception"
+            intent.result_description = "Callback phone number does not match the requested payer"
+            db.commit()
+            return True
         if paid != Decimal(str(intent.amount)).quantize(CENT):
             intent.status = "exception"
             intent.result_description = "Callback amount does not match requested tender"
@@ -232,10 +236,12 @@ def _stk_callback(db: Session, token: str, body: dict):
         intent.status = "success"
         intent.completed_at = datetime.now(timezone.utc)
         from app.api.accounting_pos import post_pos_source
+        sale = db.query(POSSale).filter_by(id=payment.sale_id, organization_id=intent.organization_id).first()
+        if not sale:
+            return False
         link = post_pos_source(db, intent.organization_id, intent.branch_id,
-                               "sale", db.query(POSSale.id).filter_by(id=payment.sale_id).scalar(),
-                               actor_user_id=None)
-        _audit(db, intent.organization_id, None, "mpesa.stk.succeeded",
+                               "sale", sale.id, actor_user_id=sale.cashier_user_id)
+        _audit(db, intent.organization_id, sale.cashier_user_id, "mpesa.stk.succeeded",
                "pos_payment", payment.id, f"receipt:{receipt};journal_link:{link.status}")
     else:
         intent.status = "failed"
@@ -350,6 +356,12 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         refund = db.query(POSRefund).filter_by(
             id=intent.refund_id, organization_id=intent.organization_id
         ).with_for_update().first()
+        callback_amount = metadata.get("TransactionAmount")
+        if callback_amount is not None and Decimal(str(callback_amount)).quantize(CENT) != Decimal(str(intent.amount)).quantize(CENT):
+            intent.status = "exception"
+            intent.result_description = "B2C callback amount does not match the requested refund"
+            db.commit()
+            return True
         if not refund or not receipt:
             intent.status = "exception"
             intent.result_description = "Successful B2C callback is missing its refund record or transaction receipt"
@@ -363,7 +375,7 @@ def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
         from app.api.accounting_pos import post_pos_source
         ret = db.query(POSReturn).filter_by(id=refund.return_id, organization_id=intent.organization_id).first()
         if ret:
-            post_pos_source(db, intent.organization_id, intent.branch_id, "return", ret.id, actor_user_id=None)
+            post_pos_source(db, intent.organization_id, intent.branch_id, "return", ret.id, actor_user_id=ret.created_by)
         _audit(db, intent.organization_id, None, "mpesa.b2c.succeeded",
                "pos_refund", refund.id, f"receipt:{receipt}")
     else:
@@ -415,6 +427,6 @@ def mpesa_payment_status(sale_id: int, membership=Depends(active_membership),
     ).filter(MpesaPaymentIntent.organization_id == membership.organization_id,
              POSPayment.sale_id == sale.id).order_by(MpesaPaymentIntent.id).all()
     return [{"intent_id": row.id, "payment_id": row.payment_id, "amount": str(row.amount),
-             "phone_number": row.phone_number, "status": row.status,
+             "phone_number": "••••" + row.phone_number[-4:], "status": row.status,
              "receipt": row.mpesa_receipt_number, "result_description": row.result_description}
             for row in rows]
