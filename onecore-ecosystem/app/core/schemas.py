@@ -661,3 +661,47 @@ class CRMCampaignIn(BaseModel):
         if len(value) < 2:
             raise ValueError("Campaign name and message must not be blank")
         return value
+
+
+
+class HREmployeeIn(BaseModel):
+    employee_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    user_id: int | None = Field(default=None, gt=0)
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    branch_id: str | None = Field(default=None, max_length=36)
+    department: str = Field(default="", max_length=120)
+    job_title: str = Field(default="", max_length=120)
+    employment_type: str = Field(default="full_time", pattern=r"^(full_time|part_time|contractor|intern)$")
+    start_date: date
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def employee_names_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Employee name is required")
+        return value
+
+
+class HRLeaveRequestIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    leave_type: str = Field(pattern=r"^(annual|sick|compassionate|unpaid|parental|other)$")
+    start_date: date
+    end_date: date
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @model_validator(mode="after")
+    def valid_leave_range(self):
+        if self.end_date < self.start_date:
+            raise ValueError("Leave end date cannot precede start date")
+        if len(self.reason.strip()) < 5:
+            raise ValueError("Leave reason must contain at least five non-space characters")
+        return self
+
+
+class HRLeaveDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
