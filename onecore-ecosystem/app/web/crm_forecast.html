@@ -4,6 +4,7 @@ body{font:15px system-ui;margin:0;background:#f4f6fa;color:#182438}main{max-widt
 <section><h2>Secure API session</h2><label for="token">Bearer access token (held in page memory)</label><input id="token" type="password" autocomplete="off" style="width:min(700px,100%)"><p id="message" role="status" class="muted">Enter an authorized CRM token.</p></section>
 <section><h2>Forecast dashboard</h2><div class="grid"><div><label for="period">Period</label><select id="period"><option value="month">Month</option><option value="quarter">Quarter</option><option value="year">Year</option></select></div><div><label for="start">Period date</label><input id="start" type="date"></div><div><label for="rep">Representative ID (optional)</label><input id="rep" type="number" min="1"></div></div><button id="load">Load forecast</button><button id="accuracy">Forecast accuracy</button><button id="health">Scheduler health</button><button id="provider">Provider configuration</button><div id="dashboard" aria-live="polite"></div></section>
 <section><h2>Opportunity close-date and probability review</h2><p class="muted">Set expected close dates and optional probability overrides for each open opportunity.</p><button id="pipeline">Load open opportunities</button><div id="pipelineData" aria-live="polite"></div></section>
+<section><h2>Closed-won realized revenue</h2><p class="muted">Correct the realized amount used in historical forecast accuracy.</p><button id="wonLeads">Load closed-won leads</button><div id="wonData" aria-live="polite"></div></section>
 <section><h2>Set sales quota</h2><div class="grid"><div><label for="targetPeriod">Period</label><select id="targetPeriod"><option>month</option><option>quarter</option><option>year</option></select></div><div><label for="targetStart">Period start date</label><input id="targetStart" type="date"></div><div><label for="targetRep">Representative ID (blank = team)</label><input id="targetRep" type="number" min="1"></div><div><label for="currency">Currency</label><input id="currency" value="KES" maxlength="3"></div><div><label for="amount">Target amount</label><input id="amount" type="number" min="0" step=".01"></div></div><button id="saveTarget">Save target</button></section>
 <section><h2>Forecast snapshot</h2><label for="scenario">Scenario</label><select id="scenario"><option>expected</option><option>best_case</option><option>worst_case</option></select><button id="snapshot">Capture immutable snapshot</button></section>
 <section><h2>Campaign ROI</h2><p class="muted">Uses explicit attributed order-won and invoice-paid revenue.</p><button id="roi">Load campaign ROI</button><div id="roiData"></div></section></main>
@@ -54,4 +55,20 @@ el("pipeline").onclick=()=>run(async()=>{
  }
  table.append(body);root.append(table);
 });
-</script></body></html>
+
+el("wonLeads").onclick=()=>run(async()=>{
+ const rows=await req("/leads?stage=won&limit=500"),root=el("wonData");root.replaceChildren();
+ const table=document.createElement("table"),head=document.createElement("tr");
+ ["Lead","Estimate","Currency","Actual closed value","Save"].forEach(x=>{const th=document.createElement("th");th.textContent=x;head.append(th)});
+ const thead=document.createElement("thead");thead.append(head);table.append(thead);
+ const body=document.createElement("tbody");
+ for(const lead of rows){const tr=document.createElement("tr");
+  const add=x=>{const td=document.createElement("td");td.textContent=x??"";tr.append(td)};
+  add(lead.title+" (#"+lead.id+")");add(lead.estimated_value);add(lead.currency);
+  const td=document.createElement("td"),input=document.createElement("input");input.type="number";input.min="0";input.step=".01";input.value=lead.actual_value??lead.estimated_value;td.append(input);tr.append(td);
+  const action=document.createElement("td"),button=document.createElement("button");button.textContent="Save";
+  button.onclick=async()=>{try{await req("/leads/"+lead.id+"/forecast-details",{method:"PATCH",body:JSON.stringify({actual_value:Number(input.value)})});button.textContent="Saved"}catch(e){el("message").textContent=e.message;el("message").className="error"}};
+  action.append(button);tr.append(action);body.append(tr);
+ }
+ table.append(body);root.append(table);
+});</script></body></html>
