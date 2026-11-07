@@ -176,6 +176,8 @@ def _source_lines(db, org_id, source_type, source_id, mapping):
         }
         credit_by_account = {}
         for refund in refunds:
+            if refund.status != "recorded":
+                continue
             key = tender_fields.get(refund.method)
             if not key:
                 return None, None, f"Unsupported POS refund method: {refund.method}"
