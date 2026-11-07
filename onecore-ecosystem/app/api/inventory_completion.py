@@ -211,6 +211,8 @@ def dispatch_transfer(transfer_id:int,payload:DispatchIn,membership=Depends(acti
     src=get_warehouse(db,membership.organization_id,row.source_warehouse_id,membership)
     lines=db.query(InventoryTransferLine).filter_by(transfer_id=row.id,organization_id=membership.organization_id).all()
     for line in lines:
+        product=db.query(InventoryProduct).filter_by(id=line.product_id,organization_id=membership.organization_id).with_for_update().first()
+        if not product: raise HTTPException(404,"Product not found")
         available=warehouse_qty(db,membership.organization_id,src,line.product_id)-active_reserved(db,membership.organization_id,src.id,line.product_id)
         if available < dec(line.quantity): raise HTTPException(409,f"Insufficient available stock for product {line.product_id}")
     for line in lines:
@@ -258,7 +260,8 @@ def reserve_stock(payload:ReservationIn,membership=Depends(active_membership),us
         if (duplicate.product_id,duplicate.warehouse_id,duplicate.quantity,duplicate.source_type,duplicate.source_reference)!=(payload.product_id,wh.id,payload.quantity,payload.source_type,payload.source_reference):
             raise HTTPException(409,"Idempotency key reused with different reservation")
         return {"id":duplicate.id,"status":duplicate.status}
-    if not db.query(InventoryProduct).filter_by(id=payload.product_id,organization_id=membership.organization_id,is_active=True).first(): raise HTTPException(404,"Product not found")
+    product=db.query(InventoryProduct).filter_by(id=payload.product_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
+    if not product: raise HTTPException(404,"Product not found")
     available=warehouse_qty(db,membership.organization_id,wh,payload.product_id)-active_reserved(db,membership.organization_id,wh.id,payload.product_id)
     if available < payload.quantity: raise HTTPException(409,"Insufficient available stock")
     row=InventoryReservation(organization_id=membership.organization_id,warehouse_id=wh.id,product_id=payload.product_id,
@@ -325,6 +328,8 @@ def receive_batch(payload:BatchReceiptIn,membership=Depends(active_membership),u
 def issue_batches(payload:BatchIssueIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"create")
     wh=get_warehouse(db,membership.organization_id,payload.warehouse_id,membership)
+    product=db.query(InventoryProduct).filter_by(id=payload.product_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
+    if not product: raise HTTPException(404,"Product not found")
     dup=db.query(InventoryStockMovement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if dup: return {"status":"already_applied","movement_id":dup.id}
     available=warehouse_qty(db,membership.organization_id,wh,payload.product_id)-active_reserved(db,membership.organization_id,wh.id,payload.product_id)
@@ -368,6 +373,12 @@ def update_batch_status(batch_id:int,payload:BatchStatusIn,membership=Depends(ac
     if payload.status=="expired" and row.expiry_date:
         exp=row.expiry_date if row.expiry_date.tzinfo else row.expiry_date.replace(tzinfo=timezone.utc)
         if exp>datetime.now(timezone.utc): raise HTTPException(422,"Batch has not reached its expiry date")
+    if row.status=="available" and payload.status in ("damaged","expired","quarantined") and dec(row.quantity_on_hand)>0:
+        wh=get_warehouse(db,membership.organization_id,row.warehouse_id,membership)
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=row.product_id,
+            branch_id=wh.branch_id,warehouse_id=wh.id,quantity_delta=-dec(row.quantity_on_hand),
+            movement_type="batch_disposition",reference=f"batch:{row.id}:{payload.status}",
+            idempotency_key=f"batch-{row.id}-disposition",created_by=user.id))
     row.status=payload.status
     audit(db,user,membership.organization_id,"inventory.batch.dispositioned","inventory_batch",row.id,payload.reason)
     db.commit()
