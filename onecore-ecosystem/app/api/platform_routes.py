@@ -1,4 +1,4 @@
-import re, secrets, socket
+import re, secrets, ssl, socket
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -62,8 +62,6 @@ def verify_domain(domain_id:int,membership=Depends(active_membership),user:User=
     row=db.query(CustomDomain).filter_by(id=domain_id,organization_id=membership.organization_id).first()
     if not row: raise HTTPException(404,"Domain not found")
     try:
-        values=socket.getaddrinfo(row.hostname,None)
-        txt=socket.gethostbyname_ex(row.hostname)
         import dns.resolver
         answers=dns.resolver.resolve(f"_onecore-verification.{row.hostname}","TXT",lifetime=4)
         found=any(row.verification_token in "".join(part.decode() if isinstance(part,bytes) else str(part) for part in answer.strings) for answer in answers)
@@ -76,6 +74,23 @@ def verify_domain(domain_id:int,membership=Depends(active_membership),user:User=
     _audit(db,user.id,membership.organization_id,"domain.verified","custom_domain",row.id,row.hostname)
     return {"id":row.id,"hostname":row.hostname,"status":row.status,"tls_status":row.tls_status,
             "next_step":"Configure the verified hostname in the hosting ingress and provision TLS before activation."}
+
+@router.post("/admin/domains/{domain_id}/activate")
+def activate_domain(domain_id:int,user:User=Depends(require_platform_admin),db:Session=Depends(get_db)):
+    row=db.get(CustomDomain,domain_id)
+    if not row or row.status!="verified":
+        raise HTTPException(409,"Domain must pass DNS verification before activation")
+    try:
+        context=ssl.create_default_context()
+        with socket.create_connection((row.hostname,443),timeout=5) as raw:
+            with context.wrap_socket(raw,server_hostname=row.hostname) as secured:
+                if not secured.getpeercert():
+                    raise ssl.SSLError("No peer certificate")
+    except Exception:
+        raise HTTPException(409,"A valid HTTPS certificate for this hostname is not available")
+    row.status="active";row.tls_status="active";db.commit()
+    _audit(db,user.id,row.organization_id,"domain.activated","custom_domain",row.id,row.hostname)
+    return {"id":row.id,"hostname":row.hostname,"status":row.status,"tls_status":row.tls_status}
 
 @router.post("/domains/{domain_id}/primary")
 def set_primary_domain(domain_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
