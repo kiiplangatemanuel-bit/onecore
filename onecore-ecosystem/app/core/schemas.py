@@ -49,6 +49,7 @@ class InventoryProductIn(BaseModel):
     description: str = Field(default="", max_length=4000)
     unit: str = Field(default="unit", min_length=1, max_length=24)
     sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
+    cost_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("99999999999999.9999"))
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, multiple_of=Decimal("0.0001"))
 
 
