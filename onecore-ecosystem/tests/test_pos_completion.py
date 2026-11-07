@@ -64,3 +64,13 @@ def test_pos_database_guards_prevent_duplicate_open_device_and_customer_phone():
     customer_indexes = {index.name for index in POSCustomer.__table__.indexes}
     assert "uq_pos_shift_open_device" in shift_indexes
     assert "uq_pos_customer_phone" in customer_indexes
+
+def test_pos_workspace_renders_all_operational_dashboards():
+    from pathlib import Path
+    page = (Path(__file__).parents[1] / "app" / "web" / "pos.html").read_text(encoding="utf-8")
+    for element_id in (
+        "refreshSyncMonitor", "syncMonitorSummary", "syncMonitorList",
+        "refreshConflicts", "conflictSummary", "conflictList",
+        "refreshOperationsReport", "operationsSummary", "branchReport", "terminalReport",
+    ):
+        assert f'id="{element_id}"' in page
