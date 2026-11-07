@@ -100,3 +100,23 @@ def test_hr_routes_registered():
     assert "/api/v1/hr/my-leave-requests" in paths
     assert "/api/v1/hr/leave-requests/{request_id}/decision" in paths
     assert "/hr" in paths
+
+
+
+def test_hr_attendance_contracts_and_duration():
+    from datetime import datetime, timezone, timedelta
+    from app.core.models import HRAttendance
+    from app.services.hr import worked_minutes
+
+    assert HRAttendance.__tablename__ == "hr_attendance"
+    start = datetime(2026, 11, 7, 8, 0, tzinfo=timezone.utc)
+    end = start + timedelta(hours=8, minutes=37)
+    assert worked_minutes(start, end) == 517
+    assert worked_minutes(start.replace(tzinfo=None), end) == 517
+    with pytest.raises(ValueError):
+        worked_minutes(end, start)
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/hr/attendance/clock-in" in paths
+    assert "/api/v1/hr/attendance/clock-out" in paths
+    assert "/api/v1/hr/my-attendance" in paths
+    assert "/api/v1/hr/attendance" in paths
