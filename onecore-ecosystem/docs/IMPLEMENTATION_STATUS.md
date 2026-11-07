@@ -215,3 +215,31 @@ opening balance imports, full reporting UI, security/performance/UAT testing.
 CI for this increment must complete migration upgrade/downgrade/re-upgrade,
 compilation and pytest before this accounting slice is considered verified. Do not
 claim production readiness or statutory compliance.
+
+
+## CRM contacts and pipeline vertical slice (7 November 2026)
+
+Implemented on `main`:
+
+- Tenant-owned contacts with email/phone duplicate checks and optional branch ownership.
+- Sales leads with source, stage, value/currency, assigned active tenant member and
+  next step; tenant/branch-scoped list and updates.
+- Controlled sales-stage transitions in `app/services/crm.py`.
+- Activities (call/email/meeting/task/note) linked to exactly one tenant contact or
+  lead; due date, completion and audit history.
+- Branch authorization enforced when creating leads/activities and listing/completing
+  activities; tenant isolation applied to all CRM lookups.
+- APIs under `/api/v1/crm`; accessible starter UI at `/crm`.
+- Migration `0004_crm`; tests in `tests/test_crm.py`; docs in `docs/CRM.md`.
+- Key commits: `ded9f53` (models), `02a18d3` (schemas), `964fbbc` (pipeline rules),
+  `b69a228` (CRM APIs), `5ddea53` (migration), `027a93a` and `36d515c`
+  (branch-scope hardening), `15162ed` (UI), `d9cb749` (route), `6d8499e` (tests).
+
+CRM still incomplete: quoting/proposals/contracts, sales order conversion, marketing
+campaigns and consent, communications delivery, pipeline forecasting/analytics,
+contact merge/edit/archive, full activity calendar/reminders, role/team ownership,
+import/export, PostgreSQL concurrency, end-to-end branch isolation, security,
+accessibility and UAT.
+
+CI must verify migration upgrade/downgrade/re-upgrade, compile and full pytest before
+this CRM increment is considered verified.
