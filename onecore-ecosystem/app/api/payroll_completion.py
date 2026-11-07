@@ -724,7 +724,7 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
         for k in totals:
             totals[k] += D(c.get(k,"0"))
     mapping = payload.get("accounts", {})
-    keys = {"salary_expense","paye_payable","nssf_payable","shif_payable","housing_levy_payable","pension_payable","other_deductions_payable"}
+    keys = {"salary_expense","salary_payable","paye_payable","nssf_payable","shif_payable","housing_levy_payable","pension_payable","other_deductions_payable"}
     if not keys.issubset(mapping):
         raise HTTPException(422, {"message":"Map all required payroll accounts","required":sorted(keys)})
     ids = {int(mapping[k]) for k in keys}
@@ -741,6 +741,7 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
     from app.api.routes import _accounting_assert_period_open
     _accounting_assert_period_open(db,membership.organization_id,run.pay_date)
     credits = {
+        "salary_payable": totals["net_pay"],
         "paye_payable": totals["paye"],
         "nssf_payable": totals["nssf_employee"] + totals["nssf_employer"],
         "shif_payable": totals["shif_employee"],
@@ -749,7 +750,7 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
         "other_deductions_payable": totals["other_deductions"]
     }
     debit = totals["gross_pay"] + totals["nssf_employer"] + totals["housing_levy_employer"]
-    credit = totals["net_pay"] + sum(credits.values(), ZERO)
+    credit = sum(credits.values(), ZERO)
     if money(debit) != money(credit):
         raise HTTPException(409, f"Payroll journal does not balance: debit {money(debit)} credit {money(credit)}")
     from app.core.models import AccountingJournal, AccountingJournalLine
