@@ -70,8 +70,11 @@ def test_supplier_statement_match_requires_exactly_one_target():
     from app.api.procurement_workflows import StatementMatchIn
     assert StatementMatchIn(invoice_id=1).invoice_id == 1
     assert StatementMatchIn(payment_id=1).payment_id == 1
+    assert StatementMatchIn(settlement_id=1).settlement_id == 1
     with pytest.raises(ValidationError):
         StatementMatchIn(invoice_id=1, payment_id=2)
+    with pytest.raises(ValidationError):
+        StatementMatchIn(invoice_id=1, settlement_id=2)
     with pytest.raises(ValidationError):
         StatementMatchIn()
 
@@ -208,5 +211,35 @@ def test_supplier_b2c_timeout_is_unknown_and_not_marked_settled():
     assert _supplier_b2c_callback(db, token, body, timeout=True) is True
     db.refresh(row)
     assert row.status == "unknown"
+    assert row.journal_id is None
+    db.close()
+
+
+def test_supplier_b2c_callback_rejects_wrong_transaction_amount():
+    import hashlib
+    from datetime import datetime
+    from app.api.procurement_workflows import _supplier_b2c_callback
+    db = _procurement_callback_session()
+    token = "supplier-b2c-wrong-amount"
+    row = ProcurementSettlement(
+        id=4, organization_id=1, supplier_id=10, payment_account_id=20,
+        amount=Decimal("125.00"), currency="KES", provider="mpesa",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending_provider", payment_date=datetime(2026, 11, 8),
+        idempotency_key="supplier-payment-0004", created_by=1,
+    )
+    db.add(row)
+    db.commit()
+    body = {"Result": {
+        "ConversationID": "AG_WRONG_AMOUNT", "ResultCode": 0,
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QABWRONG"},
+            {"Key": "TransactionAmount", "Value": 124},
+        ]},
+    }}
+    assert _supplier_b2c_callback(db, token, body) is True
+    db.refresh(row)
+    assert row.status == "exception"
+    assert row.provider_reference == ""
     assert row.journal_id is None
     db.close()
