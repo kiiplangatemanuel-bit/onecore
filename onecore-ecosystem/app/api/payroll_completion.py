@@ -229,6 +229,21 @@ def _visible_snapshots(db, membership):
     return [r for r in rows if allowed is None or r.branch_id in allowed]
 
 
+def _assert_batch_branch_scope(db, membership, batch):
+    allowed = branch_scope_ids(membership)
+    if allowed is None:
+        return
+    employee_ids = {int(row["employee_id"]) for row in batch.data.get("rows", [])}
+    if not employee_ids:
+        raise HTTPException(409, "Payment batch has no employee instructions")
+    employees = db.query(HREmployee).filter(
+        HREmployee.organization_id == membership.organization_id,
+        HREmployee.id.in_(employee_ids),
+    ).all()
+    if len(employees) != len(employee_ids) or any(employee.branch_id not in allowed for employee in employees):
+        raise HTTPException(403, "Payment batch contains employees outside your assigned branch scope")
+
+
 # Verified published parameters. Changes are new effective-dated records, never edits
 # to a rule set already used by a payroll snapshot.
 KENYA_2026_RULES = {
@@ -520,6 +535,7 @@ def export_bank_file(batch_id: int, membership=Depends(active_membership), user=
                                        module_key=MODULE, record_type="payment_batch").first()
     if not batch or batch.data["method"] != "bank":
         raise HTTPException(404, "Bank payment batch not found")
+    _assert_batch_branch_scope(db, membership, batch)
     if batch.data.get("status") not in ("authorized", "processing", "partial", "failed"):
         raise HTTPException(409, "Bank payment batch must be authorized before export")
     output = io.StringIO()
@@ -542,6 +558,7 @@ def authorize_batch(batch_id: int, payload: dict=Body(default={}), membership=De
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
     if not batch or batch.data["status"] != "prepared":
         raise HTTPException(409, "Only prepared payment batches can be authorized")
+    _assert_batch_branch_scope(db, membership, batch)
     run = db.query(HRPayrollRun).filter_by(id=batch.data["run_id"], organization_id=membership.organization_id).first()
     if not run or run.approved_by == user.id or batch.created_by == user.id:
         raise HTTPException(403, "Payment authorizer must be independent of both payroll approver and payment-batch preparer")
@@ -562,6 +579,7 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
     if not batch or batch.data["method"] != "mpesa" or batch.data["status"] not in ("authorized", "processing", "partial", "failed"):
         raise HTTPException(409, "An authorized M-Pesa batch is required")
+    _assert_batch_branch_scope(db, membership, batch)
     from app.core.config import settings
     import httpx
     required = (settings.mpesa_base_url, settings.mpesa_consumer_key, settings.mpesa_consumer_secret,
@@ -685,6 +703,7 @@ def retry_failed_payment(batch_id: int, payload: dict=Body(default={}), membersh
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
     if not batch:
         raise HTTPException(404, "Payment batch not found")
+    _assert_batch_branch_scope(db, membership, batch)
     d = dict(batch.data)
     if d["status"] not in ("failed", "partial"):
         raise HTTPException(409, "Only failed or partially paid batches can be retried")
@@ -713,6 +732,7 @@ def reconcile_payments(batch_id: int, membership=Depends(active_membership), use
                                        module_key=MODULE, record_type="payment_batch").first()
     if not batch:
         raise HTTPException(404, "Payment batch not found")
+    _assert_batch_branch_scope(db, membership, batch)
     rows = batch.data["rows"]
     return {"batch_id": batch.id, "count": len(rows), "paid": sum(x["status"] == "paid" for x in rows),
             "failed": sum(x["status"] == "failed" for x in rows), "pending": sum(x["status"] == "pending" for x in rows),
@@ -879,6 +899,7 @@ def post_salary_settlement_journal(batch_id: int, payload: dict=Body(...), membe
         module_key=MODULE,record_type="payment_batch").with_for_update().first()
     if not batch or batch.data.get("status")!="paid":
         raise HTTPException(409,"All salary instructions must be verified as paid before settlement posting")
+    _assert_batch_branch_scope(db, membership, batch)
     if _record(db,membership.organization_id,"payroll_settlement_journal").filter(Record.data["batch_id"].as_integer()==batch_id).first():
         raise HTTPException(409,"Settlement journal already exists for this payment batch")
     salary_payable_id=int(payload.get("salary_payable_account_id",0))
@@ -928,6 +949,7 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
         module_key=MODULE,record_type="payment_batch").with_for_update().first()
     if not batch or batch.data.get("method")!="bank":
         raise HTTPException(404,"Bank payment batch not found")
+    _assert_batch_branch_scope(db, membership, batch)
     if batch.data.get("status") not in ("authorized", "partial", "processing", "failed"):
         raise HTTPException(409, "Bank payment batch must be authorized before reconciliation")
     statement=payload.get("transactions")
@@ -966,6 +988,7 @@ def reverse_salary_payment(batch_id: int, employee_id: int, payload: dict=Body(.
         module_key=MODULE,record_type="payment_batch").with_for_update().first()
     if not batch:
         raise HTTPException(404,"Payment batch not found")
+    _assert_batch_branch_scope(db, membership, batch)
     d=dict(batch.data); row=next((x for x in d["rows"] if x["employee_id"]==employee_id),None)
     if not row or row["status"]!="paid":
         raise HTTPException(409,"Only a verified settled salary payment can be reversed")
