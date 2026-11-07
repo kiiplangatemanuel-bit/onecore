@@ -199,6 +199,28 @@ def pause_schedule(schedule_id:int,membership=Depends(active_membership),
     return {"id":row.id,"status":row.status}
 
 
+@router.post("/schedules/{schedule_id}/cancel")
+def cancel_schedule(schedule_id:int,membership=Depends(active_membership),
+                    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(CRMCampaignSchedule).filter_by(
+        id=schedule_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row:raise HTTPException(404,"Schedule not found")
+    campaign=db.query(CRMCampaign).filter_by(
+        id=row.campaign_id,organization_id=membership.organization_id).first()
+    if not campaign or not can_access_branch(membership,campaign.branch_id):
+        raise HTTPException(404,"Schedule not found")
+    if row.status not in {"scheduled","paused","failed"}:
+        raise HTTPException(409,"Only pending, paused or failed schedules can be cancelled")
+    if row.lease_until and as_utc(row.lease_until)>datetime.now(timezone.utc):
+        raise HTTPException(409,"A scheduled run is currently being processed; retry cancellation after it finishes")
+    row.status="cancelled";row.next_run_at=None;row.lease_until=None
+    db.add(AuditEvent(actor_user_id=user.id,organization_id=membership.organization_id,
+        action="crm.campaign.schedule_cancelled",resource_type="crm_campaign_schedule",
+        resource_id=str(row.id)));db.commit()
+    return {"id":row.id,"status":row.status}
+
+
 @router.post("/schedules/{schedule_id}/resume")
 def resume_schedule(schedule_id:int,membership=Depends(active_membership),
                     user:User=Depends(current_user),db:Session=Depends(get_db)):
