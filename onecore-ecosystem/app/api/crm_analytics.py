@@ -63,8 +63,18 @@ def update_forecast_details(lead_id:int,payload:dict,m=Depends(active_membership
         if value is not None and (isinstance(value,bool) or not 0<=float(value)<=100):
             raise HTTPException(422,"probability_override must be between 0 and 100")
         row.probability_override=Decimal(str(value)) if value is not None else None
-    if row.stage=="won" and row.actual_closed_at is None:row.actual_closed_at=datetime.now(timezone.utc)
-    if row.stage!="won":row.actual_closed_at=None
+    if row.stage=="won" and row.actual_closed_at is None:
+        row.actual_closed_at=datetime.now(timezone.utc)
+        if row.actual_value is None:row.actual_value=row.estimated_value
+    if row.stage!="won":
+        row.actual_closed_at=None
+        row.actual_value=None
+    if "actual_value" in payload:
+        if row.stage!="won":raise HTTPException(409,"Actual value can only be set on a won lead")
+        try:value=Decimal(str(payload["actual_value"]))
+        except Exception:raise HTTPException(422,"Invalid actual_value")
+        if not value.is_finite() or value<0 or value>Decimal("9999999999999999"):raise HTTPException(422,"Invalid actual_value")
+        row.actual_value=value
     db.add(AuditEvent(organization_id=m.organization_id,actor_user_id=user.id,
         action="crm.lead.forecast_details.updated",resource_type="crm_lead",resource_id=str(row.id)))
     db.commit()
@@ -214,7 +224,7 @@ def forecast_accuracy(period_type:str=Query("month",pattern="^(month|quarter|yea
         latest.setdefault((row.rep_key,row.currency,row.scenario),row)
     output=[]
     for (_,currency,scenario),snap in latest.items():
-        actual_q=db.query(func.coalesce(func.sum(CRMLead.estimated_value),0)).filter(
+        actual_q=db.query(func.coalesce(func.sum(func.coalesce(CRMLead.actual_value,CRMLead.estimated_value)),0)).filter(
             CRMLead.organization_id==m.organization_id,CRMLead.stage=="won",CRMLead.currency==currency,
             CRMLead.actual_closed_at>=datetime.combine(first,time.min,timezone.utc),
             CRMLead.actual_closed_at<datetime.combine(last+timedelta(days=1),time.min,timezone.utc))
