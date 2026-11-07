@@ -83,7 +83,7 @@ def save_forecast_settings(payload:dict,m=Depends(active_membership),user:User=D
         isinstance(v,bool) or not isinstance(v,(int,float)) or not 0<=v<=2 for v in multipliers.values()):
         raise HTTPException(422,"Define scenario multipliers from 0 to 2")
     row=db.query(CRMForecastSetting).filter_by(organization_id=m.organization_id).first()
-    if not row:row=CRMForecastSetting(organization_id=m.organization_id,updated_by=user.id);db.add(row)
+    if not row:row=CRMForecastSetting(organization_id=m.organization_id,updated_by=user.id,stage_probabilities=probabilities,scenario_multipliers=multipliers);db.add(row)
     row.stage_probabilities=probabilities;row.scenario_multipliers=multipliers;row.updated_by=user.id
     db.add(AuditEvent(organization_id=m.organization_id,actor_user_id=user.id,
         action="crm.forecast.settings.updated",resource_type="crm_forecast_settings"))
@@ -147,6 +147,7 @@ def advanced_forecast(period_type:str=Query("month",pattern="^(month|quarter|yea
     targets={(x.assigned_to or 0,x.currency):x.target_amount for x in target_rows
         if x.branch_id is None or can_access_branch(m,x.branch_id)}
     output=[]
+    for target_key in targets:grouped.setdefault(target_key,[])
     for (owner,currency),items in sorted(grouped.items(),key=lambda pair:(pair[0][1],pair[0][0])):
         scenarios=calculate_scenarios(items,probs,mults);target=targets.get((owner,currency),targets.get((0,currency),Decimal("0")))
         expected=scenarios["expected"]
@@ -220,10 +221,13 @@ def set_campaign_budget(campaign_id:int,payload:dict,m=Depends(active_membership
     except Exception:raise HTTPException(422,"budget_amount is required")
     if not amount.is_finite() or amount<0 or amount>Decimal("9999999999999999"):raise HTTPException(422,"Invalid campaign budget")
     campaign.budget_amount=amount
+    currency=str(payload.get("currency","KES")).upper()
+    if len(currency)!=3 or not currency.isalpha() or not currency.isupper():raise HTTPException(422,"Invalid budget currency")
+    campaign.budget_currency=currency
     db.add(AuditEvent(organization_id=m.organization_id,actor_user_id=user.id,
         action="crm.campaign.budget.updated",resource_type="crm_campaign",resource_id=str(campaign.id)))
     db.commit()
-    return {"campaign_id":campaign.id,"budget_amount":str(amount)}
+    return {"campaign_id":campaign.id,"budget_amount":str(amount),"budget_currency":campaign.budget_currency}
 
 @router.post("/campaigns/{campaign_id}/attributions",status_code=201)
 def create_attribution(campaign_id:int,payload:dict,m=Depends(active_membership),
@@ -277,18 +281,29 @@ def campaign_roi(campaign_id:int|None=None,m=Depends(active_membership),db:Sessi
     if campaign_id is not None:q=q.filter(CRMCampaign.id==campaign_id)
     result=[]
     for campaign in q.order_by(CRMCampaign.created_at.desc()).limit(200).all():
-        rows=db.query(CRMCampaignAttribution.currency,func.sum(CRMCampaignAttribution.revenue_amount),
-            func.count(CRMCampaignAttribution.id)).filter_by(
+        events=db.query(CRMCampaignAttribution).filter_by(
             organization_id=m.organization_id,campaign_id=campaign.id).filter(
-            CRMCampaignAttribution.event_type.in_(["order_won","invoice_paid"])).group_by(CRMCampaignAttribution.currency).all()
+            CRMCampaignAttribution.event_type.in_(["order_won","invoice_paid"])).order_by(
+            CRMCampaignAttribution.occurred_at.desc(),CRMCampaignAttribution.id.desc()).all()
+        # An invoice-paid event supersedes the earlier order-won estimate for that order.
+        per_order={}
+        for event in events:
+            key=event.sales_order_id or ("event",event.id)
+            previous=per_order.get(key)
+            if previous is None or event.event_type=="invoice_paid":per_order[key]=event
+        totals={}
+        for event in per_order.values():
+            gross,count=totals.get(event.currency,(Decimal("0"),0))
+            totals[event.currency]=(gross+Decimal(str(event.revenue_amount)),count+1)
         revenue=[]
-        for currency,total,count in rows:
-            spend=Decimal(str(campaign.budget_amount or 0));gross=Decimal(str(total or 0))
-            roi=((gross-spend)/spend*100).quantize(Decimal("0.01")) if spend else None
+        for currency,(gross,count) in totals.items():
+            spend=Decimal(str(campaign.budget_amount or 0))
+            roi=((gross-spend)/spend*100).quantize(Decimal("0.01")) if spend and currency==campaign.budget_currency else None
             revenue.append({"currency":currency,"attributed_revenue":str(gross),"conversions":count,
-                "campaign_cost":str(spend),"roi_percent":str(roi) if roi is not None else None})
+                "campaign_cost":str(spend) if currency==campaign.budget_currency else None,
+                "budget_currency":campaign.budget_currency,"roi_percent":str(roi) if roi is not None else None})
         result.append({"campaign_id":campaign.id,"name":campaign.name,"status":campaign.status,
-            "budget_amount":str(campaign.budget_amount or 0),"revenue":revenue})
+            "budget_amount":str(campaign.budget_amount or 0),"budget_currency":campaign.budget_currency,"revenue":revenue})
     return {"campaigns":result,"roi_note":"Explicit attribution only; ROI is not proof of causation."}
 
 @router.post("/scheduler/heartbeat")
