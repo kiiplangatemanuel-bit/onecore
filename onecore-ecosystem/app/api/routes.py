@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,7 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, validate_payment_total, canonical_request_hash
+from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -1538,6 +1538,147 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
           "pos_sale", sale.id, payload.client_transaction_id)
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
             "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency}
+
+
+
+@router.get("/pos/sales/{sale_id}")
+def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
+                         user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    sale = db.query(POSSale).filter_by(
+        id=sale_id, organization_id=membership.organization_id
+    ).first()
+    if not sale or not can_access_branch(membership, sale.branch_id):
+        raise HTTPException(404, "Sale not found")
+    lines = db.query(POSSaleLine, InventoryProduct.name, InventoryProduct.sku).join(
+        InventoryProduct, InventoryProduct.id == POSSaleLine.product_id
+    ).filter(POSSaleLine.organization_id == membership.organization_id,
+             POSSaleLine.sale_id == sale.id).order_by(POSSaleLine.id).all()
+    returned = db.query(POSReturnLine.sale_line_id, func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
+        POSReturn, POSReturn.id == POSReturnLine.return_id
+    ).filter(POSReturn.organization_id == membership.organization_id,
+             POSReturn.sale_id == sale.id).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {line_id: quantity for line_id, quantity in returned}
+    payments = db.query(POSPayment).filter_by(
+        organization_id=membership.organization_id, sale_id=sale.id
+    ).order_by(POSPayment.id).all()
+    return {
+        "id": sale.id, "branch_id": sale.branch_id, "shift_id": sale.shift_id,
+        "currency": sale.currency, "status": sale.status,
+        "total_amount": str(sale.total_amount), "created_at": sale.created_at.isoformat(),
+        "lines": [{
+            "id": line.id, "product_id": line.product_id, "sku": sku, "name": name,
+            "quantity": str(line.quantity), "returned_quantity": str(returned_map.get(line.id, 0)),
+            "returnable_quantity": str(Decimal(str(line.quantity)) - Decimal(str(returned_map.get(line.id, 0)))),
+            "unit_price": str(line.unit_price), "line_total": str(line.line_total),
+        } for line, name, sku in lines],
+        "payments": [{"method": p.method, "amount": str(p.amount), "status": p.status,
+                      "provider_reference": p.provider_reference} for p in payments],
+    }
+
+
+@router.post("/pos/sales/{sale_id}/returns", status_code=201)
+def create_pos_return(sale_id: int, payload: POSReturnIn,
+                      membership=Depends(active_membership), user: User = Depends(current_user),
+                      db: Session = Depends(get_db)):
+    # Refunds and stock reintegration require a supervisor/manager permission.
+    require_permission(membership, "manage")
+    request_hash = canonical_return_hash(payload)
+    existing = db.query(POSReturn).filter_by(
+        organization_id=membership.organization_id, client_return_id=payload.client_return_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash or existing.sale_id != sale_id:
+            raise HTTPException(409, "Return ID was already used for different return data")
+        return {"id": existing.id, "sale_id": existing.sale_id, "status": "already_recorded",
+                "refund_total": str(existing.refund_total)}
+    sale = db.query(POSSale).filter_by(
+        id=sale_id, organization_id=membership.organization_id, status="posted"
+    ).with_for_update().first()
+    if not sale or not can_access_branch(membership, sale.branch_id):
+        raise HTTPException(404, "Sale not found")
+    line_ids = [item.sale_line_id for item in payload.lines]
+    sale_lines = db.query(POSSaleLine).filter(
+        POSSaleLine.organization_id == membership.organization_id,
+        POSSaleLine.sale_id == sale.id, POSSaleLine.id.in_(line_ids)
+    ).with_for_update().all()
+    line_map = {item.id: item for item in sale_lines}
+    if set(line_map) != set(line_ids):
+        raise HTTPException(404, "One or more original sale lines were not found")
+    already_returned = db.query(POSReturnLine.sale_line_id,
+        func.coalesce(func.sum(POSReturnLine.quantity), 0)).join(
+        POSReturn, POSReturn.id == POSReturnLine.return_id
+    ).filter(POSReturn.organization_id == membership.organization_id,
+             POSReturn.sale_id == sale.id,
+             POSReturnLine.sale_line_id.in_(line_ids)).group_by(POSReturnLine.sale_line_id).all()
+    returned_map = {line_id: Decimal(str(quantity)) for line_id, quantity in already_returned}
+    total = Decimal("0.00")
+    prepared = []
+    for item in payload.lines:
+        original = line_map[item.sale_line_id]
+        remaining = Decimal(str(original.quantity)) - returned_map.get(original.id, Decimal("0"))
+        if item.quantity > remaining:
+            raise HTTPException(409, f"Return quantity exceeds remaining sold quantity for line {original.id}")
+        amount = money(Decimal(str(original.unit_price)) * item.quantity)
+        total += amount
+        prepared.append((original, item.quantity, amount))
+    total = money(total)
+    validate_return_refund_total(total, payload.refunds)
+    original_tenders = db.query(POSPayment.method,
+        func.coalesce(func.sum(POSPayment.amount), 0)).filter(
+        POSPayment.organization_id == membership.organization_id,
+        POSPayment.sale_id == sale.id, POSPayment.status == "recorded"
+    ).group_by(POSPayment.method).all()
+    tender_totals = {method: Decimal(str(amount)) for method, amount in original_tenders}
+    prior_refunds = db.query(POSRefund.method,
+        func.coalesce(func.sum(POSRefund.amount), 0)).join(
+        POSReturn, POSReturn.id == POSRefund.return_id
+    ).filter(POSReturn.organization_id == membership.organization_id,
+             POSReturn.sale_id == sale.id).group_by(POSRefund.method).all()
+    prior_map = {method: Decimal(str(amount)) for method, amount in prior_refunds}
+    requested_map = {}
+    for item in payload.refunds:
+        requested_map[item.method] = requested_map.get(item.method, Decimal("0")) + money(item.amount)
+    for method, amount in requested_map.items():
+        if amount + prior_map.get(method, Decimal("0")) > tender_totals.get(method, Decimal("0")):
+            raise HTTPException(422, f"Refund by {method} exceeds recorded original tender available")
+    result = POSReturn(
+        organization_id=membership.organization_id, sale_id=sale.id, branch_id=sale.branch_id,
+        client_return_id=payload.client_return_id, request_hash=request_hash,
+        reason=payload.reason.strip(), refund_total=total, created_by=user.id,
+    )
+    db.add(result)
+    db.flush()
+    return_key = hashlib.sha256(payload.client_return_id.encode()).hexdigest()[:32]
+    for index, (original, quantity, amount) in enumerate(prepared):
+        db.add(POSReturnLine(organization_id=membership.organization_id, return_id=result.id,
+            sale_line_id=original.id, product_id=original.product_id, quantity=quantity,
+            unit_price=original.unit_price, line_total=amount))
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,
+            product_id=original.product_id, branch_id=sale.branch_id, quantity_delta=quantity,
+            movement_type="receipt", reference=payload.client_return_id,
+            idempotency_key=f"pos-return:{return_key}:{index}", created_by=user.id))
+    for item in payload.refunds:
+        db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
+            method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
+            status="recorded"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(POSReturn).filter_by(
+            organization_id=membership.organization_id, client_return_id=payload.client_return_id
+        ).first()
+        if existing and existing.request_hash == request_hash and existing.sale_id == sale_id:
+            return {"id": existing.id, "sale_id": existing.sale_id, "status": "already_recorded",
+                    "refund_total": str(existing.refund_total)}
+        raise HTTPException(409, "Return conflicts with another return or stock movement")
+    db.refresh(result)
+    audit(db, user.id, membership.organization_id, "pos.sale.returned",
+          "pos_return", result.id, f"sale:{sale.id};refund:{total};reason:{payload.reason.strip()}")
+    return {"id": result.id, "sale_id": sale.id, "status": "recorded",
+            "refund_total": str(result.refund_total), "currency": sale.currency,
+            "stock_reintegrated": True, "refunds_executed": False}
 
 
 @router.get("/pos/shifts/current")
