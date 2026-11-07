@@ -399,3 +399,13 @@ Remaining accounting work:
 The increment has been committed, but do not mark it verified until GitHub Actions
 completes migration upgrade/downgrade/re-upgrade, compilation and the complete pytest
 suite. The SQLite CI environment is not a production database rehearsal.
+
+### Accounting AR/AP CI verification
+
+- GitHub Actions run 42364078944 for commit 29b47f0c85a5f3aec8e2942e5d8f3b2e7394ec07 passed.
+- Alembic migration upgrade, downgrade and re-upgrade passed.
+- Python compilation passed.
+- Full pytest suite: 49 passed, 5 warnings.
+- The migration/test run uses CI SQLite. It does not establish PostgreSQL production
+  compatibility, race-safety under real concurrent payments, statutory tax correctness,
+  security certification or production readiness.
