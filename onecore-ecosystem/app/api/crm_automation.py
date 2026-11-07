@@ -17,8 +17,6 @@ from app.services.crm_audience import validate_segment_definition, apply_segment
 from app.api.crm_campaigns import dispatch_campaign
 
 router = APIRouter(prefix="/api/v1/crm", tags=["CRM campaign automation"])
-VARIABLES = {"first_name", "full_name", "company", "email", "phone"}
-TOKEN = re.compile(r"{{\s*([a-z_]+)\s*}}")
 
 
 def _campaign(db, campaign_id, membership):
