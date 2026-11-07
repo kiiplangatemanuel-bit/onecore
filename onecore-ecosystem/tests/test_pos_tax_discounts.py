@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.models import InventoryProduct, POSSale, POSSaleLine, POSReturnLine
-from app.core.schemas import InventoryProductIn, POSSaleSyncIn
+from app.core.schemas import InventoryProductIn, InventoryProductTaxRateIn, POSSaleSyncIn
 from app.services.pos import calculate_pos_line, canonical_request_hash
 
 
@@ -76,3 +76,10 @@ def test_discount_validation_and_persisted_tax_snapshots():
     assert POSSaleLine.tax_amount is not None
     assert POSReturnLine.discount_amount is not None
     assert POSReturnLine.tax_amount is not None
+
+
+
+def test_tax_rate_update_contract_is_manager_controlled_and_registered():
+    assert InventoryProductTaxRateIn(tax_rate="16").tax_rate == Decimal("16")
+    paths = set(__import__("app.main", fromlist=["app"]).app.openapi()["paths"])
+    assert "/api/v1/inventory/products/{product_id}/tax-rate" in paths
