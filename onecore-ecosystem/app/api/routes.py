@@ -1158,9 +1158,6 @@ def replace_procurement_approval_rules(payload:list[ProcurementApprovalRuleIn],
     levels=[x.approval_level for x in payload]
     if len(levels)!=len(set(levels)):raise HTTPException(422,"Approval levels must be unique")
     ordered=sorted(payload,key=lambda x:x.approval_level)
-    for idx,rule in enumerate(ordered):
-        if idx and rule.minimum_amount < (ordered[idx-1].maximum_amount or ordered[idx-1].minimum_amount):
-            raise HTTPException(422,"Approval amount ranges must not overlap")
     db.query(ProcurementApprovalRule).filter_by(organization_id=membership.organization_id).delete()
     for rule in ordered:db.add(ProcurementApprovalRule(organization_id=membership.organization_id,**rule.model_dump(),created_by=user.id))
     audit(db,user.id,membership.organization_id,"procurement.approval_rules.updated","procurement_approval_rule",membership.organization_id)
@@ -1236,6 +1233,35 @@ def compare_procurement_rfq_quotes(rfq_id:int,membership=Depends(active_membersh
             "currency":q.currency,"delivery_days":q.delivery_days,"total":str(total),
             "lines":[{"product_id":line.product_id,"quantity":str(line.quantity),"unit_price":str(quoted.unit_price),"tax_rate":str(quoted.tax_rate)} for quoted,line in lines]})
     return sorted(result,key=lambda x:(x["currency"],Decimal(x["total"]),x["delivery_days"]))
+
+
+@router.post("/procurement/rfqs/{rfq_id}/quotes/{quote_id}/award",status_code=201)
+def award_procurement_quote(rfq_id:int,quote_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"create")
+    rfq=db.query(ProcurementRFQ).filter_by(id=rfq_id,organization_id=membership.organization_id).first()
+    quote=db.query(ProcurementRFQQuote).filter_by(id=quote_id,rfq_id=rfq_id,organization_id=membership.organization_id).first()
+    if not rfq or not quote:raise HTTPException(404,"RFQ or quotation not found")
+    if rfq.status!="open":raise HTTPException(409,"RFQ is not open")
+    invitation=db.query(ProcurementRFQInvitation).filter_by(rfq_id=rfq.id,supplier_id=quote.supplier_id,organization_id=membership.organization_id).first()
+    if not invitation:raise HTTPException(409,"Supplier invitation is missing")
+    rfq_lines=db.query(ProcurementRFQLine).filter_by(rfq_id=rfq.id,organization_id=membership.organization_id).all()
+    quote_lines=db.query(ProcurementRFQQuoteLine).filter_by(quote_id=quote.id,organization_id=membership.organization_id).all()
+    if {x.rfq_line_id for x in quote_lines}!={x.id for x in rfq_lines}:raise HTTPException(409,"Quotation is incomplete")
+    supplier=db.query(ProcurementSupplier).filter_by(id=quote.supplier_id,organization_id=membership.organization_id,is_active=True).first()
+    order=ProcurementPurchaseOrder(organization_id=membership.organization_id,branch_id=rfq.branch_id,
+        supplier_id=supplier.id,order_number="PO-"+uuid.uuid4().hex[:14].upper(),status="draft",
+        currency=quote.currency,notes="Awarded from "+rfq.rfq_number,created_by=user.id)
+    db.add(order);db.flush()
+    quote_map={x.rfq_line_id:x for x in quote_lines}
+    for line in rfq_lines:
+        qline=quote_map[line.id]
+        db.add(ProcurementPurchaseOrderLine(organization_id=membership.organization_id,purchase_order_id=order.id,
+            product_id=line.product_id,quantity_ordered=line.quantity,quantity_received=Decimal("0"),unit_cost=qline.unit_price))
+    rfq.status="awarded"
+    audit(db,user.id,membership.organization_id,"procurement.rfq.awarded","procurement_rfq",rfq.id,order.order_number)
+    db.commit()
+    return {"id":order.id,"order_number":order.order_number,"status":order.status,"supplier_id":supplier.id}
 
 
 @router.post("/procurement/supplier-invoices",status_code=201)
