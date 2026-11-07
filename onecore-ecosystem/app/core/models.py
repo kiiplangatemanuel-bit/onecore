@@ -320,6 +320,7 @@ class POSShift(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id"), index=True)
     cashier_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("pos_devices.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), default="open")
     opening_cash: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     closing_cash: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
