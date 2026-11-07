@@ -297,6 +297,9 @@ def open_break_glass(patient_id:int,payload:HealthcareBreakGlassIn,membership=De
     user:User=Depends(current_user),db:Session=Depends(get_db)):
     patient=_patient(db,membership,patient_id)
     roles=_roles(db,membership,user,patient.branch_id)
+    if patient.branch_id is None:
+        roles={x.role for x in db.query(HealthcareRoleAssignment).filter_by(
+            organization_id=membership.organization_id,user_id=user.id,is_active=True,branch_id=None).all()}
     if not roles.intersection({"healthcare_admin","clinician","nurse"}):
         raise HTTPException(403,"Only clinical staff may request emergency access")
     now=datetime.now(timezone.utc)
