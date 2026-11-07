@@ -238,7 +238,7 @@ def _check_drug_safety(db, m, patient_id, medicine_ids, concurrent_ids=None):
 @router.post("/pharmacy/medicines", status_code=201)
 def create_pharmacy_medicine(payload: dict, m=Depends(active_membership),
     u: User=Depends(current_user), db: Session=Depends(get_db)):
-    _need(db, m, u, "pharmacy.manage", payload.get("branch_id"))
+    _need_any(db, m, u, "pharmacy.manage")
     sku = _required_text(payload, "sku", 80).upper()
     generic = _required_text(payload, "generic_name")
     form = _required_text(payload, "dosage_form", 60)
@@ -287,6 +287,7 @@ def receive_pharmacy_batch(medicine_id:int,payload:dict,m=Depends(active_members
     qty=_decimal(payload.get("received_quantity"),"received_quantity",True)
     cost=_decimal(payload.get("unit_cost"),"unit_cost",places=2)
     price=_decimal(payload.get("selling_price"),"selling_price",places=2)
+    if cost<0 or price<0:raise HTTPException(422,"Batch cost and selling price cannot be negative")
     client=_required_text(payload,"client_batch_id",100)
     existing=_resource_list(db,m,"pharmacy_batch",branch_id=branch_id,limit=1000)
     for x in existing:
@@ -418,17 +419,26 @@ def adjust_pharmacy_batch(batch_id:int,payload:dict,m=Depends(active_membership)
         raise HTTPException(403,"A second pharmacist or healthcare administrator must verify")
     delta=_decimal(payload.get("quantity_delta"),"quantity_delta",places=3)
     if delta==0:raise HTTPException(422,"Adjustment cannot be zero")
+    key=_required_text(payload,"idempotency_key",100)
+    prior=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
+        resource_type="pharmacy_stock_adjustment",idempotency_key=key).first()
+    if prior:
+        prior_data=_payload(prior)
+        if prior.parent_id!=row.id or Decimal(prior_data["delta"])!=delta or prior_data["reason"]!=reason:
+            raise HTTPException(409,"Stock adjustment idempotency key conflicts with a previous request")
+        return {"batch_id":row.id,"remaining_quantity":prior_data["balance_after"],"status":"already_recorded"}
     new_qty=Decimal(data["remaining_quantity"])+delta
     if new_qty<0:raise HTTPException(409,"Adjustment would make batch stock negative")
     data["remaining_quantity"]=str(new_qty);_update(row,data,u)
+    movement_key=f"pharm-adjust:{hashlib.sha256(key.encode()).hexdigest()[:48]}"
     _movement(db,m,u,data["inventory_product_id"],row.branch_id,delta,"adjustment",
-        f"pharmacy-adjust:{row.id}",f"pharm-adjust:{row.id}:{uuid.uuid4().hex[:16]}")
+        f"pharmacy-adjust:{row.id}",movement_key)
     medrow=_get(db,m,data["medicine_id"],"pharmacy_medicine")
     if _payload(medrow).get("is_controlled"):
         _controlled_event(db,m,u,medrow.id,row.id,None,"stock_adjustment",delta,reason,verifier_id,branch_id=row.branch_id)
     _create(db,m,u,"pharmacy_stock_adjustment",{"batch_id":row.id,"delta":str(delta),
         "reason":reason,"verifier_id":verifier_id,"balance_after":str(new_qty)},
-        branch_id=row.branch_id,parent_id=row.id,status="posted")
+        branch_id=row.branch_id,parent_id=row.id,status="posted",idempotency_key=key)
     _audit_action(db,m,u,"pharmacy.batch.adjusted","pharmacy_batch",row.id,reason)
     db.commit()
     return {"batch_id":row.id,"remaining_quantity":str(new_qty)}
@@ -695,6 +705,14 @@ def return_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_membe
     data=_payload(disp);patient,_,_=_patient_read(db,m,u,disp.patient_id)
     qty=_decimal(payload.get("quantity"),"quantity",True)
     reason=_required_text(payload,"reason",500)
+    return_key=_required_text(payload,"idempotency_key",100)
+    prior=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
+        resource_type="pharmacy_return",idempotency_key=return_key).first()
+    if prior:
+        prior_data=_payload(prior)
+        if prior.parent_id!=disp.id or Decimal(prior_data["quantity"])!=qty or prior_data["reason"]!=reason:
+            raise HTTPException(409,"Return idempotency key conflicts with a previous request")
+        return {"return_id":prior.id,"status":"already_recorded"}
     previous=_resource_list(db,m,"pharmacy_return",patient_id=disp.patient_id,limit=1000)
     returned=sum((Decimal(_payload(x)["quantity"]) for x in previous if _payload(x).get("dispense_id")==disp.id),Decimal("0"))
     if returned+qty>Decimal(data["quantity"]):raise HTTPException(422,"Return exceeds dispensed quantity")
@@ -713,7 +731,8 @@ def return_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_membe
     row=_create(db,m,u,"pharmacy_return",{"dispense_id":disp.id,"quantity":str(qty),
         "allocations":return_allocations,"reason":reason,"stock_disposition":"quarantine_pending",
         "recorded_by":u.id,"recorded_at":NOW().isoformat()},
-        disp.branch_id,disp.patient_id,parent_id=disp.id,status="quarantine_pending")
+        disp.branch_id,disp.patient_id,parent_id=disp.id,status="quarantine_pending",
+        idempotency_key=return_key)
     _patient_event(db,m,u,patient,"pharmacy.dispense.returned",
         {"dispense_id":disp.id,"return_id":row.id,"quantity":str(qty),"reason":reason},row.id)
     db.commit()
@@ -1386,9 +1405,12 @@ def create_pharmacy_lab_invoice(payload:dict,m=Depends(active_membership),
         expected=sum((_money(x["price"]) for x in od["lines"]),Decimal("0.00"))
         if amount!=expected:raise HTTPException(422,"Laboratory invoice must match the configured test catalogue prices")
     else:raise HTTPException(422,"Unsupported invoice source type")
+    currency=str(payload.get("currency","KES")).upper()
+    if len(currency)!=3 or not currency.isalpha():
+        raise HTTPException(422,"Currency must be a three-letter ISO code")
     data={"patient_id":patient.id,"source_type":source_type,"source_id":source_id,
-        "invoice_number":str(payload.get("invoice_number") or f"CLIN-{source_id}-{uuid.uuid4().hex[:6].upper()}"),
-        "amount":str(amount),"currency":str(payload.get("currency","KES")),"status":"unpaid",
+        "invoice_number":str(payload.get("invoice_number") or f"CLIN-{source_type[:3].upper()}-{source_id}"),
+        "amount":str(amount),"currency":currency,"status":"unpaid",
         "created_at":NOW().isoformat()}
     invoice=_create(db,m,u,"invoice",data,patient.branch_id,patient.id,parent_id=source.id,
         status="unpaid",amount=amount,currency=data["currency"],
@@ -1416,14 +1438,20 @@ def decide_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_members
     _need(db,m,u,"insurance.manage",claim.branch_id)
     if claim.status not in {"submitted","approved"}:raise HTTPException(409,"Claim cannot transition from current state")
     decision=str(payload.get("decision",""))
-    if decision not in {"approved","rejected","settled"}:raise HTTPException(422,"Invalid claim decision")
-    if decision=="settled" and claim.status!="approved":raise HTTPException(409,"Only approved claims may settle")
+    if decision not in {"approved","rejected"}:raise HTTPException(422,"Decision must be approved or rejected; use the settlement endpoint to reconcile payment")
     data=_payload(claim);data.update({"decision_note":_required_text(payload,"note",500),
         "decided_by":u.id,"decided_at":NOW().isoformat(),"status":decision})
     _update(claim,data,u,status=decision)
     _audit_action(db,m,u,"clinical.insurance_claim."+decision,"insurance_claim",claim.id)
     db.commit()
     return {"claim_id":claim.id,"status":claim.status}
+
+
+@router.post("/pharmacy-lab/claims/{claim_id}/settle")
+def settle_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    from app.api.healthcare_hospital import settle_claim
+    return settle_claim(claim_id,payload,m,u,db)
 
 
 @router.get("/pharmacy-lab/traceability")
