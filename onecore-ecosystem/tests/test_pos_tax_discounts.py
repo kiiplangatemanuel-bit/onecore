@@ -83,3 +83,16 @@ def test_tax_rate_update_contract_is_manager_controlled_and_registered():
     assert InventoryProductTaxRateIn(tax_rate="16").tax_rate == Decimal("16")
     paths = set(__import__("app.main", fromlist=["app"]).app.openapi()["paths"])
     assert "/api/v1/inventory/products/{product_id}/tax-rate" in paths
+
+
+
+def test_pos_and_inventory_workspaces_expose_tax_discount_controls():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    pos = (root / "app" / "web" / "pos.html").read_text(encoding="utf-8")
+    inventory = (root / "app" / "web" / "inventory.html").read_text(encoding="utf-8")
+    assert 'name="discount_percent"' in pos
+    assert "discount_percent:Number(item.discount_percent||0)" in pos
+    assert "data.tax_amount" not in pos
+    assert 'name="tax_rate"' in inventory
+    assert "/tax-rate" in inventory
