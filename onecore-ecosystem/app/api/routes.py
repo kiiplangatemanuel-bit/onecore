@@ -1635,14 +1635,48 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     subtotal_total, discount_total, tax_total, total = map(
         money, (subtotal_total, discount_total, tax_total, total))
     validate_payment_total(total, payload.payments)
+    warehouse_allocations = {}
+    branch_warehouses = db.query(InventoryWarehouse).filter_by(
+        organization_id=membership.organization_id,branch_id=payload.branch_id,is_active=True
+    ).order_by(InventoryWarehouse.id).all()
     for product_id, quantity in aggregate_qty.items():
-        stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
-            InventoryStockMovement.organization_id == membership.organization_id,
-            InventoryStockMovement.product_id == product_id,
-            InventoryStockMovement.branch_id == payload.branch_id
-        ).scalar()
-        if Decimal(str(stock or 0)) < quantity:
-            raise HTTPException(409, f"Insufficient stock for product {product_map[product_id].sku}")
+        remaining = Decimal(str(quantity))
+        allocations = []
+        if branch_warehouses:
+            for warehouse in branch_warehouses:
+                balance_query = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+                    InventoryStockMovement.organization_id==membership.organization_id,
+                    InventoryStockMovement.product_id==product_id,
+                    InventoryStockMovement.branch_id==payload.branch_id)
+                if len(branch_warehouses)==1:
+                    balance_query=balance_query.filter((InventoryStockMovement.warehouse_id==warehouse.id)|(InventoryStockMovement.warehouse_id.is_(None)))
+                else:
+                    balance_query=balance_query.filter(InventoryStockMovement.warehouse_id==warehouse.id)
+                on_hand=Decimal(str(balance_query.scalar() or 0))
+                reservations=db.query(InventoryReservation).filter_by(
+                    organization_id=membership.organization_id,warehouse_id=warehouse.id,
+                    product_id=product_id,status="active").all()
+                reserved=Decimal("0")
+                now_utc=datetime.now(timezone.utc)
+                for reservation in reservations:
+                    exp=reservation.expires_at if reservation.expires_at.tzinfo else reservation.expires_at.replace(tzinfo=timezone.utc)
+                    if exp>now_utc: reserved+=Decimal(str(reservation.quantity))
+                available=max(Decimal("0"),on_hand-reserved)
+                take=min(available,remaining)
+                if take>0: allocations.append([warehouse.id,take]);remaining-=take
+                if remaining<=0: break
+        else:
+            stock=db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+                InventoryStockMovement.organization_id==membership.organization_id,
+                InventoryStockMovement.product_id==product_id,
+                InventoryStockMovement.branch_id==payload.branch_id,
+                InventoryStockMovement.warehouse_id.is_(None)).scalar()
+            available=Decimal(str(stock or 0))
+            take=min(available,remaining)
+            if take>0: allocations.append([None,take]);remaining-=take
+        if remaining>0:
+            raise HTTPException(409, f"Insufficient unreserved stock for product {product_map[product_id].sku}")
+        warehouse_allocations[product_id]=allocations
     sale = POSSale(
         organization_id=membership.organization_id, branch_id=payload.branch_id,
         shift_id=shift.id, cashier_user_id=user.id,
@@ -1654,19 +1688,30 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     )
     db.add(sale)
     db.flush()
+    movement_index=0
     for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
                            product_id=line.product_id, quantity=line.quantity,
                            unit_price=unit_price, discount_percent=line.discount_percent,
                            discount_amount=discount, tax_rate=tax_rate,
                            tax_amount=tax, line_total=line_total))
-        db.add(InventoryStockMovement(
-            organization_id=membership.organization_id, product_id=line.product_id,
-            branch_id=payload.branch_id, quantity_delta=-line.quantity,
-            movement_type="issue", reference=payload.client_transaction_id,
-            idempotency_key=f"pos:{hashlib.sha256(payload.client_transaction_id.encode()).hexdigest()[:32]}:{index}",
-            created_by=user.id
-        ))
+        line_remaining=Decimal(str(line.quantity))
+        allocations=warehouse_allocations.get(line.product_id,[])
+        while line_remaining>0 and allocations:
+            warehouse_id,allocated=allocations[0]
+            take=min(line_remaining,allocated)
+            db.add(InventoryStockMovement(
+                organization_id=membership.organization_id, product_id=line.product_id,
+                branch_id=payload.branch_id, warehouse_id=warehouse_id, quantity_delta=-take,
+                movement_type="issue", reference=payload.client_transaction_id,
+                idempotency_key=f"pos:{hashlib.sha256(payload.client_transaction_id.encode()).hexdigest()[:32]}:{movement_index}",
+                created_by=user.id
+            ))
+            movement_index+=1
+            line_remaining-=take
+            allocations[0][1]-=take
+            if allocations[0][1]<=0: allocations.pop(0)
+        if line_remaining>0: raise HTTPException(409,"Unable to allocate POS sale stock to warehouses")
     for payment in payload.payments:
         db.add(POSPayment(
             organization_id=membership.organization_id, sale_id=sale.id,
