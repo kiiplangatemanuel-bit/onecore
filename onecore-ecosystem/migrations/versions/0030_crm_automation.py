@@ -32,6 +32,7 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_crm_message_templates_organization_id", "crm_message_templates", ["organization_id"])
+    op.create_index("ix_crm_message_templates_branch_id", "crm_message_templates", ["branch_id"])
     op.create_index("ix_crm_template_org_name_version", "crm_message_templates", ["organization_id", "name", "version"], unique=True)
     op.create_table(
         "crm_audience_segments",
@@ -46,6 +47,7 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_crm_audience_segments_organization_id", "crm_audience_segments", ["organization_id"])
+    op.create_index("ix_crm_audience_segments_branch_id", "crm_audience_segments", ["branch_id"])
     op.create_index("ix_crm_segment_org_name", "crm_audience_segments", ["organization_id", "name"], unique=True)
     op.create_table(
         "crm_campaign_schedules",
