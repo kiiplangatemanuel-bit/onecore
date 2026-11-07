@@ -787,3 +787,29 @@ the coarse organization `manage` permission; field-level encryption, clinician
 roles, patient consent/portal, retention/deletion governance, break-glass access and
 formal privacy/security assessment are not implemented. Do not use live patient
 records until these controls and clinical governance are approved.
+
+
+## Pharmacy batch and laboratory workflow increment (7 November 2026)
+
+Implemented on branch `feature/pharmacy-lab-workflows`, stacked on the healthcare
+patient/clinic and HR/CRM feature branches:
+
+- Added tenant-owned pharmacy medicine catalogue entries linked to
+  `InventoryProduct`.
+- Added branch-owned medicine batches with expiry, received/remaining quantity,
+  unit cost, selling price, idempotent receipt and append-only stock ledger movement.
+- Added expired/active/quarantined batch visibility and quarantine action.
+- Added laboratory test catalogue, signed-encounter-linked orders and specimen type
+  consistency validation.
+- Added one sample/accession per order, result entry, catalogue reference-range
+  snapshots and independent second-person result validation.
+- Added `0026_pharmacy_lab`, pharmacy/lab workspace, tests and
+  `docs/PHARMACY_LAB.md`.
+
+Boundaries: prescription writing, FEFO dispensing, controlled medicine approval,
+pharmacy returns, suppliers/billing, multiple sample containers, lab equipment and
+instrument integration, QC/calibration, result amendments/delivery, critical-value
+escalation and UAT remain outstanding. Current clinical data permissions use the
+coarse `manage` permission; granular roles, field-level encryption, consent,
+retention governance and formal privacy/security review remain mandatory before
+live clinical use.
