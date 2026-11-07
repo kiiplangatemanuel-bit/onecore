@@ -151,6 +151,7 @@ class InventoryStockMovement(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("inventory_warehouses.id"), nullable=True, index=True)
     quantity_delta: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     movement_type: Mapped[str] = mapped_column(String(20))
     reference: Mapped[str] = mapped_column(String(120), default="")
