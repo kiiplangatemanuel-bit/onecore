@@ -318,14 +318,14 @@ def list_pharmacy_batches(medicine_id:int|None=None,branch_id:str|None=None,stat
 def _remove_batch_stock(db,m,u,row,data,reason,event_type):
     qty=Decimal(data.get("remaining_quantity","0"))
     if qty>0:
-        _movement(db,membership,u,data["inventory_product_id"],row.branch_id,-qty,"issue",
+        _movement(db,m,u,data["inventory_product_id"],row.branch_id,-qty,"issue",
             f"pharmacy-{event_type}:{row.id}",f"pharm-{event_type}:{row.id}")
     data["remaining_quantity"]="0";data["status"]=event_type
     _update(row,data,u,status=event_type)
-    medrow=_get(db,membership,data["medicine_id"],"pharmacy_medicine")
+    medrow=_get(db,m,data["medicine_id"],"pharmacy_medicine")
     med=_payload(medrow)
     if med.get("is_controlled"):
-        _controlled_event(db,membership,u,medrow.id,row.id,None,event_type,qty,reason,branch_id=row.branch_id)
+        _controlled_event(db,m,u,medrow.id,row.id,None,event_type,qty,reason,branch_id=row.branch_id)
     return qty
 
 
