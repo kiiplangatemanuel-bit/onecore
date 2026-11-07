@@ -691,3 +691,61 @@ class CRMCampaignIn(BaseModel):
         if len(value) < 2:
             raise ValueError("Campaign name and message must not be blank")
         return value
+
+
+class CRMCampaignTemplateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    channel: str = Field(pattern=r"^(email|sms|whatsapp)$")
+    purpose: str = Field(default="marketing", pattern=r"^(marketing|service)$")
+    subject: str = Field(default="", max_length=240)
+    body: str = Field(min_length=2, max_length=5000)
+
+
+class CRMContactSegmentIn(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    branch_id: str | None = Field(default=None, max_length=36)
+    definition: dict = Field(default_factory=dict)
+
+
+class CRMTemplateApplyIn(BaseModel):
+    template_id: int
+
+
+class CRMSegmentApplyIn(BaseModel):
+    segment_id: int
+
+
+class CRMCampaignScheduleIn(BaseModel):
+    scheduled_at: datetime
+
+
+class HealthcarePatientIn(BaseModel):
+    patient_number: str = Field(min_length=2, max_length=80)
+    full_name: str = Field(min_length=2, max_length=180)
+    date_of_birth: date | None = None
+    phone: str | None = Field(default=None, max_length=32)
+    branch_id: str | None = Field(default=None, max_length=36)
+
+
+class HealthcareAccessGrantIn(BaseModel):
+    user_id: int
+    access_level: str = Field(pattern=r"^(read|write|clinical)$")
+    reason: str = Field(min_length=10, max_length=500)
+    expires_at: datetime
+
+
+class HealthcareConsentIn(BaseModel):
+    purpose: str = Field(pattern=r"^(treatment|billing|disclosure|research|telehealth)$")
+    decision: str = Field(pattern=r"^(granted|denied|withdrawn)$")
+    scope: str = Field(default="", max_length=500)
+    reason: str = Field(default="", max_length=500)
+    expires_at: datetime | None = None
+
+
+class HealthcareBreakGlassIn(BaseModel):
+    reason: str = Field(min_length=20, max_length=1000)
+    duration_minutes: int = Field(default=30, ge=1, le=60)
+
+
+class HealthcareBreakGlassReviewIn(BaseModel):
+    review_note: str = Field(min_length=10, max_length=1000)
