@@ -45,6 +45,7 @@ def upgrade():
         sa.Column("ends_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reason", sa.String(500), nullable=False, server_default=""),
         sa.Column("status", sa.String(20), nullable=False, server_default="scheduled"),
+        sa.Column("status_note", sa.String(500), nullable=False, server_default=""),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
