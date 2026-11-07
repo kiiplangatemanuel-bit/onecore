@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db, SessionLocal
 from app.core.models import (
-    AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournalLine,
+    AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournal, AccountingJournalLine,
     AccountingInvoiceLine, AccountingCreditNote, AccountingCreditNoteLine, AccountingProcurementLink,
     AccountingBankStatementLine, ProcurementSupplier, ProcurementPurchaseOrder,
     ProcurementPurchaseOrderLine, ProcurementApprovalRule, ProcurementApprovalAction,
@@ -1571,15 +1571,20 @@ def procurement_accounting_reconciliation(start_date: date | None = None, end_da
     if end_date:
         q = q.filter(ProcurementSupplierInvoice.invoice_date <= datetime.combine(end_date, time.max, tzinfo=timezone.utc))
     source = q.order_by(ProcurementSupplierInvoice.id).all()
-    from app.core.models import AccountingProcurementLink, AccountingBankStatement
     links = db.query(AccountingProcurementLink).filter_by(organization_id=membership.organization_id).all()
     link_map = {x.procurement_invoice_id: x for x in links}
-    settlements = db.query(ProcurementSettlement).filter_by(
+    settlements_q = db.query(ProcurementSettlement).filter_by(
         organization_id=membership.organization_id, status="settled"
-    ).all()
-    statement_lines = db.query(AccountingBankStatementLine).filter_by(
+    )
+    if start_date:
+        settlements_q = settlements_q.filter(ProcurementSettlement.payment_date >= datetime.combine(start_date, time.min, tzinfo=timezone.utc))
+    if end_date:
+        settlements_q = settlements_q.filter(ProcurementSettlement.payment_date <= datetime.combine(end_date, time.max, tzinfo=timezone.utc))
+    settlements = settlements_q.order_by(ProcurementSettlement.id).all()
+    statement_lines_q = db.query(AccountingBankStatementLine).filter_by(
         organization_id=membership.organization_id
-    ).all()
+    )
+    statement_lines = statement_lines_q.all()
     bank_matched_journal_ids = {x.matched_journal_line_id for x in statement_lines if x.matched_journal_line_id}
     result = []
     blockers = []
@@ -1588,23 +1593,70 @@ def procurement_accounting_reconciliation(start_date: date | None = None, end_da
         ap = db.query(AccountingInvoice).filter_by(
             id=link.accounting_invoice_id, organization_id=membership.organization_id
         ).first() if link else None
+        source_total = Decimal(item.subtotal) + Decimal(item.tax_total)
+        credits_total = Decimal("0.00")
+        if ap:
+            credits_total = db.query(func.coalesce(func.sum(AccountingCreditNote.total), 0)).filter_by(
+                organization_id=membership.organization_id, invoice_id=ap.id, status="posted"
+            ).scalar() or Decimal("0.00")
+        expected_net = source_total - Decimal(credits_total)
         row = {"procurement_invoice_id": item.id, "supplier_invoice_number": item.invoice_number,
                "source_status": item.status, "accounting_invoice_id": ap.id if ap else None,
                "ap_status": ap.status if ap else "not_integrated",
-               "source_total": str(Decimal(item.subtotal)+Decimal(item.tax_total)),
-               "ap_total": str(ap.total) if ap else None}
+               "source_gross_total": str(source_total),
+               "posted_supplier_credits": str(credits_total),
+               "expected_ap_net_total": str(expected_net),
+               "ap_net_total": str(ap.total) if ap else None}
         if not ap:
             blockers.append({"invoice_id": item.id, "reason": "not_integrated_to_ap"})
-        elif Decimal(ap.total) != Decimal(item.subtotal)+Decimal(item.tax_total):
-            blockers.append({"invoice_id": item.id, "reason": "source_ap_total_mismatch"})
+        elif Decimal(ap.total) != expected_net:
+            blockers.append({"invoice_id": item.id, "reason": "source_ap_credit_adjusted_total_mismatch"})
         result.append(row)
+    settlement_results = []
+    for settlement in settlements:
+        allocations = db.query(ProcurementSettlementAllocation).filter_by(
+            organization_id=membership.organization_id, settlement_id=settlement.id
+        ).all()
+        allocation_total = sum((Decimal(x.amount) for x in allocations), Decimal("0.00"))
+        payments = [db.query(AccountingInvoicePayment).filter_by(
+            id=x.accounting_payment_id, organization_id=membership.organization_id,
+            journal_id=settlement.journal_id,
+        ).first() for x in allocations]
+        payments = [x for x in payments if x]
+        payment_total = sum((Decimal(x.amount) for x in payments), Decimal("0.00"))
+        journal = db.query(AccountingJournal).filter_by(
+            id=settlement.journal_id, organization_id=membership.organization_id, status="posted"
+        ).first() if settlement.journal_id else None
+        cash_lines = db.query(AccountingJournalLine).filter_by(
+            organization_id=membership.organization_id, journal_id=settlement.journal_id,
+            account_id=settlement.payment_account_id,
+        ).all() if settlement.journal_id else []
+        cash_credit = sum((Decimal(x.credit) - Decimal(x.debit) for x in cash_lines), Decimal("0.00"))
+        bank_matched = any(x.id in bank_matched_journal_ids for x in cash_lines)
+        settled_ok = (allocation_total == Decimal(settlement.amount)
+                      and payment_total == Decimal(settlement.amount)
+                      and len(payments) == len(allocations)
+                      and journal is not None and cash_credit == Decimal(settlement.amount))
+        if not settled_ok:
+            blockers.append({"settlement_id": settlement.id, "reason": "supplier_settlement_ap_cash_journal_mismatch"})
+        if not bank_matched:
+            blockers.append({"settlement_id": settlement.id, "reason": "supplier_settlement_not_matched_to_bank_statement"})
+        settlement_results.append({
+            "settlement_id": settlement.id, "supplier_id": settlement.supplier_id,
+            "amount": str(settlement.amount), "provider_reference": settlement.provider_reference,
+            "journal_id": settlement.journal_id, "allocation_total": str(allocation_total),
+            "ap_payment_total": str(payment_total), "cash_journal_credit": str(cash_credit),
+            "bank_matched": bank_matched, "reconciled": settled_ok and bank_matched,
+        })
+    unmatched_bank_lines = [x.id for x in statement_lines if not x.matched_journal_line_id]
+    if unmatched_bank_lines:
+        blockers.append({"reason": "unmatched_bank_statement_lines", "line_ids": unmatched_bank_lines[:100]})
     return {
-        "supplier_invoices": result,
+        "supplier_invoices": result, "settlements": settlement_results,
         "settled_supplier_payments": len(settlements),
         "bank_statement_lines": len(statement_lines),
         "bank_matched_lines": len(bank_matched_journal_ids),
-        "unmatched_bank_lines": len(statement_lines)-len(bank_matched_journal_ids),
-        "blockers": blockers,
-        "ready": not blockers and len(statement_lines) == len(bank_matched_journal_ids),
-        "note": "Bank matching is evidenced by matched journal-line references; provider callbacks and live bank feeds require configured production credentials and provider UAT.",
+        "unmatched_bank_lines": len(unmatched_bank_lines),
+        "blockers": blockers, "ready": not blockers,
+        "note": "Reconciliation checks source invoice gross totals, posted supplier credits, AP net balances, settlement allocations, AP payment records, posted cash journals and bank statement journal-line matches. External bank-feed completeness still depends on the configured statement import process.",
     }
