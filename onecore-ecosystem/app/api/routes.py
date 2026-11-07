@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -4661,6 +4661,12 @@ def enter_laboratory_result(order_id: int, line_id: int, payload: LaboratoryResu
         organization_id=membership.organization_id, order_id=order.id
     ).all()
     order.status = "results_entered" if all(x.status == "entered" for x in lines) else "processing"
+    if payload.is_critical:
+        _pharm_lab_record(db,membership,user,"lab_critical_alert",f"critical:{line.id}",
+            {"order_id":order.id,"line_id":line.id,"patient_id":order.patient_id,
+             "test_code":line.test_code,"result_value":line.result_value,
+             "status":"queued","escalation_required":True},parent_id=order.id,
+            branch_id=order.branch_id,status="queued")
     db.commit()
     audit(db, user.id, membership.organization_id, "lab.result.entered",
           "laboratory_order_line", line.id, f"order:{order.id}")
@@ -6003,7 +6009,7 @@ def register_laboratory_instrument(payload:LaboratoryInstrumentIn,
 
 @router.post("/lab/instruments/{instrument_id}/results")
 def receive_instrument_result(instrument_id:int,payload:LaboratoryInstrumentResultIn,
-    x_instrument_key:str=Query(...,min_length=32),membership=Depends(active_membership),
+    x_instrument_key:str=Header(...,min_length=32),membership=Depends(active_membership),
     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
     instrument=db.query(PharmacyLabWorkflowRecord).filter_by(
