@@ -1810,3 +1810,158 @@ def accounting_financial_statements(start_date:date,end_date:date,
         "balance_sheet":{"lines":balance,"total_assets":str(assets),
             "total_liabilities_and_equity":str(liabilities+equity+cumulative_profit),
             "balanced":assets==liabilities+equity+cumulative_profit}}
+
+
+@router.post("/accounting/bank-statements",status_code=201)
+def import_accounting_bank_statement(payload:AccountingBankStatementIn,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if payload.end_date<payload.start_date: raise HTTPException(422,"Statement end date must not precede start date")
+    if payload.branch_id: _crm_branch_check(db,membership,payload.branch_id)
+    account=_accounting_get_accounts(db,membership.organization_id,{payload.bank_account_id})[payload.bank_account_id]
+    if account.account_type!="asset": raise HTTPException(422,"Bank statement must use an asset account")
+    if sum((x.amount for x in payload.lines),Decimal("0"))+payload.opening_balance!=payload.closing_balance:
+        raise HTTPException(422,"Opening balance plus statement movements must equal closing balance")
+    for item in payload.lines:
+        if item.transaction_date<payload.start_date or item.transaction_date>payload.end_date:
+            raise HTTPException(422,"Statement transaction date falls outside the statement period")
+    statement=AccountingBankStatement(organization_id=membership.organization_id,
+        bank_account_id=payload.bank_account_id,branch_id=payload.branch_id,
+        statement_reference=payload.statement_reference.strip(),start_date=datetime.combine(payload.start_date,time.min,tzinfo=timezone.utc),
+        end_date=datetime.combine(payload.end_date,time.max,tzinfo=timezone.utc),
+        opening_balance=payload.opening_balance,closing_balance=payload.closing_balance,
+        status="draft",created_by=user.id)
+    db.add(statement);db.flush()
+    for index,item in enumerate(payload.lines,1):
+        db.add(AccountingBankStatementLine(organization_id=membership.organization_id,
+            statement_id=statement.id,line_number=index,
+            transaction_date=datetime.combine(item.transaction_date,time.min,tzinfo=timezone.utc),
+            description=item.description.strip(),reference=item.reference,amount=item.amount))
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Statement reference already exists")
+    db.refresh(statement);audit(db,user.id,membership.organization_id,"accounting.bank_statement.imported","bank_statement",statement.id)
+    return {"id":statement.id,"statement_reference":statement.statement_reference,
+        "line_count":len(payload.lines),"status":statement.status}
+
+
+@router.get("/accounting/bank-statements")
+def list_accounting_bank_statements(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    q=db.query(AccountingBankStatement).filter_by(organization_id=membership.organization_id)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return []
+        q=q.filter((AccountingBankStatement.branch_id==None)|(AccountingBankStatement.branch_id.in_(allowed)))
+    rows=q.order_by(AccountingBankStatement.id.desc()).limit(200).all()
+    result=[]
+    for x in rows:
+        total=db.query(AccountingBankStatementLine).filter_by(
+            organization_id=membership.organization_id,statement_id=x.id).count()
+        matched=db.query(AccountingBankStatementLine).filter(
+            AccountingBankStatementLine.organization_id==membership.organization_id,
+            AccountingBankStatementLine.statement_id==x.id,
+            AccountingBankStatementLine.matched_journal_line_id.isnot(None)).count()
+        result.append({"id":x.id,"statement_reference":x.statement_reference,
+            "bank_account_id":x.bank_account_id,"start_date":x.start_date.date().isoformat(),
+            "end_date":x.end_date.date().isoformat(),"opening_balance":str(x.opening_balance),
+            "closing_balance":str(x.closing_balance),"line_count":total,"matched_count":matched,"status":x.status})
+    return result
+
+
+@router.get("/accounting/bank-statements/{statement_id}")
+def get_accounting_bank_statement(statement_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    statement=db.query(AccountingBankStatement).filter_by(
+        id=statement_id,organization_id=membership.organization_id).first()
+    if not statement or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+        raise HTTPException(404,"Bank statement not found")
+    lines=db.query(AccountingBankStatementLine).filter_by(
+        organization_id=membership.organization_id,statement_id=statement.id).order_by(
+        AccountingBankStatementLine.line_number).all()
+    return {"id":statement.id,"statement_reference":statement.statement_reference,
+        "status":statement.status,"bank_account_id":statement.bank_account_id,
+        "start_date":statement.start_date.date().isoformat(),"end_date":statement.end_date.date().isoformat(),
+        "opening_balance":str(statement.opening_balance),"closing_balance":str(statement.closing_balance),
+        "lines":[{"id":x.id,"line_number":x.line_number,"transaction_date":x.transaction_date.date().isoformat(),
+            "description":x.description,"reference":x.reference,"amount":str(x.amount),
+            "matched_journal_line_id":x.matched_journal_line_id} for x in lines]}
+
+
+@router.post("/accounting/bank-statements/{statement_id}/match")
+def match_accounting_bank_statement_line(statement_id:int,payload:AccountingBankMatchIn,
+    membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    statement=db.query(AccountingBankStatement).filter_by(
+        id=statement_id,organization_id=membership.organization_id,status="draft").with_for_update().first()
+    if not statement or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+        raise HTTPException(404,"Draft bank statement not found")
+    line=db.query(AccountingBankStatementLine).filter_by(
+        id=payload.statement_line_id,statement_id=statement.id,
+        organization_id=membership.organization_id).with_for_update().first()
+    if not line: raise HTTPException(404,"Statement line not found")
+    if line.matched_journal_line_id: raise HTTPException(409,"Statement line is already matched")
+    journal_line=db.query(AccountingJournalLine).join(
+        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+        AccountingJournalLine.id==payload.journal_line_id,
+        AccountingJournalLine.organization_id==membership.organization_id,
+        AccountingJournalLine.account_id==statement.bank_account_id,
+        AccountingJournal.organization_id==membership.organization_id,
+        AccountingJournal.status=="posted",
+        AccountingJournal.entry_date>=statement.start_date,
+        AccountingJournal.entry_date<=statement.end_date).first()
+    if not journal_line: raise HTTPException(404,"Matching posted bank ledger line not found in this statement period")
+    if statement.branch_id is not None and journal_line.branch_id!=statement.branch_id:
+        raise HTTPException(422,"Journal line belongs to a different branch")
+    if not can_access_branch(membership,journal_line.branch_id):
+        raise HTTPException(404,"Matching journal line not found")
+    movement=Decimal(journal_line.debit)-Decimal(journal_line.credit)
+    if movement!=Decimal(line.amount):
+        raise HTTPException(422,"Statement amount does not equal the bank ledger movement")
+    already=db.query(AccountingBankStatementLine).filter_by(
+        organization_id=membership.organization_id,matched_journal_line_id=journal_line.id).first()
+    if already: raise HTTPException(409,"Bank ledger line is already matched to another statement line")
+    line.matched_journal_line_id=journal_line.id;line.matched_by=user.id;line.matched_at=datetime.now(timezone.utc)
+    try: db.commit()
+    except IntegrityError:
+        db.rollback();raise HTTPException(409,"Bank ledger line was matched concurrently")
+    audit(db,user.id,membership.organization_id,"accounting.bank_statement.line_matched",
+        "bank_statement_line",line.id,str(journal_line.id))
+    return {"statement_line_id":line.id,"journal_line_id":journal_line.id,"status":"matched"}
+
+
+@router.post("/accounting/bank-statements/{statement_id}/reconcile")
+def reconcile_accounting_bank_statement(statement_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    statement=db.query(AccountingBankStatement).filter_by(
+        id=statement_id,organization_id=membership.organization_id,status="draft").with_for_update().first()
+    if not statement or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+        raise HTTPException(404,"Draft bank statement not found")
+    unmatched=db.query(AccountingBankStatementLine).filter_by(
+        organization_id=membership.organization_id,statement_id=statement.id,
+        matched_journal_line_id=None).count()
+    if unmatched: raise HTTPException(409,f"{unmatched} statement lines remain unmatched")
+    q=db.query(func.coalesce(func.sum(AccountingJournalLine.debit-AccountingJournalLine.credit),0)).join(
+        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+        AccountingJournalLine.organization_id==membership.organization_id,
+        AccountingJournalLine.account_id==statement.bank_account_id,
+        AccountingJournal.organization_id==membership.organization_id,
+        AccountingJournal.status=="posted")
+    if statement.branch_id is not None:
+        q=q.filter(AccountingJournalLine.branch_id==statement.branch_id)
+    else:
+        allowed=branch_scope_ids(membership)
+        if allowed is not None:
+            if not allowed: raise HTTPException(403,"No branch access is assigned")
+            q=q.filter((AccountingJournalLine.branch_id==None)|(AccountingJournalLine.branch_id.in_(allowed)))
+    opening=Decimal(str(q.filter(AccountingJournal.entry_date<statement.start_date).scalar() or 0))
+    closing=Decimal(str(q.filter(AccountingJournal.entry_date<=statement.end_date).scalar() or 0))
+    if opening!=Decimal(statement.opening_balance):
+        raise HTTPException(409,f"Opening balance does not agree with bank ledger: ledger {opening}, statement {statement.opening_balance}")
+    if closing!=Decimal(statement.closing_balance):
+        raise HTTPException(409,f"Closing balance does not agree with bank ledger: ledger {closing}, statement {statement.closing_balance}")
+    statement.status="reconciled";statement.reconciled_by=user.id;statement.reconciled_at=datetime.now(timezone.utc)
+    db.commit();audit(db,user.id,membership.organization_id,"accounting.bank_statement.reconciled","bank_statement",statement.id)
+    return {"id":statement.id,"status":statement.status,"opening_balance":str(opening),
+        "closing_balance":str(closing),"reconciled_at":statement.reconciled_at.isoformat()}
