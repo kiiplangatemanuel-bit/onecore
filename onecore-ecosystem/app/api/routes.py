@@ -3325,6 +3325,9 @@ def create_healthcare_appointment(payload:HealthcareAppointmentIn,
     branch_id=payload.branch_id if payload.branch_id is not None else patient.branch_id
     if not can_access_branch(membership,patient.branch_id) or not can_access_branch(membership,branch_id):
         raise HTTPException(404,"Patient or appointment branch not found")
+    if patient.branch_id is not None and branch_id != patient.branch_id:
+        raise HTTPException(422,"Appointment branch must match the patient's registered branch")
+    _crm_branch_check(db,membership,branch_id)
     if payload.provider_user_id and not db.query(Membership).filter_by(
         user_id=payload.provider_user_id,organization_id=membership.organization_id,is_active=True
     ).first():
