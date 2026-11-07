@@ -280,3 +280,6 @@ Hardware and live payment boundaries:
 - Cash drawer and thermal printer execution remain browser/OS/driver integration points; the API does not claim to operate a particular USB, Bluetooth or serial device without an installed supported driver and physical device acceptance test.
 - M-Pesa Daraja collection/refund callbacks remain the verified provider settlement path documented above. Card/bank settlement feeds and automated reconciliation require provider credentials and integrations.
 - Device trust metadata is not hardware attestation. Production offline operation still requires managed endpoint encryption, secure key storage, device policy, and a validated offline entitlement/session renewal design.
+
+
+The POS page now includes a supervisor workspace for trusted terminal approval/rejection/revocation, sync-health and dead-letter visibility, open conflict resolution, branch totals, customer membership creation/update, and linked customer purchase/loyalty history. Checkout accepts an optional customer reference and preserves it in the offline request fingerprint. The browser UI still needs device credential provisioning and transmission to the sync endpoint before a device-enrolled branch can use that UI for offline sync.
