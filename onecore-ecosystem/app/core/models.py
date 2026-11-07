@@ -235,7 +235,7 @@ class CRMLead(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
-    source_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id"), nullable=True, index=True)
+    source_campaign_id: Mapped[int | None] = mapped_column(ForeignKey("crm_campaigns.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(180))
     source: Mapped[str] = mapped_column(String(60), default="other")
     stage: Mapped[str] = mapped_column(String(24), default="new")
@@ -249,7 +249,7 @@ class CRMLead(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
-    __table_args__ = (Index("ix_crm_lead_org_stage", "organization_id", "stage"),)
+    __table_args__ = (Index("ix_crm_lead_org_stage", "organization_id", "stage"), Index("ix_crm_lead_source_campaign", "organization_id", "source_campaign_id"))
 
 
 class CRMActivity(Base):
@@ -1402,10 +1402,10 @@ class CRMCampaignAttribution(Base):
     __tablename__ = "crm_campaign_attributions"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
-    campaign_id: Mapped[int] = mapped_column(ForeignKey("crm_campaigns.id"), index=True)
-    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"), index=True)
-    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True, index=True)
-    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True, index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("crm_campaigns.id"))
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"))
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True)
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True)
     event_type: Mapped[str] = mapped_column(String(20))
     revenue_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3))
