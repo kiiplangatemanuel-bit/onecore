@@ -440,3 +440,29 @@ disposal/revaluation/impairment, fiscal closing journals and retained-earnings
 roll-forward, cash-flow statement, multi-currency, statutory tax/eTIMS, production
 PostgreSQL rehearsal, concurrency/performance, finance UAT and security review.
 Period boundaries are only enforced where an organization has configured periods.
+
+
+### Accounting bank statement reconciliation increment (8 November 2026)
+
+Implemented on main:
+- Tenant-owned bank statement headers and imported statement lines.
+- JSON statement import validates bank asset account, authorized branch, transaction
+  date range, non-zero two-decimal movements and opening-plus-movements arithmetic.
+- Manual one-to-one matching against posted journal lines for the same bank account,
+  statement period, branch and exact signed amount.
+- Reconciliation refuses unmatched statement lines and compares opening/closing
+  statement balances with ledger balances before/through the statement period.
+- Reconciled statements are locked against further line matching.
+- Branch-scoped users must explicitly select an authorized branch.
+- Accounting workspace includes statement import, match and reconcile controls.
+- Migration 0011_accounting_bank_reconciliation; API/models/schemas/tests and
+  documentation in docs/ACCOUNTING.md.
+
+Verification: GitHub Actions run 42364648747 passed migration upgrade,
+downgrade/re-upgrade, Python compilation and pytest: 51 passed, 5 warnings.
+This is CI SQLite verification, not a live bank feed or production bank reconciliation
+sign-off.
+
+Remaining bank reconciliation gaps: CSV/XLSX statement parsing, direct bank feeds,
+automatic/fuzzy matching, bank account verification, provider credentials, bank
+charges workflow and finance-team UAT. No live bank integration is claimed.
