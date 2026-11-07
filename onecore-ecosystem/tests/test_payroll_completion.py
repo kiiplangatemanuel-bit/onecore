@@ -25,9 +25,10 @@ def test_nssf_upper_limit_and_shif_minimum():
 
 def test_nonresident_does_not_receive_personal_relief():
     resident = calculate_kenya_payroll(Decimal("50000"), {"resident_for_tax": True}, KENYA_2026_RULES)
-    nonresident = calculate_kenya_payroll(Decimal("50000"), {"resident_for_tax": False}, KENYA_2026_RULES)
+    nonresident = calculate_kenya_payroll(Decimal("50000"), {"resident_for_tax": False}, KENYA_2026_RULES, {"insurance_premium": "50000"})
     assert Decimal(resident["personal_relief"]) == Decimal("2400.00")
     assert Decimal(nonresident["personal_relief"]) == Decimal("0.00")
+    assert Decimal(nonresident["insurance_relief"]) == Decimal("0.00")
     assert Decimal(nonresident["paye"]) > Decimal(resident["paye"])
 
 
