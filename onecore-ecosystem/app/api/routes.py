@@ -1,11 +1,11 @@
-import json, re
+import json, re, uuid
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Record, AuditEvent
-from app.core.schemas import OrganizationIn, RecordIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -59,6 +59,46 @@ def module_catalog(user: User = Depends(current_user)):
 def integrations(user: User = Depends(current_user)):
     return public_provider_status()
 
+
+@router.get("/branches")
+def list_branches(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    query=db.query(Branch).filter_by(organization_id=membership.organization_id,is_active=True)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed: return []
+        query=query.filter(Branch.id.in_(allowed))
+    return [{"id":b.id,"code":b.code,"name":b.name,"address":b.address} for b in query.order_by(Branch.name).all()]
+
+@router.post("/branches",status_code=201)
+def create_branch(payload:BranchIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    if db.query(Branch).filter_by(organization_id=membership.organization_id,code=payload.code).first():
+        raise HTTPException(409,"Branch code already exists in this organization")
+    row=Branch(id=str(uuid.uuid4()),organization_id=membership.organization_id,code=payload.code,name=payload.name,address=payload.address)
+    db.add(row);db.commit();db.refresh(row)
+    audit(db,user.id,membership.organization_id,"branch.created","branch",row.id)
+    return {"id":row.id,"code":row.code,"name":row.name,"address":row.address}
+
+@router.put("/branches/{branch_id}")
+def update_branch(branch_id:str,payload:BranchIn,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(Branch).filter_by(id=branch_id,organization_id=membership.organization_id,is_active=True).first()
+    if not row: raise HTTPException(404,"Branch not found")
+    duplicate=db.query(Branch).filter(Branch.organization_id==membership.organization_id,Branch.code==payload.code,Branch.id!=branch_id).first()
+    if duplicate: raise HTTPException(409,"Branch code already exists in this organization")
+    row.code=payload.code;row.name=payload.name;row.address=payload.address;db.commit()
+    audit(db,user.id,membership.organization_id,"branch.updated","branch",row.id)
+    return {"id":row.id,"code":row.code,"name":row.name,"address":row.address}
+
+@router.delete("/branches/{branch_id}",status_code=204)
+def deactivate_branch(branch_id:str,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(Branch).filter_by(id=branch_id,organization_id=membership.organization_id,is_active=True).first()
+    if not row: raise HTTPException(404,"Branch not found")
+    row.is_active=False;db.commit()
+    audit(db,user.id,membership.organization_id,"branch.deactivated","branch",row.id)
+
 @router.get("/records/{module_key}")
 def list_records(module_key: str, membership=Depends(active_membership), db: Session = Depends(get_db),
                  limit: int = Query(default=100, ge=1, le=500)):
@@ -82,6 +122,8 @@ def create_record(module_key: str, payload: RecordIn, membership=Depends(active_
     require_permission(membership, "create")
     if not can_access_branch(membership, payload.branch_id):
         raise HTTPException(403, "Your membership is not authorized for this branch")
+    if payload.branch_id is not None and not db.query(Branch).filter_by(id=payload.branch_id, organization_id=membership.organization_id, is_active=True).first():
+        raise HTTPException(404, "Branch not found")
     row = Record(organization_id=membership.organization_id, module_key=module_key, record_type=payload.record_type,
                  data=payload.data, branch_id=payload.branch_id, created_by=user.id)
     db.add(row); db.commit(); db.refresh(row)
@@ -101,6 +143,8 @@ def update_record(module_key: str, record_id: int, payload: RecordIn,
         raise HTTPException(404, "Record not found")
     if not can_access_branch(membership, row.branch_id) or not can_access_branch(membership, payload.branch_id):
         raise HTTPException(404, "Record not found")
+    if payload.branch_id is not None and not db.query(Branch).filter_by(id=payload.branch_id, organization_id=membership.organization_id, is_active=True).first():
+        raise HTTPException(404, "Branch not found")
     row.record_type = payload.record_type
     row.data = payload.data
     row.branch_id = payload.branch_id
