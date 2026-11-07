@@ -4376,8 +4376,9 @@ def list_pharmacy_batches(medicine_id: int | None = None, branch_id: str | None 
     if medicine_id:
         query = query.filter(PharmacyBatch.medicine_id == medicine_id)
     if status == "expired":
-        query = query.filter(PharmacyBatch.status == "active",
-                             PharmacyBatch.expiry_date < date.today())
+        query = query.filter(or_(
+            PharmacyBatch.status == "expired",
+            and_(PharmacyBatch.status == "active",PharmacyBatch.expiry_date < date.today())))
     elif status in {"active", "quarantined"}:
         query = query.filter(PharmacyBatch.status == status)
         if status == "active":
@@ -4402,11 +4403,27 @@ def quarantine_pharmacy_batch(batch_id: int, payload: PharmacyBatchQuarantineIn,
         raise HTTPException(404, "Batch not found")
     if row.status != "active":
         raise HTTPException(409, "Only active batches can be quarantined")
+    medicine=db.query(PharmacyMedicine).filter_by(
+        id=row.medicine_id,organization_id=membership.organization_id).first()
+    qty=row.remaining_quantity
+    if qty>0:
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,
+            product_id=medicine.inventory_product_id,branch_id=row.branch_id,
+            quantity_delta=-qty,movement_type="issue",reference=f"pharmacy-quarantine:{row.id}",
+            idempotency_key=f"pharmacy-quarantine:{row.id}",created_by=user.id))
+    row.remaining_quantity=Decimal("0")
     row.status = "quarantined"
+    _pharm_lab_record(db,membership,user,"pharmacy_quarantine",f"pharmacy-quarantine:{row.id}",
+        {"batch_id":row.id,"quantity_removed":str(qty),"reason":payload.reason.strip()},
+        parent_id=row.id,branch_id=row.branch_id,status="quarantined")
+    if medicine.is_controlled:
+        db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+            medicine_id=medicine.id,batch_id=row.id,event_type="quarantined",
+            quantity=qty,reason=payload.reason.strip(),actor_id=user.id))
     db.commit()
     audit(db, user.id, membership.organization_id, "pharmacy.batch.quarantined",
           "pharmacy_batch", row.id, payload.reason.strip())
-    return {"id": row.id, "status": row.status}
+    return {"id": row.id, "status": row.status,"quantity_removed":str(qty)}
 
 
 def _lab_order_out(order, patient):
@@ -5876,6 +5893,45 @@ def return_pharmacy_dispense(dispense_id:int,payload:PharmacyReturnIn,
           "pharmacy_dispense",disp.id,f"return_record:{record.id};qty:{payload.quantity}")
     return {"return_id":record.id,"status":"quarantine_pending",
             "note":"Returned medicine is not restored to saleable stock."}
+
+
+@router.post("/pharmacy/batches/expire")
+def expire_pharmacy_batches(membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db),as_of:date|None=None):
+    require_permission(membership,"manage")
+    cutoff=as_of or date.today()
+    q=db.query(PharmacyBatch).filter_by(
+        organization_id=membership.organization_id,status="active").filter(PharmacyBatch.expiry_date<cutoff)
+    allowed=branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:return {"expired_count":0,"quantity_removed":"0"}
+        q=q.filter(PharmacyBatch.branch_id.in_(allowed))
+    batches=q.with_for_update().all()
+    removed=Decimal("0");ids=[]
+    for batch in batches:
+        qty=batch.remaining_quantity
+        med=db.query(PharmacyMedicine).filter_by(id=batch.medicine_id,
+            organization_id=membership.organization_id).first()
+        if qty>0 and med:
+            db.add(InventoryStockMovement(organization_id=membership.organization_id,
+                product_id=med.inventory_product_id,branch_id=batch.branch_id,
+                quantity_delta=-qty,movement_type="issue",reference=f"pharmacy-expiry:{batch.id}",
+                idempotency_key=f"pharmacy-expiry:{batch.id}",created_by=user.id))
+        batch.remaining_quantity=Decimal("0");batch.status="expired"
+        _pharm_lab_record(db,membership,user,"pharmacy_expiry",f"pharmacy-expiry:{batch.id}",
+            {"batch_id":batch.id,"expiry_date":batch.expiry_date.isoformat(),
+             "quantity_removed":str(qty),"as_of":cutoff.isoformat()},
+            parent_id=batch.id,branch_id=batch.branch_id,status="expired")
+        if med and med.is_controlled:
+            db.add(PharmacyControlledEvent(organization_id=membership.organization_id,
+                medicine_id=med.id,batch_id=batch.id,event_type="expired",
+                quantity=qty,reason="Expired batch removed from available inventory",actor_id=user.id))
+        removed+=qty;ids.append(batch.id)
+    db.commit()
+    audit(db,user.id,membership.organization_id,"pharmacy.expiry.sweep",
+          "pharmacy_batch","expiry-sweep",f"count:{len(ids)};qty:{removed}")
+    return {"as_of":cutoff.isoformat(),"expired_count":len(ids),
+            "batch_ids":ids,"quantity_removed":str(removed)}
 
 
 @router.post("/pharmacy/batches/{batch_id}/recall")
