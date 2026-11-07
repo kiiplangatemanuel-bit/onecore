@@ -1341,6 +1341,15 @@ def queue_laboratory_result_delivery(order_id:int,payload:dict,m=Depends(active_
     od=_payload(order);recipient_type=str(payload.get("recipient_type","clinician"))
     if recipient_type not in {"clinician","patient"}:raise HTTPException(422,"Invalid recipient type")
     recipient_id=int(payload.get("recipient_id") or (od["ordering_clinician_id"] if recipient_type=="clinician" else patient.id))
+    if recipient_type=="clinician":
+        recipient=db.query(User).filter_by(id=recipient_id,is_active=True).first()
+        member=db.query(Membership).filter_by(organization_id=m.organization_id,
+            user_id=recipient_id,is_active=True).first()
+        from app.api.healthcare_hospital import _roles
+        if not recipient or not member or not _roles(db,m,recipient,order.branch_id).intersection({"clinician","healthcare_admin"}):
+            raise HTTPException(403,"Result recipient must be an active clinician in this organization")
+        if recipient_id!=od["ordering_clinician_id"] and "healthcare_admin" not in _roles(db,m,u,order.branch_id):
+            raise HTTPException(403,"Only the ordering clinician or healthcare administrator may redirect results")
     token=secrets.token_urlsafe(40) if recipient_type=="patient" else None
     data={"order_id":order.id,"recipient_type":recipient_type,"recipient_id":recipient_id,
         "results":[{"test_code":x["test_code"],"test_name":x["test_name"],
@@ -1372,7 +1381,7 @@ def get_laboratory_delivery(delivery_id:int,m=Depends(active_membership),
 @router.get("/lab/public-deliveries/{delivery_id}")
 def get_patient_laboratory_delivery(delivery_id:int,x_delivery_token:str=Header(...,alias="X-Delivery-Token",min_length=32),
     db:Session=Depends(get_db)):
-    row=db.query(HealthcareResource).filter_by(id=delivery_id,resource_type="lab_delivery",status="queued").first()
+    row=db.query(HealthcareResource).filter_by(id=delivery_id,resource_type="lab_delivery",status="queued").with_for_update().first()
     if not row:raise HTTPException(404,"Secure result delivery not found")
     data=decrypt(row.encrypted_payload)
     expected=data.get("token_hash","")
@@ -1436,7 +1445,7 @@ def decide_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_members
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     claim=_get(db,m,claim_id,"insurance_claim",lock=True)
     _need(db,m,u,"insurance.manage",claim.branch_id)
-    if claim.status not in {"submitted","approved"}:raise HTTPException(409,"Claim cannot transition from current state")
+    if claim.status!="submitted":raise HTTPException(409,"Only submitted claims can receive an insurer decision")
     decision=str(payload.get("decision",""))
     if decision not in {"approved","rejected"}:raise HTTPException(422,"Decision must be approved or rejected; use the settlement endpoint to reconcile payment")
     data=_payload(claim);data.update({"decision_note":_required_text(payload,"note",500),
@@ -1450,6 +1459,10 @@ def decide_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_members
 @router.post("/pharmacy-lab/claims/{claim_id}/settle")
 def settle_pharmacy_lab_claim(claim_id:int,payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
+    claim=_get(db,m,claim_id,"insurance_claim",lock=True)
+    _need(db,m,u,"insurance.manage",claim.branch_id)
+    if claim.status not in {"approved","partially_settled"}:
+        raise HTTPException(409,"Only approved claims can be settled")
     from app.api.healthcare_hospital import settle_claim
     return settle_claim(claim_id,payload,m,u,db)
 
