@@ -736,6 +736,12 @@ def return_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_membe
         "recorded_by":u.id,"recorded_at":NOW().isoformat()},
         disp.branch_id,disp.patient_id,parent_id=disp.id,status="quarantine_pending",
         idempotency_key=return_key)
+    for allocation in return_allocations:
+        batch,_=_batch(db,m,int(allocation["batch_id"]))
+        medrow,med=_medicine(db,m,int(_payload(batch).get("medicine_id")))
+        if med.get("is_controlled"):
+            _controlled_event(db,m,u,medrow.id,batch.id,disp.patient_id,"return_received",
+                Decimal(allocation["quantity"]),reason,parent_id=row.id,branch_id=disp.branch_id)
     _patient_event(db,m,u,patient,"pharmacy.dispense.returned",
         {"dispense_id":disp.id,"return_id":row.id,"quantity":str(qty),"reason":reason},row.id)
     db.commit()
@@ -771,9 +777,13 @@ def decide_pharmacy_return(return_id:int,payload:dict,m=Depends(active_membershi
             medrow,med=_medicine(db,m,int(bd["medicine_id"]))
             _movement(db,m,u,med["inventory_product_id"],row.branch_id,qty,"receipt",
                 f"pharmacy-return:{row.id}",f"pharm-return:{row.id}:{batch.id}")
-            if med.get("is_controlled"):
-                _controlled_event(db,m,u,medrow.id,batch.id,row.patient_id,"returned_to_stock",
-                    qty,reason,verifier_id,row.id,row.branch_id)
+    for allocation in data["allocations"]:
+        batch,_=_batch(db,m,int(allocation["batch_id"]))
+        medrow,med=_medicine(db,m,int(_payload(batch).get("medicine_id")))
+        if med.get("is_controlled"):
+            _controlled_event(db,m,u,medrow.id,batch.id,row.patient_id,
+                "return_"+decision,Decimal(allocation["quantity"]),reason,
+                verifier_id if decision=="restock" else None,row.id,row.branch_id)
     data["stock_disposition"]=decision;data["disposition_reason"]=reason
     data["disposition_by"]=u.id;data["disposition_at"]=NOW().isoformat()
     data["verifier_id"]=verifier_id if decision=="restock" else None
@@ -1360,6 +1370,9 @@ def receive_analyzer_result(instrument_id:int,payload:dict,
     u=db.query(User).filter_by(id=data.get("registered_by"),is_active=True).first()
     if not m or not u or not can_access_branch(m,instrument.branch_id):
         raise HTTPException(401,"Analyzer registration owner is no longer authorized")
+    from app.api.healthcare_hospital import _roles
+    if not _roles(db,m,u,instrument.branch_id).intersection(LAB_ROLES):
+        raise HTTPException(403,"Analyzer registration owner no longer has laboratory privileges")
 
     latest_qc=_resource_list(db,m,"lab_qc",branch_id=instrument.branch_id,limit=1000)
     latest_qc=next((x for x in latest_qc if x.parent_id==instrument.id),None)
