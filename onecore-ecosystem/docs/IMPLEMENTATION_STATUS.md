@@ -91,3 +91,16 @@ Remaining database work: production PostgreSQL migration rehearsal, data backup 
 restore/PITR procedures, migration lock/concurrency strategy, monitoring and a
 reviewed upgrade/rollback runbook. The initial migration establishes the current
 shared schema only; specialist product schemas and domain migrations remain unbuilt.
+
+
+### Migration CI regression and correction
+
+- The first migration CI runs confirmed that Alembic upgrade, downgrade and re-upgrade
+  all succeeded. The pytest step then failed in 2 existing smoke tests because the
+  migration command ran from `onecore-ecosystem` while pytest ran from the repository
+  root, causing the relative SQLite URL to point at a different empty database.
+- Corrected the workflow to execute pytest with `onecore-ecosystem` as its working
+  directory, matching the migration command and application database path.
+- Correction commit: `2663254`. Its CI run was queued at tracker update time;
+  success is not yet verified. The earlier failed run is retained as evidence rather
+  than being represented as a pass.
