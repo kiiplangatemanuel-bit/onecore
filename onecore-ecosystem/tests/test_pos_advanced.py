@@ -26,6 +26,7 @@ def test_advanced_pos_routes_are_mounted():
         "/api/v1/pos/advanced/devices/{device_id}/session",
         "/api/v1/pos/advanced/conflicts",
         "/api/v1/pos/advanced/conflicts/{conflict_id}/resolve",
+        "/api/v1/pos/advanced/conflicts/by-transaction/{client_transaction_id}",
         "/api/v1/pos/advanced/sync-events",
         "/api/v1/pos/advanced/sync-dashboard",
         "/api/v1/pos/advanced/customers",
