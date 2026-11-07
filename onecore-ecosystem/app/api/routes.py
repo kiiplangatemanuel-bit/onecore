@@ -198,7 +198,7 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
         organization_id=membership.organization_id, is_active=True
     ).order_by(InventoryProduct.name).all()
     return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
-             "unit": p.unit, "is_active": p.is_active} for p in rows]
+             "unit": p.unit, "sale_price": str(p.sale_price), "is_active": p.is_active} for p in rows]
 
 
 @router.post("/inventory/products", status_code=201)
@@ -210,7 +210,7 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
         raise HTTPException(409, "SKU already exists in this organization")
     row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
                            name=payload.name.strip(), description=payload.description,
-                           unit=payload.unit, created_by=user.id)
+                           unit=payload.unit, sale_price=payload.sale_price, created_by=user.id)
     db.add(row)
     try:
         db.commit()
@@ -220,7 +220,7 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
     db.refresh(row)
     audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
     return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
-            "unit": row.unit, "is_active": row.is_active}
+            "unit": row.unit, "sale_price": str(row.sale_price), "is_active": row.is_active}
 
 
 @router.get("/inventory/stock")
