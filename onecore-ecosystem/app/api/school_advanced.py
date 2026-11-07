@@ -391,6 +391,10 @@ def moderate_assessment(assessment_id:int,payload:ModerationIn,m=Depends(active_
     require_permission(m,"manage")
     assessment=db.query(SchoolAssessment).filter_by(id=assessment_id,organization_id=m.organization_id).first()
     if not assessment: raise HTTPException(404,"Assessment not found")
+    assessment_class=db.query(SchoolClass).filter_by(
+        id=assessment.class_id,organization_id=m.organization_id).first()
+    if not assessment_class or not can_access_branch(m,assessment_class.branch_id):
+        raise HTTPException(404,"Assessment not found")
     if payload.decision=="return_for_revision" and len(payload.reason.strip())<5:
         raise HTTPException(422,"A reason is required when returning marks")
     marks_q=db.query(SchoolMark).filter_by(assessment_id=assessment_id,organization_id=m.organization_id)
@@ -483,6 +487,8 @@ def create_fee_charge(payload:FeeChargeIn,m=Depends(active_membership),
                       u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"create")
     learner=_learner(db,m,payload.learner_id)
+    if any(x.data.get("reference")==payload.reference for x in _rows(db,m,"fee_charge")):
+        raise HTTPException(409,"Fee charge reference already exists")
     data=payload.model_dump(mode="json")
     data.update({"amount":str(payload.amount),"balance":str(payload.amount),"status":"unpaid"})
     row=_create(db,m,u,"fee_charge",data)
@@ -497,7 +503,12 @@ def record_fee_payment(payload:FeePaymentIn,m=Depends(active_membership),
     require_permission(m,"create")
     _learner(db,m,payload.learner_id)
     existing=next((x for x in _rows(db,m,"fee_payment") if x.data.get("idempotency_key")==payload.idempotency_key),None)
-    if existing: return _data(existing)
+    if existing:
+        if int(existing.data.get("learner_id",0))!=payload.learner_id:
+            raise HTTPException(409,"Payment idempotency key is already used for another learner")
+        if existing.branch_id is not None and not can_access_branch(m,existing.branch_id):
+            raise HTTPException(404,"Payment not found")
+        return _data(existing)
     data=payload.model_dump(mode="json")
     data.update({"amount":str(payload.amount),"unallocated":str(payload.amount),"allocations":[]})
     row=_create(db,m,u,"fee_payment",data)
@@ -596,6 +607,9 @@ def guardian_portal(m=Depends(active_membership),u:User=Depends(current_user),db
             item["report_cards"]=[_data(x) for x in _rows(db,m,"report_card") if x.data.get("learner_id")==learner.id and x.data.get("status")=="published"]
         if "attendance" in permissions:
             item["attendance"]=[_data(x) for x in _rows(db,m,"guardian_notification") if x.data.get("learner_id")==learner.id and x.data.get("category")=="attendance"]
+        if "communications" in permissions:
+            item["notifications"]=[_data(x) for x in _rows(db,m,"guardian_notification")
+                if x.data.get("learner_id")==learner.id and u.id in x.data.get("guardian_user_ids",[])]
         output.append(item)
     return {"learners":output}
 
