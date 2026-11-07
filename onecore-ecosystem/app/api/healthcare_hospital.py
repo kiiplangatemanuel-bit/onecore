@@ -788,7 +788,12 @@ def integration_result(job_id: int, payload: dict, m=Depends(active_membership),
 
 @router.post("/patients/{patient_id}/emergency/triage", status_code=201)
 def emergency_triage(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db,m,u,patient_id,"patient.read",write=False)
+    patient=_patient(db,patient_id,m)
+    assigned_roles=_roles(db,m,u,patient.branch_id)
+    if "receptionist" in assigned_roles and patient.created_by==u.id:
+        emergency=False
+    else:
+        patient, emergency, _ = _patient_access(db,m,u,patient_id,"patient.read",write=False)
     _need(db,m,u,"emergency.manage",patient.branch_id)
     acuity=payload.get("acuity")
     if type(acuity) is not int or acuity not in {1,2,3,4,5}: raise HTTPException(422,"Acuity must be 1 (highest) to 5 (lowest)")
