@@ -338,6 +338,8 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         raise HTTPException(404, "Payroll run not found")
     if run.status != "draft":
         raise HTTPException(409, "Only draft payroll runs can be calculated")
+    if run.currency != "KES":
+        raise HTTPException(422, "Kenya statutory payroll calculations require KES payroll runs")
     rule = _active_rule(db, membership.organization_id, run.period_end)
     rule_start = date.fromisoformat(rule.data["effective_from"])
     rule_end = date.fromisoformat(rule.data["effective_to"]) if rule.data.get("effective_to") else date.max
@@ -406,6 +408,9 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
                     "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "non_cash_benefits": str(noncash_benefits), "meal_benefit": str(meal_benefit), "regular_cash_allowances": str(regular_allowances)}, "statutory_contribution_bases": {"nssf": extras["nssf_pensionable_base"], "shif": extras["shif_contribution_base"], "housing_levy": extras["housing_levy_contribution_base"]}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+        line.gross_pay = money(result["gross_pay"])
+        line.deductions_total = money(D(result["gross_pay"]) - D(result["net_pay"]))
+        line.net_pay = money(result["net_pay"])
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
@@ -428,7 +433,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
 
 @router.get("/hr/payroll/runs/{run_id}/snapshots")
 def list_snapshots(run_id: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
+    _require_manage(membership)
     run = db.query(HRPayrollRun).filter_by(id=run_id, organization_id=membership.organization_id).first()
     if not run:
         raise HTTPException(404, "Payroll run not found")
@@ -496,6 +501,8 @@ def export_bank_file(batch_id: int, membership=Depends(active_membership), user=
                                        module_key=MODULE, record_type="payment_batch").first()
     if not batch or batch.data["method"] != "bank":
         raise HTTPException(404, "Bank payment batch not found")
+    if batch.data.get("status") not in ("authorized", "processing", "partial", "failed"):
+        raise HTTPException(409, "Bank payment batch must be authorized before export")
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["employee_number", "employee_name", "account_reference", "currency", "amount", "payment_reference"])
@@ -620,7 +627,7 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     row = next((x for x in d["rows"] if x["employee_id"] == item_id), None)
     if not row:
         raise HTTPException(404, "Payment instruction not found")
-    if row.get("conversation_id") and payload.get("conversation_id") != row.get("conversation_id"):
+    if not row.get("conversation_id") or payload.get("conversation_id") != row.get("conversation_id"):
         raise HTTPException(409, "Provider callback conversation does not match the submitted payment")
     status = payload.get("status")
     if status not in ("paid", "failed"):
@@ -631,14 +638,16 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
         raise HTTPException(409, "A settled salary payment cannot be downgraded or assigned a different reference")
     if status == "paid" and not payload.get("provider_reference"):
         raise HTTPException(422, "Verified provider reference is required")
+    if status == "paid" and any(x is not row and x.get("provider_reference") == payload.get("provider_reference") for x in d["rows"]):
+        raise HTTPException(409, "Provider transaction reference is already assigned to another employee")
     row.update({"status": status, "provider_reference": payload.get("provider_reference"),
                 "verified_at": datetime.now(timezone.utc).isoformat(), "callback_hash": hashlib.sha256(raw).hexdigest()})
     d["status"] = "paid" if all(x["status"] == "paid" for x in d["rows"]) else ("partial" if any(x["status"] == "paid" for x in d["rows"]) else "failed")
     batch.data = d
-    if d["status"] == "paid":
+    if any(x["status"] == "paid" for x in d["rows"]):
         paid_run = db.query(HRPayrollRun).filter_by(id=d["run_id"], organization_id=batch.organization_id).with_for_update().first()
         if paid_run:
-            paid_run.status = "paid"
+            paid_run.status = "paid" if d["status"] == "paid" else "partial_paid"
     _audit(db, batch.organization_id, None, "hr.payroll.payment.callback", "payment_batch", batch.id, f"employee:{item_id};status:{status}")
     db.commit()
     return {"batch_id": batch.id, "status": d["status"]}
