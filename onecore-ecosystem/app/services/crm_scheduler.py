@@ -78,7 +78,6 @@ def _execute_schedule(db,schedule_id,now):
             CRMContact.organization_id==parent.organization_id,
             CRMContactConsent.organization_id==parent.organization_id,
             CRMContactConsent.decision=="granted",
-            or_(CRMContactConsent.expires_at.is_(None),CRMContactConsent.expires_at>now),
         )
         branch_id=parent.branch_id or (segment.branch_id if segment else None)
         if branch_id:q=q.filter(CRMContact.branch_id==branch_id)
@@ -89,6 +88,7 @@ def _execute_schedule(db,schedule_id,now):
                 q=q.filter(CRMContact.branch_id.in_(allowed)) if allowed else q.filter(CRMContact.id==-1)
         contacts=q.order_by(CRMContact.id).limit(5000).all()
         for contact,consent in contacts:
+            if consent.expires_at and as_utc(consent.expires_at)<=now:continue
             if segment and not matches_segment(contact,segment.filters):continue
             address=contact.email if parent.channel=="email" else contact.phone
             if not address:continue
@@ -132,11 +132,12 @@ def run_due_schedules(db,limit=10):
     now=datetime.now(timezone.utc)
     processed=0
     for _ in range(limit):
-        row=db.query(CRMCampaignSchedule).filter(
-            CRMCampaignSchedule.status=="scheduled",
-            CRMCampaignSchedule.next_run_at<=now,
-            or_(CRMCampaignSchedule.lease_until.is_(None),CRMCampaignSchedule.lease_until<now),
-        ).order_by(CRMCampaignSchedule.next_run_at,CRMCampaignSchedule.id).with_for_update(skip_locked=True).first()
+        candidates=db.query(CRMCampaignSchedule).filter(
+            CRMCampaignSchedule.status=="scheduled"
+        ).order_by(CRMCampaignSchedule.next_run_at,CRMCampaignSchedule.id).limit(100).with_for_update(skip_locked=True).all()
+        row=next((candidate for candidate in candidates
+            if candidate.next_run_at and as_utc(candidate.next_run_at)<=now
+            and (candidate.lease_until is None or as_utc(candidate.lease_until)<now)),None)
         if not row:break
         row.lease_until=now+timedelta(minutes=10)
         schedule_id=row.id
