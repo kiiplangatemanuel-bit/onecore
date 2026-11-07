@@ -11,6 +11,7 @@ import io
 import json
 import os
 import uuid
+from urllib.parse import urlparse
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
@@ -61,6 +62,23 @@ def _active_rule(db, org_id, on_date):
     if len(active) != 1:
         raise HTTPException(409, "Exactly one active Kenya statutory rule set must cover the payroll period")
     return active[0]
+
+
+def _validate_authority_sources(sources):
+    if not isinstance(sources, list) or not sources:
+        raise HTTPException(422, "Authoritative source evidence is required")
+    authorities=set()
+    for source in sources:
+        url=str(source.get("url",""))
+        host=(urlparse(url).hostname or "").lower()
+        authority=str(source.get("authority","")).lower()
+        if not url.startswith("https://") or not any(host == d or host.endswith("."+d) for d in
+                ("kra.go.ke","nssf.or.ke","kenyalaw.org","new.kenyalaw.org","sha.go.ke","health.go.ke")):
+            raise HTTPException(422, "Statutory evidence must link to an official KRA, NSSF, SHA or Kenya Law HTTPS source")
+        authorities.add(authority)
+    combined=" ".join(authorities)
+    if "kra" not in combined or "nssf" not in combined or not ("sha" in combined or "kenya law" in combined):
+        raise HTTPException(422, "Rule evidence must cover KRA, NSSF and SHA/Kenya Law")
 
 
 def _validate_rule_parameters(parameters):
@@ -231,6 +249,7 @@ def create_statutory_rules(payload: dict=Body(...), membership=Depends(active_me
     if not required.issubset(payload) or not payload["sources"]:
         raise HTTPException(422, "Version, effective_from, parameters and authoritative sources are required")
     _validate_rule_parameters(payload["parameters"])
+    _validate_authority_sources(payload["sources"])
     try:
         start = date.fromisoformat(payload["effective_from"])
         end = date.fromisoformat(payload["effective_to"]) if payload.get("effective_to") else None
@@ -257,6 +276,7 @@ def activate_statutory_rules(rule_id: int, membership=Depends(active_membership)
     if not d.get("sources") or not d.get("version") or not d.get("parameters"):
         raise HTTPException(422, "Rule set requires a version, parameters and evidence sources")
     _validate_rule_parameters(d["parameters"])
+    _validate_authority_sources(d["sources"])
     start = date.fromisoformat(d["effective_from"])
     for other in _record(db, membership.organization_id, "statutory_rule_set").all():
         if other.id == row.id or other.data.get("status") != "active":
