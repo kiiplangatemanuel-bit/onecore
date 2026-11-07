@@ -268,6 +268,8 @@ def integrate_procurement_invoice_to_ap(
                 "status": "already_integrated"}
     if source.status != "matched":
         raise HTTPException(409, "Only a three-way-matched supplier invoice can be integrated")
+    if payload.due_date < source.invoice_date.date():
+        raise HTTPException(422, "AP due date cannot precede the supplier invoice date")
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=source.purchase_order_id, organization_id=membership.organization_id,
         supplier_id=source.supplier_id,
@@ -303,6 +305,8 @@ def integrate_procurement_invoice_to_ap(
     if source.tax_total and (not payload.tax_account_id or ledger_accounts[payload.tax_account_id].account_type != "asset"):
         raise HTTPException(422, "Input-tax asset account is required for a taxed supplier invoice")
     if not source.tax_total and payload.tax_account_id:
+        raise HTTPException(422, "Omit the input-tax account when the supplier invoice has no tax")
+    if not source.tax_total and payload.tax_account_id:
         raise HTTPException(422, "Omit tax account when the supplier invoice has no tax")
     subtotal = Decimal(source.subtotal)
     if subtotal <= 0 or Decimal(source.tax_total) < 0:
@@ -323,16 +327,22 @@ def integrate_procurement_invoice_to_ap(
     )
     db.add(ledger_invoice)
     db.flush()
+    line_subtotals = [
+        (Decimal(line.quantity) * Decimal(line.unit_cost)).quantize(CENT, rounding=ROUND_HALF_UP)
+        for line in source_lines
+    ]
+    taxable_indexes = [i for i, value in enumerate(line_subtotals) if value > 0]
+    last_taxable_index = taxable_indexes[-1] if taxable_indexes else -1
     allocated = Decimal("0.00")
     for index, line in enumerate(source_lines):
-        line_sub = (Decimal(line.quantity) * Decimal(line.unit_cost)).quantize(CENT, rounding=ROUND_HALF_UP)
-        if index == len(source_lines) - 1:
+        line_sub = line_subtotals[index]
+        if not source.tax_total or not line_sub:
+            tax_amount = Decimal("0.00")
+        elif index == last_taxable_index:
             tax_amount = Decimal(source.tax_total) - allocated
-        elif subtotal:
+        else:
             tax_amount = (Decimal(source.tax_total) * line_sub / subtotal).quantize(CENT, rounding=ROUND_HALF_UP)
             allocated += tax_amount
-        else:
-            tax_amount = Decimal("0.00")
         tax_rate = ((tax_amount * Decimal("100") / line_sub).quantize(Decimal("0.0001"))
                     if line_sub else Decimal("0.0000"))
         db.add(AccountingInvoiceLine(
@@ -392,7 +402,7 @@ def refund_accounting_credit_note(
         if (duplicate.credit_note_id == note.id and duplicate.amount == payload.amount
                 and duplicate.payment_account_id == payload.payment_account_id
                 and duplicate.refund_date.date() == payload.refund_date
-                and duplicate.reference == payload.reference):
+                and duplicate.reference == payload.reference.strip()):
             return {"id": duplicate.id, "status": "already_applied", "journal_id": duplicate.journal_id}
         raise HTTPException(409, "Refund idempotency key has already been used")
     already_refunded = db.query(func.coalesce(func.sum(AccountingRefund.amount), 0)).filter_by(
