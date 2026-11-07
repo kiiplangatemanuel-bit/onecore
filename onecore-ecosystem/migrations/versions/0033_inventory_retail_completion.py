@@ -134,6 +134,10 @@ def upgrade():
 
 
 def downgrade():
+    op.drop_index("ix_inventory_stock_movements_warehouse_id", table_name="inventory_stock_movements")
+    with op.batch_alter_table("inventory_stock_movements") as batch_op:
+        batch_op.drop_constraint("fk_inventory_movement_warehouse", type_="foreignkey")
+        batch_op.drop_column("warehouse_id")
     op.drop_table("inventory_prices")
     op.drop_table("inventory_price_lists")
     op.drop_table("inventory_reorder_rules")
@@ -144,7 +148,4 @@ def downgrade():
     op.drop_table("inventory_transfer_lines")
     op.drop_table("inventory_transfers")
     op.drop_table("inventory_warehouses")
-    op.drop_index("ix_inventory_stock_movements_warehouse_id", table_name="inventory_stock_movements")
-    with op.batch_alter_table("inventory_stock_movements") as batch_op:
-        batch_op.drop_constraint("fk_inventory_movement_warehouse", type_="foreignkey")
-        batch_op.drop_column("warehouse_id")
+
