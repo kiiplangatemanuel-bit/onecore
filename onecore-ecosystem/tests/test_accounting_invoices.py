@@ -142,3 +142,17 @@ def test_fiscal_period_close_check_endpoint_is_registered():
         "/api/v1/accounting/fiscal-periods/{period_id}/close-check"
     ]["get"]
     assert {item["name"] for item in operation["parameters"]} >= {"period_id"}
+
+
+def test_fiscal_period_close_requires_organization_wide_branch_scope():
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.api.routes import _require_organization_wide_period_close
+
+    _require_organization_wide_period_close(SimpleNamespace(branch_scope="*"))
+    with pytest.raises(HTTPException) as restricted:
+        _require_organization_wide_period_close(SimpleNamespace(branch_scope="branch-a,branch-b"))
+    assert restricted.value.status_code == 403
+    with pytest.raises(HTTPException) as empty_scope:
+        _require_organization_wide_period_close(SimpleNamespace(branch_scope=""))
+    assert empty_scope.value.status_code == 403

@@ -262,3 +262,13 @@ workflow. Differences must be investigated and corrected through authorized sour
 transactions. It does not certify tax, statutory or audit compliance. Historical
 cutoff results rely on dated invoice, payment and credit-note records; imported
 opening balances or unlinked manual control-account entries may produce differences.
+
+
+## Fiscal-period close access control
+
+Fiscal-period close checks and close operations are organization-wide because a
+period lock affects every branch. They now require a membership with unrestricted
+branch scope (`*`). Branch-scoped memberships receive HTTP 403 for both the
+pre-close check and close action; they cannot inspect organization-wide close
+blockers or lock periods that include other branches. Organization-wide finance
+administrators remain responsible for reviewing the complete close checklist.
