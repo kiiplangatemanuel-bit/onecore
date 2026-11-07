@@ -499,6 +499,9 @@ def approve_stocktake(stocktake_id:int,membership=Depends(active_membership),use
         current_quantity=warehouse_qty(db,membership.organization_id,wh,line.product_id)
         if current_quantity != dec(line.expected_quantity):
             raise HTTPException(409,f"Stock changed after count for product {line.product_id}; recount before approval")
+        reserved_quantity=active_reserved(db,membership.organization_id,wh.id,line.product_id)
+        if dec(line.counted_quantity)<reserved_quantity:
+            raise HTTPException(409,f"Counted stock for product {line.product_id} is below active reservations")
         delta=dec(line.counted_quantity)-dec(line.expected_quantity)
         if delta:
             db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=wh.branch_id,warehouse_id=wh.id,
