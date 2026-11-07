@@ -81,3 +81,15 @@ def test_shif_defaults_to_gross_salary_wage_while_housing_levy_uses_kra_fixed_pa
     assert Decimal(result["nssf_employee"]) == Decimal("2400.00")
     assert Decimal(result["housing_levy_employee"]) == Decimal("600.00")
     assert Decimal(result["shif_employee"]) == Decimal("2750.00")
+
+
+def test_meal_benefit_is_non_cash_and_only_excess_over_kra_threshold_is_taxable():
+    cash = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES)
+    with_meals = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES, {
+        "meal_benefit": "7000"
+    })
+    assert Decimal(with_meals["gross_pay"]) == Decimal(cash["gross_pay"])
+    assert Decimal(with_meals["net_pay"]) == Decimal(cash["net_pay"])
+    assert Decimal(with_meals["taxable_benefits"]) == Decimal("2000.00")
+    assert Decimal(with_meals["taxable_pay"]) == Decimal(cash["taxable_pay"]) + Decimal("2000.00")
+    assert Decimal(with_meals["total_employer_cost"]) == Decimal(cash["total_employer_cost"]) + Decimal("7000.00")
