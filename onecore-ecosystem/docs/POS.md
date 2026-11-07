@@ -255,7 +255,8 @@ reconciliation or production till-count pilot sign-off.
 
 The POS completion API adds organization/branch-scoped device registration and a supervisor approval lifecycle. Device credentials are high-entropy random tokens; only SHA-256 hashes are stored, and the raw token is returned once at registration. Device APIs require the `X-POS-Device-Token` header. Revocation immediately rejects subsequent online device API calls. Approved devices receive a bounded 24-hour offline authorization lease which a manager can renew after the device reconnects. Re-enrolment uses a new device identity; revoked identities cannot be reactivated.
 
-- `POST /api/v1/pos/devices/register`, `POST /api/v1/pos/devices/{id}/approve`, `POST /api/v1/pos/devices/{id}/renew-offline`, `POST /api/v1/pos/devices/{id}/revoke`
+- `POST /api/v1/pos/devices/register`, `POST /api/v1/pos/devices/{id}/approve`, `POST /api/v1/pos/devices/{id}/renew-offline`, `POST /api/v1/pos/devices/{id}/revoke`.
+- `POST /api/v1/pos/devices/{id}/bind-shift?shift_id=...` binds an open shift to a trusted device only when the authenticated user is the shift's cashier. A device can have only one open shift bound through this workflow.
 - `POST /api/v1/pos/devices/{id}/conflicts` records stale stock, closed shift, price change, duplicate transaction, revoked device, expired offline lease and unknown-product conflicts. Client and server snapshots are retained for supervisor review.
 - `GET /api/v1/pos/conflicts` and `POST /api/v1/pos/conflicts/{id}/resolve` provide a maker/reviewer queue. Decisions are auditable. Resolution deliberately does not replay a queued sale or payment: the cashier must first reconcile tender capture, preventing duplicate charges.
 - `POST /api/v1/pos/devices/{id}/sync-heartbeat` and `GET /api/v1/pos/sync/monitor` provide per-device sync status, last success, stale devices, failures and pending conflict counts.
