@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, CRMContact, CRMLead, CRMActivity, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, POSShift, POSSale, POSSaleLine, POSPayment
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, POSShiftOpenIn, POSShiftCloseIn, POSSaleSyncIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -16,6 +16,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
+from app.services.pos import money, validate_payment_total, canonical_request_hash
 from datetime import datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -863,3 +864,170 @@ def get_purchase_order(order_id: int, membership=Depends(active_membership), db:
                        "quantity_received": str(x.quantity_received),
                        "outstanding": str(x.quantity_ordered - x.quantity_received),
                        "unit_cost": str(x.unit_cost)} for x in lines]}
+
+
+# POS shift accountability and idempotent online/offline transaction synchronization.
+@router.get("/pos/catalog")
+def pos_catalog(branch_id: str, membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    _crm_branch_check(db, membership, branch_id)
+    products = db.query(InventoryProduct).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(InventoryProduct.name).all()
+    result = []
+    for product in products:
+        stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+            InventoryStockMovement.organization_id == membership.organization_id,
+            InventoryStockMovement.product_id == product.id,
+            InventoryStockMovement.branch_id == branch_id
+        ).scalar()
+        result.append({"id": product.id, "sku": product.sku, "name": product.name,
+                       "unit": product.unit, "sale_price": str(product.sale_price),
+                       "available_quantity": str(stock or 0)})
+    return result
+
+
+@router.post("/pos/shifts/open", status_code=201)
+def open_pos_shift(payload: POSShiftOpenIn, membership=Depends(active_membership),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    _crm_branch_check(db, membership, payload.branch_id)
+    existing = db.query(POSShift).filter_by(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        cashier_user_id=user.id, status="open"
+    ).first()
+    if existing:
+        raise HTTPException(409, "You already have an open shift at this branch")
+    shift = POSShift(organization_id=membership.organization_id, branch_id=payload.branch_id,
+                     cashier_user_id=user.id, status="open", opening_cash=payload.opening_cash)
+    db.add(shift)
+    db.commit()
+    db.refresh(shift)
+    audit(db, user.id, membership.organization_id, "pos.shift.opened", "pos_shift", shift.id)
+    return {"id": shift.id, "branch_id": shift.branch_id, "status": shift.status,
+            "opening_cash": str(shift.opening_cash)}
+
+
+@router.post("/pos/shifts/{shift_id}/close")
+def close_pos_shift(shift_id: int, payload: POSShiftCloseIn,
+                    membership=Depends(active_membership), user: User = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    require_permission(membership, "update")
+    shift = db.query(POSShift).filter_by(
+        id=shift_id, organization_id=membership.organization_id,
+        cashier_user_id=user.id, status="open"
+    ).with_for_update().first()
+    if not shift or not can_access_branch(membership, shift.branch_id):
+        raise HTTPException(404, "Open shift not found")
+    cash_sales = db.query(func.coalesce(func.sum(POSPayment.amount), 0)).join(
+        POSSale, POSSale.id == POSPayment.sale_id
+    ).filter(POSSale.organization_id == membership.organization_id,
+             POSSale.shift_id == shift.id, POSPayment.method == "cash",
+             POSPayment.status == "recorded").scalar()
+    expected = Decimal(str(shift.opening_cash)) + Decimal(str(cash_sales or 0))
+    shift.closing_cash = payload.closing_cash
+    shift.status = "closed"
+    shift.closed_at = datetime.now(timezone.utc)
+    db.commit()
+    variance = payload.closing_cash - expected
+    audit(db, user.id, membership.organization_id, "pos.shift.closed",
+          "pos_shift", shift.id, f"expected:{expected};counted:{payload.closing_cash};variance:{variance}")
+    return {"id": shift.id, "status": shift.status, "expected_cash": str(expected),
+            "closing_cash": str(payload.closing_cash), "variance": str(variance)}
+
+
+@router.post("/pos/sync", status_code=201)
+def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    _crm_branch_check(db, membership, payload.branch_id)
+    request_hash = canonical_request_hash(payload)
+    existing = db.query(POSSale).filter_by(
+        organization_id=membership.organization_id,
+        client_transaction_id=payload.client_transaction_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Client transaction ID was already used for different sale data")
+        return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
+                "status": "already_synced", "total_amount": str(existing.total_amount)}
+    shift = db.query(POSShift).filter_by(
+        id=payload.shift_id, organization_id=membership.organization_id,
+        branch_id=payload.branch_id, cashier_user_id=user.id, status="open"
+    ).with_for_update().first()
+    if not shift:
+        raise HTTPException(409, "An open cashier shift for this branch is required to sync sales")
+    product_ids = {line.product_id for line in payload.lines}
+    products = db.query(InventoryProduct).filter(
+        InventoryProduct.organization_id == membership.organization_id,
+        InventoryProduct.is_active == True, InventoryProduct.id.in_(product_ids)
+    ).with_for_update().all()
+    product_map = {p.id: p for p in products}
+    if set(product_map) != product_ids:
+        raise HTTPException(404, "One or more POS products were not found")
+    total = Decimal("0.00")
+    prepared = []
+    aggregate_qty = {}
+    for line in payload.lines:
+        product = product_map[line.product_id]
+        unit_price = money(Decimal(str(product.sale_price)))
+        line_total = money(unit_price * line.quantity)
+        if line_total <= 0:
+            raise HTTPException(409, f"Product {product.sku} has no configured sale price")
+        total += line_total
+        aggregate_qty[line.product_id] = aggregate_qty.get(line.product_id, Decimal("0")) + line.quantity
+        prepared.append((line, unit_price, line_total))
+    total = money(total)
+    validate_payment_total(total, payload.payments)
+    for product_id, quantity in aggregate_qty.items():
+        stock = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+            InventoryStockMovement.organization_id == membership.organization_id,
+            InventoryStockMovement.product_id == product_id,
+            InventoryStockMovement.branch_id == payload.branch_id
+        ).scalar()
+        if Decimal(str(stock or 0)) < quantity:
+            raise HTTPException(409, f"Insufficient stock for product {product_map[product_id].sku}")
+    sale = POSSale(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        shift_id=shift.id, cashier_user_id=user.id,
+        client_transaction_id=payload.client_transaction_id, request_hash=request_hash,
+        total_amount=total, currency=payload.currency, status="posted",
+        offline_created_at=payload.offline_created_at
+    )
+    db.add(sale)
+    db.flush()
+    for index, (line, unit_price, line_total) in enumerate(prepared):
+        db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
+                           product_id=line.product_id, quantity=line.quantity,
+                           unit_price=unit_price, line_total=line_total))
+        db.add(InventoryStockMovement(
+            organization_id=membership.organization_id, product_id=line.product_id,
+            branch_id=payload.branch_id, quantity_delta=-line.quantity,
+            movement_type="issue", reference=payload.client_transaction_id,
+            idempotency_key=f"pos:{payload.client_transaction_id}:{index}",
+            created_by=user.id
+        ))
+    for payment in payload.payments:
+        db.add(POSPayment(
+            organization_id=membership.organization_id, sale_id=sale.id,
+            method=payment.method, amount=money(payment.amount),
+            provider_reference=payment.provider_reference,
+            status="unsettled" if payment.method == "credit" else "recorded"
+        ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(POSSale).filter_by(
+            organization_id=membership.organization_id,
+            client_transaction_id=payload.client_transaction_id
+        ).first()
+        if existing and existing.request_hash == request_hash:
+            return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
+                    "status": "already_synced", "total_amount": str(existing.total_amount)}
+        raise HTTPException(409, "POS transaction conflicts with an existing synchronization")
+    db.refresh(sale)
+    audit(db, user.id, membership.organization_id, "pos.sale.synced",
+          "pos_sale", sale.id, payload.client_transaction_id)
+    return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
+            "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency}
