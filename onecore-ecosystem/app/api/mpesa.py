@@ -123,7 +123,7 @@ def _audit(db, org_id, actor_id, action, resource_type, resource_id, detail):
 def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
                       membership=Depends(active_membership), user=Depends(current_user),
                       db: Session = Depends(get_db)):
-    require_permission(membership, "manage")
+    require_permission(membership, "create")
     _enabled()
     sale = db.query(POSSale).filter_by(
         id=sale_id, organization_id=membership.organization_id, status="posted"
@@ -290,7 +290,7 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
     existing = db.query(MpesaRefundIntent).filter_by(
         organization_id=membership.organization_id, refund_id=refund.id
     ).first()
-    if existing:
+    if existing and existing.status in {"initiating", "pending", "success"}:
         return {"intent_id": existing.id, "status": existing.status,
                 "conversation_id": existing.conversation_id,
                 "message": "A disbursement request already exists; do not submit a duplicate refund"}
@@ -302,13 +302,26 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     callback_token = secrets.token_urlsafe(32)
-    intent = MpesaRefundIntent(
-        organization_id=membership.organization_id, branch_id=result.branch_id,
-        refund_id=refund.id, phone_number=phone, amount=amount,
-        callback_token_hash=hashlib.sha256(callback_token.encode()).hexdigest(),
-        status="initiating",
-    )
-    db.add(intent)
+    if existing:
+        intent = existing
+        intent.phone_number = phone
+        intent.amount = amount
+        intent.callback_token_hash = hashlib.sha256(callback_token.encode()).hexdigest()
+        intent.conversation_id = ""
+        intent.originator_conversation_id = ""
+        intent.result_code = ""
+        intent.result_description = ""
+        intent.mpesa_receipt_number = ""
+        intent.completed_at = None
+        intent.status = "initiating"
+    else:
+        intent = MpesaRefundIntent(
+            organization_id=membership.organization_id, branch_id=result.branch_id,
+            refund_id=refund.id, phone_number=phone, amount=amount,
+            callback_token_hash=hashlib.sha256(callback_token.encode()).hexdigest(),
+            status="initiating",
+        )
+        db.add(intent)
     db.flush()
     base = settings.mpesa_base_url.rstrip("/") + "/"
     response = _post("mpesa/b2c/v1/paymentrequest", {
