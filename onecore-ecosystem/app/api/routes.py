@@ -1031,3 +1031,18 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
           "pos_sale", sale.id, payload.client_transaction_id)
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
             "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency}
+
+
+@router.get("/pos/shifts/current")
+def current_pos_shift(branch_id: str, membership=Depends(active_membership),
+                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    _crm_branch_check(db, membership, branch_id)
+    shift = db.query(POSShift).filter_by(
+        organization_id=membership.organization_id, branch_id=branch_id,
+        cashier_user_id=user.id, status="open"
+    ).first()
+    if not shift:
+        return None
+    return {"id": shift.id, "branch_id": shift.branch_id, "status": shift.status,
+            "opening_cash": str(shift.opening_cash), "opened_at": shift.opened_at.isoformat()}
