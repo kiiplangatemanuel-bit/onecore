@@ -1,11 +1,14 @@
 import json, re, uuid
+from decimal import Decimal
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryMovementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -179,3 +182,138 @@ def audit_log(membership=Depends(active_membership), db: Session = Depends(get_d
 def admin_overview(user: User = Depends(require_platform_admin), db: Session = Depends(get_db)):
     return {"organizations": db.query(Organization).count(), "users": db.query(User).count(),
             "providers": public_provider_status()}
+
+
+# Inventory is implemented as a tenant-owned product catalogue and append-only
+# stock ledger. Stock changes are idempotent and branch-scoped; balances are
+# derived from the ledger rather than stored as mutable counters.
+@router.get("/inventory/products")
+def inventory_products(membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(InventoryProduct).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(InventoryProduct.name).all()
+    return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
+             "unit": p.unit, "is_active": p.is_active} for p in rows]
+
+
+@router.post("/inventory/products", status_code=201)
+def create_inventory_product(payload: InventoryProductIn, membership=Depends(active_membership),
+                             user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    sku = payload.sku.strip().upper()
+    if db.query(InventoryProduct).filter_by(organization_id=membership.organization_id, sku=sku).first():
+        raise HTTPException(409, "SKU already exists in this organization")
+    row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
+                           name=payload.name.strip(), description=payload.description,
+                           unit=payload.unit, created_by=user.id)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "SKU already exists in this organization")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
+    return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
+            "unit": row.unit, "is_active": row.is_active}
+
+
+@router.get("/inventory/stock")
+def inventory_stock(product_id: int | None = Query(default=None, gt=0),
+                    branch_id: str | None = None,
+                    membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    allowed = branch_scope_ids(membership)
+    if branch_id and not can_access_branch(membership, branch_id):
+        raise HTTPException(404, "Stock location not found")
+    q = db.query(InventoryStockMovement.product_id, InventoryStockMovement.branch_id,
+                 func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0).label("quantity"))
+    q = q.filter(InventoryStockMovement.organization_id == membership.organization_id)
+    if product_id is not None:
+        q = q.filter(InventoryStockMovement.product_id == product_id)
+    if branch_id is not None:
+        q = q.filter(InventoryStockMovement.branch_id == branch_id)
+    elif allowed is not None:
+        if not allowed:
+            return []
+        q = q.filter(InventoryStockMovement.branch_id.in_(allowed))
+    q = q.group_by(InventoryStockMovement.product_id, InventoryStockMovement.branch_id)
+    rows = q.all()
+    product_ids = {r.product_id for r in rows}
+    products = {p.id: p for p in db.query(InventoryProduct).filter(
+        InventoryProduct.organization_id == membership.organization_id,
+        InventoryProduct.id.in_(product_ids) if product_ids else InventoryProduct.id == -1
+    ).all()}
+    return [{"product_id": r.product_id, "sku": products[r.product_id].sku,
+             "name": products[r.product_id].name, "branch_id": r.branch_id,
+             "quantity": str(r.quantity)} for r in rows if r.product_id in products]
+
+
+@router.post("/inventory/movements", status_code=201)
+def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(active_membership),
+                              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    if payload.movement_type == "receipt" and payload.quantity_delta <= 0:
+        raise HTTPException(422, "Receipt quantity must be positive")
+    if payload.movement_type == "issue" and payload.quantity_delta >= 0:
+        raise HTTPException(422, "Issue quantity must be negative")
+    if payload.movement_type == "adjustment" and payload.quantity_delta == 0:
+        raise HTTPException(422, "Adjustment quantity cannot be zero")
+    if payload.branch_id:
+        branch = db.query(Branch).filter_by(id=payload.branch_id,
+            organization_id=membership.organization_id, is_active=True).first()
+        if not branch or not can_access_branch(membership, branch.id):
+            raise HTTPException(404, "Stock location not found")
+    elif branch_scope_ids(membership) not in (None, []):
+        raise HTTPException(422, "A branch-scoped user must select an authorized branch")
+    elif branch_scope_ids(membership) == []:
+        raise HTTPException(403, "No branch access is assigned")
+
+    duplicate = db.query(InventoryStockMovement).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if duplicate:
+        if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id
+                or duplicate.quantity_delta != payload.quantity_delta
+                or duplicate.movement_type != payload.movement_type):
+            raise HTTPException(409, "Idempotency key was already used for a different movement")
+        return {"id": duplicate.id, "status": "already_applied",
+                "quantity_delta": str(duplicate.quantity_delta)}
+
+    product = db.query(InventoryProduct).filter_by(
+        id=payload.product_id, organization_id=membership.organization_id, is_active=True
+    ).with_for_update().first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    current = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+        InventoryStockMovement.organization_id == membership.organization_id,
+        InventoryStockMovement.product_id == product.id,
+        InventoryStockMovement.branch_id == payload.branch_id
+    ).scalar()
+    new_balance = Decimal(str(current or 0)) + payload.quantity_delta
+    if new_balance < 0:
+        raise HTTPException(409, "Insufficient stock for this issue or adjustment")
+    row = InventoryStockMovement(
+        organization_id=membership.organization_id, product_id=product.id,
+        branch_id=payload.branch_id, quantity_delta=payload.quantity_delta,
+        movement_type=payload.movement_type, reference=payload.reference,
+        idempotency_key=payload.idempotency_key, created_by=user.id
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        duplicate = db.query(InventoryStockMovement).filter_by(
+            organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+        ).first()
+        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type:
+            return {"id": duplicate.id, "status": "already_applied",
+                    "quantity_delta": str(duplicate.quantity_delta)}
+        raise HTTPException(409, "Stock movement conflicts with an existing request")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "inventory.stock.movement", "inventory_movement",
+          row.id, f"{payload.movement_type}:{payload.quantity_delta}:{payload.branch_id or 'unassigned'}")
+    return {"id": row.id, "status": "applied", "quantity_delta": str(row.quantity_delta),
+            "balance": str(new_balance)}
