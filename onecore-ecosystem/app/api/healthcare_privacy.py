@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.models import (User, HealthcarePatient, HealthcareEncounter, HealthcarePatientAccess,
+from app.core.models import (User, Branch, HealthcarePatient, HealthcareEncounter, HealthcarePatientAccess,
     HealthcareConsent, HealthcareAccessAudit)
 from app.core.security import current_user
 from app.core.tenancy import active_membership
+from app.core.authorization import can_access_branch
 
 router=APIRouter(prefix="/api/v1/healthcare",tags=["Healthcare privacy"])
-CLINICAL={"healthcare_admin","physician","nurse"}
+CLINICAL={"org_admin","healthcare_admin","physician","nurse"}
 READ_ROLES=CLINICAL|{"clinical_auditor"}
 WRITE_ROLES=CLINICAL
 def cipher():
@@ -32,7 +33,7 @@ def patient(db,pid,m):
     return p
 def access(db,p,m,u,level="read"):
     role(m,READ_ROLES)
-    if m.role=="healthcare_admin" or m.role=="org_admin": return
+    if (m.role or "").lower() in {"healthcare_admin","org_admin"}: return
     now=datetime.now(timezone.utc)
     q=db.query(HealthcarePatientAccess).filter_by(organization_id=m.organization_id,patient_id=p.id,user_id=u.id,revoked_at=None)
     grants=q.all()
@@ -44,10 +45,10 @@ def audit(db,p,m,u,action,reason=""):
 
 @router.post("/patients")
 def create_patient(payload:dict,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
-    role(m,{"healthcare_admin"}); mrn=str(payload.get("medical_record_number","")).strip()
+    role(m,{"org_admin","healthcare_admin"}); mrn=str(payload.get("medical_record_number","")).strip()
     profile=payload.get("profile")
     if not mrn or len(mrn)>60 or not isinstance(profile,dict): raise HTTPException(422,"medical_record_number and profile object required")
-    p=HealthcarePatient(organization_id=m.organization_id,branch_id=payload.get("branch_id"),medical_record_number=mrn,
+    branch_id=payload.get("branch_id")\n    if branch_id:\n        b=db.query(Branch).filter_by(id=branch_id,organization_id=m.organization_id,is_active=True).first()\n        if not b or not can_access_branch(m,branch_id): raise HTTPException(404,"Branch not found")\n    p=HealthcarePatient(organization_id=m.organization_id,branch_id=branch_id,medical_record_number=mrn,
         encrypted_profile=encrypt(profile),created_by=u.id)
     db.add(p); db.flush(); audit(db,p,m,u,"patient_created"); return {"id":p.id,"medical_record_number":p.medical_record_number}
 
@@ -66,12 +67,12 @@ def update_patient(patient_id:int,payload:dict,reason:str,m=Depends(active_membe
 
 @router.post("/patients/{patient_id}/access")
 def grant_access(patient_id:int,payload:dict,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
-    role(m,{"healthcare_admin"}); p=patient(db,patient_id,m); uid=int(payload.get("user_id",0)); level=payload.get("access_level","read")
+    role(m,{"org_admin","healthcare_admin"}); p=patient(db,patient_id,m); uid=int(payload.get("user_id",0)); level=payload.get("access_level","read")
     if uid<=0 or level not in {"read","write"}: raise HTTPException(422,"Valid user_id and access_level required")
     from app.core.models import Membership
     member=db.query(Membership).filter_by(user_id=uid,organization_id=m.organization_id,is_active=True).first()
     if not member: raise HTTPException(422,"User is not an active member of this organization")
-    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id)
+    expires=None\n    if payload.get("expires_at"):\n        try:\n            expires=datetime.fromisoformat(str(payload["expires_at"]).replace("Z","+00:00"))\n            if expires.tzinfo is None or expires<=datetime.now(timezone.utc): raise ValueError()\n        except Exception: raise HTTPException(422,"expires_at must be a future timezone-aware timestamp")\n    g=HealthcarePatientAccess(organization_id=m.organization_id,patient_id=p.id,user_id=uid,access_level=level,granted_by=u.id,expires_at=expires)
     db.add(g); audit(db,p,m,u,"access_granted",str(uid)); return {"grant_id":g.id}
 
 @router.post("/patients/{patient_id}/encounters")
@@ -105,3 +106,11 @@ def patient_audit(patient_id:int,m=Depends(active_membership),u:User=Depends(cur
     role(m,{"healthcare_admin","clinical_auditor"}); p=patient(db,patient_id,m)
     rows=db.query(HealthcareAccessAudit).filter_by(organization_id=m.organization_id,patient_id=p.id).order_by(HealthcareAccessAudit.id.desc()).limit(500).all()
     return [{"actor_user_id":x.actor_user_id,"action":x.action,"reason":x.reason,"created_at":x.created_at.isoformat()} for x in rows]
+
+@router.post("/patients/{patient_id}/access/{grant_id}/revoke")
+def revoke_access(patient_id:int,grant_id:int,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
+    role(m,{"org_admin","healthcare_admin"}); p=patient(db,patient_id,m)
+    g=db.query(HealthcarePatientAccess).filter_by(id=grant_id,organization_id=m.organization_id,patient_id=p.id,revoked_at=None).first()
+    if not g: raise HTTPException(404,"Active access grant not found")
+    g.revoked_at=datetime.now(timezone.utc); audit(db,p,m,u,"access_revoked",str(g.user_id))
+    return {"revoked":True}
