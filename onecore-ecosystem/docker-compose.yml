@@ -7,7 +7,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/onecore.db}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${PORT:-8000}:8000"
     volumes:
       - onecore_data:/app/data
     restart: unless-stopped
