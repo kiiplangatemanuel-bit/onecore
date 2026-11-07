@@ -3903,13 +3903,19 @@ def _healthcare_patient_out(row):
     }
 
 
+def _healthcare_datetime_out(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 def _healthcare_appointment_out(row, patient=None):
     return {
         "id": row.id, "patient_id": row.patient_id,
         "patient_number": patient.patient_number if patient else None,
         "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
         "branch_id": row.branch_id, "provider_user_id": row.provider_user_id,
-        "starts_at": row.starts_at.isoformat(), "ends_at": row.ends_at.isoformat(),
+        "starts_at": _healthcare_datetime_out(row.starts_at), "ends_at": _healthcare_datetime_out(row.ends_at),
         "reason": row.reason, "status": row.status,
     }
 
@@ -4006,6 +4012,9 @@ def create_healthcare_appointment(payload: HealthcareAppointmentIn,
     ).with_for_update().first()
     if not provider_membership:
         raise HTTPException(404, "Provider is not an active organization member")
+    provider_branches = branch_scope_ids(provider_membership)
+    if branch_id and provider_branches is not None and branch_id not in provider_branches:
+        raise HTTPException(403, "Provider is not assigned access to the appointment branch")
     starts_at = payload.starts_at.astimezone(timezone.utc)
     ends_at = payload.ends_at.astimezone(timezone.utc)
     if starts_at <= datetime.now(timezone.utc):
@@ -4163,7 +4172,7 @@ def get_healthcare_encounter(appointment_id: int, membership=Depends(active_memb
         "provider_user_id": row.provider_user_id, "chief_complaint": row.chief_complaint,
         "clinical_notes": row.clinical_notes, "assessment": row.assessment,
         "plan": row.plan, "status": row.status,
-        "signed_by": row.signed_by, "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+        "signed_by": row.signed_by, "signed_at": _healthcare_datetime_out(row.signed_at) if row.signed_at else None,
     }
 
 
