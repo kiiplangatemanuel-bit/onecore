@@ -6,6 +6,7 @@ down_revision="0029_crm_campaign_dispatch_leases"
 branch_labels=None
 depends_on=None
 def upgrade():
+    op.add_column("crm_campaigns",sa.Column("subject",sa.String(240),nullable=False,server_default=""))
     op.create_table("crm_communication_templates",sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),sa.Column("name",sa.String(180),nullable=False),sa.Column("channel",sa.String(16),nullable=False),sa.Column("purpose",sa.String(24),nullable=False),sa.Column("subject",sa.String(240),nullable=False),sa.Column("body",sa.Text(),nullable=False),sa.Column("variables",sa.JSON(),nullable=False),sa.Column("is_active",sa.Boolean(),nullable=False),sa.Column("created_by",sa.Integer(),sa.ForeignKey("users.id"),nullable=False),sa.Column("created_at",sa.DateTime(timezone=True),nullable=False),sa.Column("updated_at",sa.DateTime(timezone=True),nullable=False))
     op.create_index("ix_crm_template_org_name","crm_communication_templates",["organization_id","name"],unique=True)
     op.create_table("crm_audience_segments",sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),sa.Column("name",sa.String(180),nullable=False),sa.Column("description",sa.String(500),nullable=False),sa.Column("rules",sa.JSON(),nullable=False),sa.Column("is_active",sa.Boolean(),nullable=False),sa.Column("created_by",sa.Integer(),sa.ForeignKey("users.id"),nullable=False),sa.Column("created_at",sa.DateTime(timezone=True),nullable=False),sa.Column("updated_at",sa.DateTime(timezone=True),nullable=False))
@@ -21,6 +22,7 @@ def upgrade():
     op.create_table("healthcare_access_audits",sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),sa.Column("patient_id",sa.Integer(),sa.ForeignKey("healthcare_patients.id"),nullable=False),sa.Column("actor_user_id",sa.Integer(),sa.ForeignKey("users.id"),nullable=False),sa.Column("action",sa.String(32),nullable=False),sa.Column("reason",sa.String(500),nullable=False),sa.Column("created_at",sa.DateTime(timezone=True),nullable=False))
     op.create_index("ix_healthcare_audit_patient","healthcare_access_audits",["organization_id","patient_id","created_at"])
 def downgrade():
+    op.drop_column("crm_campaigns","subject")
     op.drop_index("ix_healthcare_audit_patient",table_name="healthcare_access_audits")
     for t in ["healthcare_access_audits","healthcare_consents","healthcare_patient_access","healthcare_encounters"]: op.drop_table(t)
     op.drop_index("ix_health_access_patient_user",table_name="healthcare_patient_access")
