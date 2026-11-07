@@ -3889,6 +3889,307 @@ def list_my_hr_payslips(membership=Depends(active_membership),
     return payslips
 
 
+
+
+# Healthcare patient registration, scheduling and signed clinical encounter records.
+def _healthcare_patient_out(row):
+    return {
+        "id": row.id, "patient_number": row.patient_number,
+        "first_name": row.first_name, "last_name": row.last_name,
+        "date_of_birth": row.date_of_birth.isoformat() if row.date_of_birth else None,
+        "phone": row.phone, "email": row.email, "branch_id": row.branch_id,
+        "emergency_contact_name": row.emergency_contact_name,
+        "emergency_contact_phone": row.emergency_contact_phone,
+    }
+
+
+def _healthcare_appointment_out(row, patient=None):
+    return {
+        "id": row.id, "patient_id": row.patient_id,
+        "patient_number": patient.patient_number if patient else None,
+        "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
+        "branch_id": row.branch_id, "provider_user_id": row.provider_user_id,
+        "starts_at": row.starts_at.isoformat(), "ends_at": row.ends_at.isoformat(),
+        "reason": row.reason, "status": row.status,
+    }
+
+
+@router.post("/healthcare/patients", status_code=201)
+def create_healthcare_patient(payload: HealthcarePatientIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    _crm_branch_check(db, membership, payload.branch_id)
+    patient_number = payload.patient_number.strip().upper()
+    if db.query(HealthcarePatient).filter_by(
+        organization_id=membership.organization_id, patient_number=patient_number
+    ).first():
+        raise HTTPException(409, "Patient number already exists in this organization")
+    row = HealthcarePatient(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        patient_number=patient_number, first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(), date_of_birth=payload.date_of_birth,
+        phone=payload.phone.strip() if payload.phone else None,
+        email=str(payload.email).lower() if payload.email else None,
+        emergency_contact_name=payload.emergency_contact_name.strip(),
+        emergency_contact_phone=payload.emergency_contact_phone.strip(),
+        created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Patient number conflicts with an existing patient")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.patient.created",
+          "healthcare_patient", row.id)
+    return _healthcare_patient_out(row)
+
+
+@router.get("/healthcare/patients")
+def list_healthcare_patients(q: str | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(HealthcarePatient).filter_by(
+        organization_id=membership.organization_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(HealthcarePatient.branch_id.in_(allowed))
+    if q and q.strip():
+        term = "%" + q.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.filter(or_(
+            HealthcarePatient.patient_number.ilike(term),
+            HealthcarePatient.first_name.ilike(term),
+            HealthcarePatient.last_name.ilike(term),
+            HealthcarePatient.phone.ilike(term),
+        ))
+    rows = query.order_by(HealthcarePatient.id.desc()).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "healthcare.patient.listed",
+          "healthcare_patient", "search", f"count:{len(rows)}")
+    return [_healthcare_patient_out(row) for row in rows]
+
+
+@router.get("/healthcare/patients/{patient_id}")
+def get_healthcare_patient(patient_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcarePatient).filter_by(
+        id=patient_id, organization_id=membership.organization_id
+    ).first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Patient not found")
+    audit(db, user.id, membership.organization_id, "healthcare.patient.viewed",
+          "healthcare_patient", row.id)
+    return _healthcare_patient_out(row)
+
+
+@router.post("/healthcare/appointments", status_code=201)
+def create_healthcare_appointment(payload: HealthcareAppointmentIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=payload.patient_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not patient or not can_access_branch(membership, patient.branch_id):
+        raise HTTPException(404, "Patient not found")
+    branch_id = payload.branch_id or patient.branch_id
+    _crm_branch_check(db, membership, branch_id)
+    provider_membership = db.query(Membership).filter_by(
+        user_id=payload.provider_user_id, organization_id=membership.organization_id,
+        is_active=True,
+    ).with_for_update().first()
+    if not provider_membership:
+        raise HTTPException(404, "Provider is not an active organization member")
+    starts_at = payload.starts_at.astimezone(timezone.utc)
+    ends_at = payload.ends_at.astimezone(timezone.utc)
+    if starts_at <= datetime.now(timezone.utc):
+        raise HTTPException(422, "Appointments must be scheduled in the future")
+    active_statuses = ["scheduled", "checked_in"]
+    provider_conflict = db.query(HealthcareAppointment).filter(
+        HealthcareAppointment.organization_id == membership.organization_id,
+        HealthcareAppointment.provider_user_id == payload.provider_user_id,
+        HealthcareAppointment.status.in_(active_statuses),
+        HealthcareAppointment.starts_at < ends_at,
+        HealthcareAppointment.ends_at > starts_at,
+    ).first()
+    if provider_conflict:
+        raise HTTPException(409, "Provider already has an overlapping appointment")
+    patient_conflict = db.query(HealthcareAppointment).filter(
+        HealthcareAppointment.organization_id == membership.organization_id,
+        HealthcareAppointment.patient_id == patient.id,
+        HealthcareAppointment.status.in_(active_statuses),
+        HealthcareAppointment.starts_at < ends_at,
+        HealthcareAppointment.ends_at > starts_at,
+    ).first()
+    if patient_conflict:
+        raise HTTPException(409, "Patient already has an overlapping appointment")
+    row = HealthcareAppointment(
+        organization_id=membership.organization_id, patient_id=patient.id,
+        branch_id=branch_id, provider_user_id=payload.provider_user_id,
+        starts_at=starts_at, ends_at=ends_at, reason=payload.reason.strip(),
+        status="scheduled", created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Appointment conflicts with an existing record")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.created",
+          "healthcare_appointment", row.id, f"patient:{patient.id};provider:{payload.provider_user_id}")
+    return _healthcare_appointment_out(row, patient)
+
+
+@router.get("/healthcare/appointments")
+def list_healthcare_appointments(status: str | None = None,
+    starts_after: datetime | None = None, ends_before: datetime | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(HealthcareAppointment, HealthcarePatient).join(
+        HealthcarePatient, HealthcarePatient.id == HealthcareAppointment.patient_id
+    ).filter(HealthcareAppointment.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(HealthcareAppointment.branch_id.in_(allowed))
+    if status:
+        if status not in {"scheduled", "checked_in", "completed", "cancelled", "no_show"}:
+            raise HTTPException(422, "Invalid appointment status")
+        query = query.filter(HealthcareAppointment.status == status)
+    if starts_after:
+        if starts_after.tzinfo is None or starts_after.utcoffset() is None:
+            raise HTTPException(422, "starts_after must include a timezone")
+        query = query.filter(HealthcareAppointment.starts_at >= starts_after.astimezone(timezone.utc))
+    if ends_before:
+        if ends_before.tzinfo is None or ends_before.utcoffset() is None:
+            raise HTTPException(422, "ends_before must include a timezone")
+        query = query.filter(HealthcareAppointment.ends_at <= ends_before.astimezone(timezone.utc))
+    rows = query.order_by(HealthcareAppointment.starts_at).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.listed",
+          "healthcare_appointment", "schedule", f"count:{len(rows)}")
+    return [_healthcare_appointment_out(appointment, patient) for appointment, patient in rows]
+
+
+@router.post("/healthcare/appointments/{appointment_id}/status")
+def update_healthcare_appointment_status(appointment_id: int,
+    payload: HealthcareAppointmentStatusIn, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareAppointment).filter_by(
+        id=appointment_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Appointment not found")
+    validate_appointment_transition(row.status, payload.status)
+    if payload.status in {"cancelled", "no_show"} and len(payload.note.strip()) < 3:
+        raise HTTPException(422, "A reason is required when cancelling or marking no-show")
+    if payload.status == "completed":
+        encounter = db.query(HealthcareEncounter).filter_by(
+            organization_id=membership.organization_id, appointment_id=row.id,
+            status="signed",
+        ).first()
+        if not encounter:
+            raise HTTPException(409, "A signed clinical encounter is required before completing the visit")
+    previous = row.status
+    row.status = payload.status
+    db.commit()
+    audit(db, user.id, membership.organization_id, "healthcare.appointment.status_changed",
+          "healthcare_appointment", row.id, f"{previous}->{row.status};{payload.note.strip()}")
+    return {"id": row.id, "status": row.status}
+
+
+@router.post("/healthcare/appointments/{appointment_id}/encounter", status_code=201)
+def create_healthcare_encounter(appointment_id: int, payload: HealthcareEncounterIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    appointment = db.query(HealthcareAppointment).filter_by(
+        id=appointment_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not appointment or not can_access_branch(membership, appointment.branch_id):
+        raise HTTPException(404, "Appointment not found")
+    if appointment.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may create the clinical encounter")
+    if appointment.status != "checked_in":
+        raise HTTPException(409, "Patient must be checked in before an encounter is opened")
+    existing = db.query(HealthcareEncounter).filter_by(
+        organization_id=membership.organization_id, appointment_id=appointment.id
+    ).first()
+    if existing:
+        raise HTTPException(409, "An encounter already exists for this appointment")
+    row = HealthcareEncounter(
+        organization_id=membership.organization_id, appointment_id=appointment.id,
+        patient_id=appointment.patient_id, branch_id=appointment.branch_id,
+        provider_user_id=appointment.provider_user_id,
+        chief_complaint=payload.chief_complaint.strip(),
+        clinical_notes=payload.clinical_notes.strip(), assessment=payload.assessment.strip(),
+        plan=payload.plan.strip(), status="draft", created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "An encounter already exists for this appointment")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.created",
+          "healthcare_encounter", row.id, f"appointment:{appointment.id}")
+    return {"id": row.id, "appointment_id": appointment.id, "patient_id": row.patient_id,
+            "status": row.status}
+
+
+@router.get("/healthcare/appointments/{appointment_id}/encounter")
+def get_healthcare_encounter(appointment_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareEncounter).filter_by(
+        organization_id=membership.organization_id, appointment_id=appointment_id
+    ).first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Encounter not found")
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.viewed",
+          "healthcare_encounter", row.id)
+    return {
+        "id": row.id, "appointment_id": row.appointment_id, "patient_id": row.patient_id,
+        "provider_user_id": row.provider_user_id, "chief_complaint": row.chief_complaint,
+        "clinical_notes": row.clinical_notes, "assessment": row.assessment,
+        "plan": row.plan, "status": row.status,
+        "signed_by": row.signed_by, "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+    }
+
+
+@router.post("/healthcare/encounters/{encounter_id}/sign")
+def sign_healthcare_encounter(encounter_id: int, payload: HealthcareEncounterSignIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(HealthcareEncounter).filter_by(
+        id=encounter_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Encounter not found")
+    if row.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may sign this encounter")
+    if row.status != "draft":
+        raise HTTPException(409, "Only draft encounters can be signed")
+    row.status = "signed"
+    row.signed_by = user.id
+    row.signed_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "healthcare.encounter.signed",
+          "healthcare_encounter", row.id, payload.note.strip())
+    return {"id": row.id, "status": row.status, "signed_at": row.signed_at.isoformat()}
+
+
 @router.get("/crm/forecast")
 def crm_pipeline_forecast(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
