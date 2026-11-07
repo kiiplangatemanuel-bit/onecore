@@ -92,8 +92,8 @@ class Settings(BaseSettings):
             if self.database_url.startswith("sqlite"):
                 raise ValueError("A managed PostgreSQL database is required in production")
             origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
-            if not origins or "*" in origins:
-                raise ValueError("CORS_ORIGINS must contain explicit trusted origins in production")
+            if not origins or "*" in origins or any(not origin.startswith("https://") for origin in origins):
+                raise ValueError("CORS_ORIGINS must contain explicit HTTPS origins in production")
             hosts = [item.strip() for item in self.trusted_hosts.split(",") if item.strip()]
             if not hosts or "*" in hosts:
                 raise ValueError("TRUSTED_HOSTS must contain explicit hostnames in production")
