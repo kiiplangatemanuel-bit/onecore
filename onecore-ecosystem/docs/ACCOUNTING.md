@@ -136,3 +136,34 @@ A further increment adds:
   consolidation, audit sign-off and export formats remain outstanding.
 - The financial statement and budget reports require PostgreSQL scale/performance
   testing and finance-team reconciliation before operational use.
+
+
+## Bank statement import and reconciliation increment
+
+- Tenant bank statement import accepts dated signed transaction lines, statement
+  reference, opening and closing balances and a bank asset ledger account.
+- Import validates statement date ranges and arithmetic (opening balance plus
+  movements equals closing balance).
+- Each imported line can be matched to one posted general-ledger journal line for
+  the same bank account, period and branch. Amounts must agree exactly using the
+  ledger debit-minus-credit sign convention.
+- A ledger line can only be matched once. A statement cannot be reconciled while
+  unmatched lines remain.
+- Reconciliation compares the statement opening and closing balances to the
+  corresponding ledger balances; only then is the statement marked reconciled.
+- Branch-scoped users must import statements for an explicitly authorized branch.
+- A basic import/match/reconcile interface is available in the accounting workspace.
+
+### Additional API
+
+- POST /api/v1/accounting/bank-statements
+- GET /api/v1/accounting/bank-statements
+- GET /api/v1/accounting/bank-statements/{id}
+- POST /api/v1/accounting/bank-statements/{id}/match
+- POST /api/v1/accounting/bank-statements/{id}/reconcile
+
+This increment provides a structured JSON import contract. It does not include
+bank-provider APIs, direct bank feeds, automatic fuzzy matching, CSV/XLSX upload,
+statement file parsing, bank account verification or live bank connectivity.
+Unmatched bank charges/fees must first be entered into the ledger before the
+statement can reconcile. Manual match workflows require finance operator review.
