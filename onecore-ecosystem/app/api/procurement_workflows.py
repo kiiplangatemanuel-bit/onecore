@@ -190,7 +190,7 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
                 and existing.provider == payload.provider
                 and existing.payment_date.date() == payload.payment_date
                 and existing.provider_phone_number == requested_phone
-                and existing.provider_reference == payload.provider_reference.strip()
+                and (payload.provider == "mpesa" or existing.provider_reference == payload.provider_reference.strip())
                 and existing.currency == cash_currency(db, membership.organization_id)
                 and prior_map == requested_map)
         if not same:
