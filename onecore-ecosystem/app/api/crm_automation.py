@@ -125,6 +125,10 @@ def run_due(m=Depends(active_membership),u:User=Depends(current_user),db:Session
     for s in due:
         s.status="running"; s.claimed_at=now; db.commit()
         try:
+            campaign=db.query(CRMCampaign).filter_by(id=s.campaign_id,organization_id=m.organization_id).first()
+            if not campaign: raise HTTPException(404,"Scheduled campaign not found")
+            campaign.status="ready"
+            db.commit()
             result=dispatch_campaign(s.campaign_id,100,m,u,db)
             s.status="completed" if result.get("remaining",0)==0 else "scheduled"
             if s.status=="scheduled": s.last_error="Batch incomplete; invoke scheduler again to continue"
@@ -133,3 +137,16 @@ def run_due(m=Depends(active_membership),u:User=Depends(current_user),db:Session
             s.status="failed"; s.last_error=str(exc)[:1000]; results.append({"campaign_id":s.campaign_id,"error":"dispatch failed"})
         db.commit()
     return {"processed":len(results),"results":results}
+
+@router.post("/campaigns/{campaign_id}/apply-template/{template_id}")
+def apply_template(campaign_id:int,template_id:int,m=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(m,"manage")
+    campaign=db.query(CRMCampaign).filter_by(id=campaign_id,organization_id=m.organization_id).first()
+    template=db.query(CRMCommunicationTemplate).filter_by(id=template_id,organization_id=m.organization_id,is_active=True).first()
+    if not campaign or not template: raise HTTPException(404,"Campaign or template not found")
+    if campaign.status!="draft": raise HTTPException(409,"Templates can only be applied to draft campaigns")
+    if campaign.channel!=template.channel: raise HTTPException(422,"Template channel must match campaign channel")
+    if campaign.purpose!=template.purpose: raise HTTPException(422,"Template purpose must match campaign purpose")
+    campaign.message=template.body
+    db.commit()
+    return {"campaign_id":campaign.id,"template_id":template.id,"applied":True,"variables":template.variables}
