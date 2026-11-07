@@ -199,7 +199,8 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
         organization_id=membership.organization_id, is_active=True
     ).order_by(InventoryProduct.name).all()
     return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
-             "unit": p.unit, "sale_price": str(p.sale_price), "is_active": p.is_active} for p in rows]
+             "unit": p.unit, "sale_price": str(p.sale_price),
+             "tax_rate": str(p.tax_rate), "is_active": p.is_active} for p in rows]
 
 
 @router.post("/inventory/products", status_code=201)
@@ -1392,6 +1393,7 @@ def pos_catalog(branch_id: str, membership=Depends(active_membership), db: Sessi
         ).scalar()
         result.append({"id": product.id, "sku": product.sku, "name": product.name,
                        "unit": product.unit, "sale_price": str(product.sale_price),
+                       "tax_rate": str(product.tax_rate),
                        "available_quantity": str(stock or 0)})
     return result
 
