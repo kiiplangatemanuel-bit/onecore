@@ -141,17 +141,27 @@ def advanced_forecast(period_type:str=Query("month",pattern="^(month|quarter|yea
     require_permission(m,"read");_rep(db,m.organization_id,rep_id)
     first,last=_period(period_type,start_date);probs,mults=_settings(db,m.organization_id);leads=_leads(db,m,first,last,rep_id)
     grouped={}
-    for lead in leads:grouped.setdefault((lead.assigned_to or 0,lead.currency),[]).append(lead)
+    by_currency={}
+    for lead in leads:
+        grouped.setdefault((lead.assigned_to if lead.assigned_to is not None else -1,lead.currency),[]).append(lead)
+        by_currency.setdefault(lead.currency,[]).append(lead)
+    for currency,items in by_currency.items():grouped[(-2,currency)]=items
     target_rows=db.query(CRMSalesTarget).filter_by(organization_id=m.organization_id,
         period_type=period_type,period_start=datetime.combine(first,time.min,timezone.utc)).all()
-    targets={(x.assigned_to or 0,x.currency):x.target_amount for x in target_rows
-        if x.branch_id is None or can_access_branch(m,x.branch_id)}
+    targets={}
+    for x in target_rows:
+        if x.branch_id is not None and not can_access_branch(m,x.branch_id):continue
+        key=(int(x.assigned_to) if x.assigned_to is not None else -2,x.currency)
+        targets[key]=x.target_amount
+    for key in targets:grouped.setdefault(key,[])
     output=[]
-    for target_key in targets:grouped.setdefault(target_key,[])
     for (owner,currency),items in sorted(grouped.items(),key=lambda pair:(pair[0][1],pair[0][0])):
-        scenarios=calculate_scenarios(items,probs,mults);target=targets.get((owner,currency),targets.get((0,currency),Decimal("0")))
+        scenarios=calculate_scenarios(items,probs,mults)
+        target=targets.get((owner,currency),Decimal("0"))
         expected=scenarios["expected"]
-        output.append({"representative_id":owner or None,"currency":currency,"opportunity_count":len(items),
+        output.append({"representative_id":owner if owner>0 else None,
+            "group":"team" if owner==-2 else ("unassigned" if owner==-1 else "representative"),
+            "currency":currency,"opportunity_count":len(items),
             "pipeline_amount":str(sum((Decimal(str(x.estimated_value)) for x in items),Decimal("0"))),
             "best_case":str(scenarios["best_case"]),"expected":str(expected),"worst_case":str(scenarios["worst_case"]),
             "target_amount":str(target),"attainment_percent":str((expected/target*100).quantize(Decimal("0.01")) if target else Decimal("0"))})
@@ -170,13 +180,19 @@ def create_snapshot(payload:dict,m=Depends(active_membership),user:User=Depends(
     except Exception:raise HTTPException(422,"Invalid snapshot parameters")
     if scenario not in {"best_case","expected","worst_case"}:raise HTTPException(422,"Invalid scenario")
     _rep(db,m.organization_id,rep);first,last=_period(kind,start);probs,mults=_settings(db,m.organization_id)
+    selected=_leads(db,m,first,last,rep)
     grouped={}
-    for lead in _leads(db,m,first,last,rep):grouped.setdefault((lead.assigned_to or 0,lead.currency),[]).append(lead)
+    by_currency={}
+    for lead in selected:
+        grouped.setdefault((lead.assigned_to if lead.assigned_to is not None else -1,lead.currency),[]).append(lead)
+        by_currency.setdefault(lead.currency,[]).append(lead)
+    if rep is None:
+        for currency,items in by_currency.items():grouped[(-2,currency)]=items
     now=datetime.now(timezone.utc);count=0
     for (owner,currency),items in grouped.items():
         db.add(CRMForecastSnapshot(organization_id=m.organization_id,period_type=kind,
             period_start=datetime.combine(first,time.min,timezone.utc),period_end=datetime.combine(last,time.max,timezone.utc),
-            rep_key=str(owner) if owner else "team",assigned_to=owner or None,currency=currency,scenario=scenario,
+            rep_key=("team" if owner==-2 else ("unassigned" if owner==-1 else str(owner))),assigned_to=owner if owner>0 else None,currency=currency,scenario=scenario,
             forecast_amount=calculate_scenarios(items,probs,mults)[scenario],opportunity_count=len(items),
             snapshot_at=now,snapshot_by=user.id));count+=1
     db.add(AuditEvent(organization_id=m.organization_id,actor_user_id=user.id,
@@ -202,7 +218,8 @@ def forecast_accuracy(period_type:str=Query("month",pattern="^(month|quarter|yea
             CRMLead.actual_closed_at>=datetime.combine(first,time.min,timezone.utc),
             CRMLead.actual_closed_at<datetime.combine(last+timedelta(days=1),time.min,timezone.utc))
         actual_q=_scope(actual_q,m,CRMLead)
-        if snap.assigned_to is not None:actual_q=actual_q.filter(CRMLead.assigned_to==snap.assigned_to)
+        if snap.rep_key=="unassigned":actual_q=actual_q.filter(CRMLead.assigned_to.is_(None))
+        elif snap.assigned_to is not None:actual_q=actual_q.filter(CRMLead.assigned_to==snap.assigned_to)
         actual=Decimal(str(actual_q.scalar() or 0));variance=actual-snap.forecast_amount
         pct=(variance/snap.forecast_amount*100).quantize(Decimal("0.01")) if snap.forecast_amount else None
         output.append({"representative_id":snap.assigned_to,"currency":currency,"scenario":scenario,
@@ -285,16 +302,18 @@ def campaign_roi(campaign_id:int|None=None,m=Depends(active_membership),db:Sessi
             organization_id=m.organization_id,campaign_id=campaign.id).filter(
             CRMCampaignAttribution.event_type.in_(["order_won","invoice_paid"])).order_by(
             CRMCampaignAttribution.occurred_at.desc(),CRMCampaignAttribution.id.desc()).all()
-        # An invoice-paid event supersedes the earlier order-won estimate for that order.
-        per_order={}
+        # Sum all idempotent payment events; use order-won estimate only if no payment exists.
+        orders={}
         for event in events:
             key=event.sales_order_id or ("event",event.id)
-            previous=per_order.get(key)
-            if previous is None or event.event_type=="invoice_paid":per_order[key]=event
+            orders.setdefault(key,[]).append(event)
         totals={}
-        for event in per_order.values():
-            gross,count=totals.get(event.currency,(Decimal("0"),0))
-            totals[event.currency]=(gross+Decimal(str(event.revenue_amount)),count+1)
+        for group in orders.values():
+            payments=[event for event in group if event.event_type=="invoice_paid"]
+            selected=payments if payments else [next((event for event in group if event.event_type=="order_won"),group[0])]
+            for event in selected:
+                gross,count=totals.get(event.currency,(Decimal("0"),0))
+                totals[event.currency]=(gross+Decimal(str(event.revenue_amount)),count+(1 if event is selected[0] else 0))
         revenue=[]
         for currency,(gross,count) in totals.items():
             spend=Decimal(str(campaign.budget_amount or 0))
