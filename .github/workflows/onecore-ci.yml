@@ -13,9 +13,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: onecore-ecosystem
+    env:
+      PYTHONPATH: ${{ github.workspace }}/onecore-ecosystem
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,8 +23,9 @@ jobs:
           cache: pip
           cache-dependency-path: onecore-ecosystem/requirements.txt
       - name: Install dependencies
+        working-directory: onecore-ecosystem
         run: python -m pip install -r requirements.txt
       - name: Compile Python modules
-        run: python -m compileall -q app tests
+        run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q onecore-ecosystem/tests
