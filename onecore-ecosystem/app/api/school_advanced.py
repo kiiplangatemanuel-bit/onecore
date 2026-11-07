@@ -33,6 +33,11 @@ def _rows(db: Session, m, kind: str):
     ).order_by(Record.id.asc()).all()
 
 
+def _visible_rows(db: Session, m, kind: str):
+    return [x for x in _rows(db,m,kind)
+            if x.branch_id is None or can_access_branch(m,x.branch_id)]
+
+
 def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_id"):
     row = db.query(Record).filter_by(
         id=record_id, organization_id=m.organization_id,
@@ -267,8 +272,10 @@ def school_rankings(academic_year:int,class_id:int|None=None,subject_id:int|None
     q=db.query(SchoolAssessment).filter_by(organization_id=m.organization_id,academic_year=academic_year,status="published")
     if class_id is not None: q=q.filter(SchoolAssessment.class_id==class_id)
     if subject_id is not None: q=q.filter(SchoolAssessment.subject_id==subject_id)
+    visible_class_ids={x.id for x in db.query(SchoolClass).filter_by(
+        organization_id=m.organization_id).all() if can_access_branch(m,x.branch_id)}
+    q=q.filter(SchoolAssessment.class_id.in_(visible_class_ids or {-1}))
     assessments=q.all()
-    if not assessments: return {"academic_year":academic_year,"rankings":[],"configuration":config}
     assessment_ids=[x.id for x in assessments]
     by_id={x.id:x for x in assessments}
     marks=db.query(SchoolMark).filter(SchoolMark.organization_id==m.organization_id,
@@ -749,13 +756,18 @@ def create_guardian_notification(payload:dict[str,Any],m=Depends(active_membersh
 @router.get("/school/dashboard")
 def school_dashboard(m=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(m,"read")
-    learners=db.query(SchoolLearner).filter_by(organization_id=m.organization_id).all()
-    classes=db.query(SchoolClass).filter_by(organization_id=m.organization_id,is_active=True).all()
-    assessments=db.query(SchoolAssessment).filter_by(organization_id=m.organization_id).all()
-    charges=_rows(db,m,"fee_charge"); payments=_rows(db,m,"fee_payment")
+    learners=[x for x in db.query(SchoolLearner).filter_by(organization_id=m.organization_id).all()
+              if can_access_branch(m,x.branch_id)]
+    classes=[x for x in db.query(SchoolClass).filter_by(organization_id=m.organization_id,is_active=True).all()
+             if can_access_branch(m,x.branch_id)]
+    class_ids={x.id for x in classes}
+    assessments=db.query(SchoolAssessment).filter(
+        SchoolAssessment.organization_id==m.organization_id,
+        SchoolAssessment.class_id.in_(class_ids or {-1})).all()
+    charges=_visible_rows(db,m,"fee_charge"); payments=_visible_rows(db,m,"fee_payment")
     total_due=sum((Decimal(x.data["balance"]) for x in charges),Decimal("0"))
     received=sum((Decimal(x.data["amount"]) for x in payments),Decimal("0"))
-    published=sum(1 for x in _rows(db,m,"report_card") if x.data.get("status")=="published")
+    published=sum(1 for x in _visible_rows(db,m,"report_card") if x.data.get("status")=="published")
     return {"learners":len(learners),"active_learners":sum(x.status=="active" for x in learners),
             "classes":len(classes),"assessments":len(assessments),"published_report_cards":published,
             "fee_charges":str(sum((Decimal(x.data["amount"]) for x in charges),Decimal("0"))),
@@ -766,7 +778,7 @@ def school_dashboard(m=Depends(active_membership),db:Session=Depends(get_db)):
 @router.get("/school/reconciliation")
 def school_reconciliation(m=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(m,"read")
-    charges=_rows(db,m,"fee_charge"); payments=_rows(db,m,"fee_payment")
+    charges=_visible_rows(db,m,"fee_charge"); payments=_visible_rows(db,m,"fee_payment")
     errors=[]
     charge_total=sum((Decimal(x.data["amount"]) for x in charges),Decimal("0"))
     charge_balance=sum((Decimal(x.data["balance"]) for x in charges),Decimal("0"))
