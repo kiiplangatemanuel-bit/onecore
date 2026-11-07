@@ -733,3 +733,22 @@ Implemented on branch `feature/hr-attendance-timekeeping`:
 Boundaries: no organization timezone configuration, shift calendars, breaks, overtime,
 geolocation/biometrics, offline punches, manager correction workflow, multiple daily
 sessions or payroll integration. UTC-day attendance is not a local payroll timesheet.
+
+
+## School fee schedules, learner billing and receipts increment (7 November 2026)
+
+Implemented on branch `feature/school-fees-payments`:
+
+- Class/year/term fee schedules with tenant and branch scope, currency and due date.
+- Manager-controlled bulk billing of active learners in a class; unique learner/schedule
+  constraints make repeated billing safe and non-duplicating.
+- Learner fee account with charge, paid and outstanding balances plus receipt history.
+- Manual payment receipt capture with tenant-unique receipt numbers and charge
+  allocations; allocations must equal receipt total, match currency and not overpay.
+- Payment, allocations and charge balance updates commit atomically with audit events.
+- Four school fee models, migration `0024_school_fees`, APIs, starter UI, docs and
+  schema/model/OpenAPI tests.
+
+Boundaries: no guardian portal, bursary/discount workflows, payment plan, refund or
+reversal process, M-Pesa/bank/card provider verification, payment settlement,
+accounting journal integration or UAT. Tender methods are manually recorded only.
