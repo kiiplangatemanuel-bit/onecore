@@ -64,14 +64,15 @@ this increment is considered verified.
 ## Remaining gaps
 
 - Supplier edit/archive, supplier terms, RFQ/quotation comparison and supplier
-  performance.
-- Configurable multi-level approval limits, delegated approval, monetary thresholds,
-  and segregation-of-duties policies beyond the manager gate.
+  performance reporting are now implemented by this increment.
+- Delegated approval, approval expiry/escalation, configurable approver groups and
+  branch-specific approval matrices remain future work.
 - PO edit/cancel, PDF/email dispatch, supplier acknowledgement and delivery schedule.
-- Supplier invoices and three-way matching; rejected stock is recorded but supplier
-  return/credit-note processing is not yet implemented. Requisition-to-PO conversion is also not yet implemented.
+- Automated AP journal posting/payment settlement, tax compliance validation,
+  credit-note accounting allocation and supplier statement reconciliation remain future work.
 - Tax/freight/discount allocations, landed cost and accounts-payable integration.
-- Advanced procurement reporting, audit views, CSV import/export and notifications.
+- Supplier portal/email dispatch, RFQ notification delivery, CSV import/export,
+  detailed on-time delivery analytics and procurement dashboard exports.
 - PostgreSQL concurrent receipt tests, end-to-end branch isolation, security review,
   accessibility and UAT.
 
@@ -91,3 +92,55 @@ cannot bypass inspection. The workspace includes GRN creation and inspection for
 Tests cover payload validation, unique receipt line/key constraints, model and route
 registration, legacy endpoint deprecation and workspace controls. CI migration and test
 results are the verification gate for this increment.
+
+
+## Procurement completion increment — 7 November 2026
+
+### Requisition conversion
+
+`POST /api/v1/procurement/requisitions/{id}/convert-to-order` converts an approved
+requisition into a draft PO using its original branch, products and requested quantities.
+The caller selects the supplier, currency and unit costs. A requisition is guarded
+against duplicate conversion; PO approval remains a separate control.
+
+### RFQ and quotation comparison
+
+`POST /api/v1/procurement/rfqs` creates an RFQ, its product/quantity lines and supplier
+invitations. Invited suppliers can submit one complete quotation per RFQ. Comparison
+returns line pricing, tax, delivery days and total by currency. Awarding a complete
+quotation creates a draft PO and closes the RFQ; the PO must still pass its approval
+workflow. Currency totals are deliberately not compared across different currencies.
+
+### Approval policy
+
+`PUT /api/v1/procurement/approval-rules` replaces the organization's sequential PO
+approval tiers. Rules define amount ranges, level and required role. The PO approval
+endpoint records one distinct approver per level, prevents the PO creator from approving,
+and only releases the order after all applicable levels have approved. Approval
+history is available from `/procurement/orders/{id}/approvals`. Manager/admin roles
+are checked at each approval step.
+
+### Supplier invoice matching
+
+`POST /api/v1/procurement/supplier-invoices` validates supplier and PO identity, exact
+PO unit prices, and invoice quantities against accepted, non-returned and not-yet-
+invoiced inspected GRN quantities. Duplicate supplier invoice numbers are rejected by
+a database unique index. Successfully matched invoice records are retained with their
+line details and totals. This endpoint does not yet post an AP journal or settle payment.
+
+### Supplier returns and performance
+
+`POST /api/v1/procurement/goods-receipts/{id}/returns` returns previously accepted
+quantities only, rejects duplicate/excess returns and insufficient stock, and writes
+negative stock ledger movements with unique idempotency keys. The return records the
+supplier's credit-note reference. `/procurement/supplier-performance` reports PO/GRN
+counts, delivered/accepted quantities and acceptance rate.
+
+### Database, UI and tests
+
+Migration `0016_procurement_completion` adds approval tiers/actions, RFQs/invitations/
+quotes, supplier invoices and supplier returns. The procurement workspace now exposes
+forms for conversion, RFQs, quotation comparison/award, approval policy, invoice
+matching, supplier returns and performance reporting. Automated tests cover payload
+constraints, model/table registration, OpenAPI route registration and workspace
+controls. CI must pass migration upgrade, downgrade/re-upgrade, compilation and pytest.
