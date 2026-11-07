@@ -249,3 +249,34 @@ tenders are excluded until they are recorded as collected cash.
 This is a single-cashier shift control workflow. It does not yet provide physical
 cash drawer hardware integration, multi-cashier shared tills, bank deposit
 reconciliation or production till-count pilot sign-off.
+
+
+## Advanced POS controls (migration 0035)
+
+The advanced POS API adds organization-scoped device enrollment, supervisor approval and revocation:
+- `POST /api/v1/pos/advanced/devices/register` issues a high-entropy device secret once and creates a pending device.
+- `GET /api/v1/pos/advanced/devices`, `POST /devices/{id}/decision` and `POST /devices/{id}/revoke` provide supervisor device lifecycle controls.
+- `POST /devices/{id}/session` verifies the stored device secret against a trusted device. Cashier authentication remains a separate user session; this endpoint is not a substitute for the normal bearer token.
+
+Offline conflict cases can be recorded with client/server snapshots and resolved by a manager:
+- `POST /conflicts`, `GET /conflicts`, `POST /conflicts/{id}/resolve`.
+- The server deliberately rejects direct acceptance of an unvalidated client payload. The safe resolution is to accept server state, void the local transaction, or refresh and retry through ordinary server-side validation.
+
+Client sync telemetry is append-only and idempotent:
+- `POST /sync-events` records queued, attempting, synced, retrying, dead-letter and conflict events.
+- `GET /sync-dashboard` provides branch-scoped counts and recent failures.
+- This is an operational telemetry API; a deployed client/background worker must submit events. It does not create a server-side worker or guarantee a browser Background Sync event will run on every platform.
+
+Customer membership and loyalty:
+- `POST /customers` creates/updates organization-scoped customer membership records.
+- `GET /customers`, `GET /customers/{id}/history`, `POST /customers/{id}/loyalty/award` and `POST /customers/{id}/loyalty/redeem`.
+- Loyalty awards and redemptions use organization-scoped idempotency keys and row locks; awards are supervisor-controlled and must be called by the sale/checkout workflow or an authorized manager.
+- The current history endpoint exposes the loyalty ledger. Existing POS sale records do not yet carry a customer foreign key, so it does not fabricate purchase history by matching phone numbers.
+
+Multi-store reporting:
+- `GET /operations-report` aggregates posted sale counts, gross totals and distinct shifts by branch within the caller's branch scope.
+
+Hardware and live payment boundaries:
+- Cash drawer and thermal printer execution remain browser/OS/driver integration points; the API does not claim to operate a particular USB, Bluetooth or serial device without an installed supported driver and physical device acceptance test.
+- M-Pesa Daraja collection/refund callbacks remain the verified provider settlement path documented above. Card/bank settlement feeds and automated reconciliation require provider credentials and integrations.
+- Device trust metadata is not hardware attestation. Production offline operation still requires managed endpoint encryption, secure key storage, device policy, and a validated offline entitlement/session renewal design.
