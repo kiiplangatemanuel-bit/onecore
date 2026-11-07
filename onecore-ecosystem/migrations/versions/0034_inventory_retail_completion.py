@@ -9,6 +9,7 @@ depends_on = None
 
 
 def upgrade():
+    op.add_column("inventory_products", sa.Column("cost_price", sa.Numeric(18,4), nullable=False, server_default="0"))
     op.create_table("inventory_warehouses",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
@@ -134,6 +135,8 @@ def upgrade():
 
 
 def downgrade():
+    with op.batch_alter_table("inventory_products") as batch_op:
+        batch_op.drop_column("cost_price")
     op.drop_index("ix_inventory_stock_movements_warehouse_id", table_name="inventory_stock_movements")
     with op.batch_alter_table("inventory_stock_movements") as batch_op:
         batch_op.drop_constraint("fk_inventory_movement_warehouse", type_="foreignkey")
