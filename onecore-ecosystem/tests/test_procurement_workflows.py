@@ -106,3 +106,107 @@ def test_procurement_workflow_migration_is_reversible_and_chained():
         "procurement_supplier_statement_lines",
     ):
         assert f'"{table}"' in source
+
+
+def _procurement_callback_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.core.database import Base
+    from app.core.models import MpesaPaymentIntent, MpesaRefundIntent
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        ProcurementSettlement.__table__, MpesaPaymentIntent.__table__, MpesaRefundIntent.__table__,
+    ])
+    return sessionmaker(bind=engine)()
+
+
+def test_supplier_b2c_callback_confirms_exact_amount_and_receipt_before_posting():
+    import hashlib
+    from app.api.procurement_workflows import _supplier_b2c_callback
+    db = _procurement_callback_session()
+    token = "supplier-b2c-test-token"
+    row = ProcurementSettlement(
+        id=1, organization_id=1, supplier_id=10, payment_account_id=20,
+        amount=Decimal("125.00"), currency="KES", provider="mpesa",
+        provider_phone_number="254712345678",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending_provider", payment_date=__import__("datetime").datetime(2026, 11, 8),
+        idempotency_key="supplier-payment-0001", created_by=1,
+    )
+    db.add(row)
+    db.commit()
+    body = {"Result": {
+        "ConversationID": "AG_SUPPLIER_1", "OriginatorConversationID": "OR_SUPPLIER_1",
+        "ResultCode": 0, "ResultDesc": "Success",
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QABSUPPLIER001"},
+            {"Key": "TransactionAmount", "Value": 125},
+        ]},
+    }}
+    assert _supplier_b2c_callback(db, token, body) is True
+    db.refresh(row)
+    assert row.status == "provider_confirmed"
+    assert row.provider_reference == "QABSUPPLIER001"
+    # Provider confirmation is not yet AP settlement: a manager must post it.
+    assert row.journal_id is None
+    assert _supplier_b2c_callback(db, token, body) is True
+    assert row.status == "provider_confirmed"
+    db.close()
+
+
+def test_supplier_b2c_callback_rejects_amount_mismatch_and_duplicate_receipt():
+    import hashlib
+    from app.api.procurement_workflows import _supplier_b2c_callback
+    db = _procurement_callback_session()
+    token = "supplier-b2c-duplicate-token"
+    duplicate = ProcurementSettlement(
+        id=1, organization_id=1, supplier_id=10, payment_account_id=20,
+        amount=Decimal("100.00"), currency="KES", provider="mpesa",
+        provider_reference="QABUSED", status="failed",
+        payment_date=__import__("datetime").datetime(2026, 11, 8),
+        idempotency_key="supplier-payment-duplicate", created_by=1,
+    )
+    row = ProcurementSettlement(
+        id=2, organization_id=1, supplier_id=10, payment_account_id=20,
+        amount=Decimal("125.00"), currency="KES", provider="mpesa",
+        provider_phone_number="254712345678",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending_provider", payment_date=__import__("datetime").datetime(2026, 11, 8),
+        idempotency_key="supplier-payment-0002", created_by=1,
+    )
+    db.add_all([duplicate, row])
+    db.commit()
+    mismatch = {"Result": {
+        "ConversationID": "AG_SUPPLIER_2", "ResultCode": 0,
+        "ResultParameters": {"ResultParameter": [
+            {"Key": "TransactionReceipt", "Value": "QABNEW"},
+            {"Key": "TransactionAmount", "Value": 100},
+        ]},
+    }}
+    assert _supplier_b2c_callback(db, token, mismatch) is True
+    db.refresh(row)
+    assert row.status == "exception"
+    assert row.provider_reference == ""
+    db.close()
+
+
+def test_supplier_b2c_timeout_is_unknown_and_not_marked_settled():
+    import hashlib
+    from app.api.procurement_workflows import _supplier_b2c_callback
+    db = _procurement_callback_session()
+    token = "supplier-b2c-timeout-token"
+    row = ProcurementSettlement(
+        id=3, organization_id=1, supplier_id=10, payment_account_id=20,
+        amount=Decimal("75.00"), currency="KES", provider="mpesa",
+        callback_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        status="pending_provider", payment_date=__import__("datetime").datetime(2026, 11, 8),
+        idempotency_key="supplier-payment-0003", created_by=1,
+    )
+    db.add(row)
+    db.commit()
+    body = {"Result": {"ConversationID": "AG_TIMEOUT", "OriginatorConversationID": "OR_TIMEOUT"}}
+    assert _supplier_b2c_callback(db, token, body, timeout=True) is True
+    db.refresh(row)
+    assert row.status == "unknown"
+    assert row.journal_id is None
+    db.close()
