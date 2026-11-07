@@ -1,4 +1,5 @@
-"""HR date calculations shared by leave workflows."""
+"""HR date and payroll calculations shared by HR workflows."""
+from decimal import Decimal
 from datetime import date, timedelta
 
 
