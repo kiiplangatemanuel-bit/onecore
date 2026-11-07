@@ -345,8 +345,11 @@ def create_accounting_account(payload: AccountingAccountIn,
         organization_id=membership.organization_id, code=code
     ).first():
         raise HTTPException(409, "Account code already exists in this organization")
+    if payload.cash_flow_category == "cash_equivalent" and payload.account_type != "asset":
+        raise HTTPException(422, "Cash-equivalent classification requires an asset account")
     row = AccountingAccount(organization_id=membership.organization_id, code=code,
                             name=payload.name.strip(), account_type=payload.account_type,
+                            cash_flow_category=payload.cash_flow_category,
                             created_by=user.id)
     db.add(row)
     try:
@@ -6304,7 +6307,7 @@ def post_procurement_invoice_to_accounting(supplier_invoice_id:int, payload:Acco
         id=source.purchase_order_id,organization_id=membership.organization_id,supplier_id=source.supplier_id).first()
     if not supplier or not order: raise HTTPException(409,"Matched procurement supplier or purchase order is unavailable")
     _procurement_branch_check(db,membership,order.branch_id)
-    control=_accounting_get_accounts(db,membership.organization_id,[payload.control_account_id])[payload.control_account_id]
+    control=_accounting_get_accounts(db,membership.organization_id,[payload.payable_control_account_id])[payload.payable_control_account_id]
     expense=_accounting_get_accounts(db,membership.organization_id,[payload.expense_account_id])[payload.expense_account_id]
     if control.account_type!="liability" or expense.account_type not in ("expense","asset"):
         raise HTTPException(422,"AP control must be a liability and expense mapping must be expense or asset")
@@ -6424,7 +6427,7 @@ def accounting_cash_flow(start_date:date,end_date:date,
     if end_date<start_date: raise HTTPException(422,"end_date must not precede start_date")
     allowed=branch_scope_ids(membership)
     cash_accounts=db.query(AccountingAccount).filter_by(
-        organization_id=membership.organization_id,is_active=True,is_cash_equivalent=True).all()
+        organization_id=membership.organization_id,is_active=True,cash_flow_category="cash_equivalent").all()
     if not cash_accounts:return {"start_date":start_date.isoformat(),"end_date":end_date.isoformat(),
         "currency":db.query(Organization.currency).filter_by(id=membership.organization_id).scalar(),"operating":"0.00","investing":"0.00","financing":"0.00",
         "unclassified":"0.00","net_change":"0.00","movements":[]}
