@@ -260,3 +260,46 @@ class CRMActivity(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementSupplier(Base):
+    __tablename__ = "procurement_suppliers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tax_pin: Mapped[str] = mapped_column(String(24), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_supplier_org_name", "organization_id", "name"),)
+
+
+class ProcurementPurchaseOrder(Base):
+    __tablename__ = "procurement_purchase_orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("procurement_suppliers.id"), index=True)
+    order_number: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    notes: Mapped[str] = mapped_column(String(1000), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_po_org_number", "organization_id", "order_number", unique=True),)
+
+
+class ProcurementPurchaseOrderLine(Base):
+    __tablename__ = "procurement_purchase_order_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_orders.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    quantity_ordered: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    quantity_received: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
