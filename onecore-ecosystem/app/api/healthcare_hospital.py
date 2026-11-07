@@ -548,7 +548,8 @@ def decide_preauthorization(preauth_id: int, payload: dict, m=Depends(active_mem
     if row.status != "pending": raise HTTPException(409, "Preauthorization is no longer pending")
     decision = payload.get("decision")
     if decision not in {"approved", "partially_approved", "denied", "more_information"}: raise HTTPException(422, "Invalid payer decision")
-    approved = (_money(payload.get("approved_amount")) if decision == "partially_approved" else\n        ((row.amount or Decimal("0")) if decision == "approved" else Decimal("0")))
+    approved = (_money(payload.get("approved_amount")) if decision == "partially_approved" else
+        ((row.amount or Decimal("0")) if decision == "approved" else Decimal("0")))
     if approved > (row.amount or Decimal("0")): raise HTTPException(422, "Approved amount exceeds request")
     data = _payload(row); data.update({"decision": decision, "approved_amount": str(approved),
         "decided_at": NOW().isoformat(), "payer_reference": str(payload.get("payer_reference", ""))[:100]})
