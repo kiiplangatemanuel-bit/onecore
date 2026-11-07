@@ -16,6 +16,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -324,7 +325,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
                     "pay_date": run.pay_date.isoformat(), "rule_set_id": rule.id, "rule_version": rule.data["version"],
                     "rule_set": rule.data, "earnings": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "earning"],
                     "deductions": [{"code": i.code, "description": i.description, "amount": str(i.amount)} for i in items if i.item_type == "deduction"],
-                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit)}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
+                    "pay_components": {"prorated_base_pay": str(prorated_base), "days_employed": days_employed, "period_days": period_days, "overtime_hours": str(overtime_hours), "overtime_multiplier": str(overtime_multiplier), "overtime_pay": str(overtime_pay), "shift_allowance": str(shift_allowance), "cash_allowances": str(cash_allowances), "taxable_benefits": str(taxable_benefits), "meal_benefit": str(meal_benefit)}, "tax_declarations": {k: extras.get(k) for k in ("resident_for_tax","employee_pension","mortgage_interest","post_retirement_medical_fund","insurance_premium","disability_exemption_certificate_number","disability_exemption_valid_until","meal_benefit","shif_contribution_base") if k in extras}, "calculation": result, "calculated_at": datetime.now(timezone.utc).isoformat()}
         snapshot["sha256"] = _json_hash(snapshot)
         existing = _record(db, membership.organization_id, "calculation_snapshot", f"{run.id}:{line.employee_id}").first()
         if existing:
@@ -421,7 +422,8 @@ def export_bank_file(batch_id: int, membership=Depends(active_membership), user=
     for row in batch.data["rows"]:
         emp = db.query(HREmployee).filter_by(id=row["employee_id"], organization_id=membership.organization_id).first()
         writer.writerow([row["employee_number"], row["employee_name"], "", row["currency"], row["amount"], f"PAY-{batch.id}-{row['employee_id']}"])
-    return {"filename": f"payroll-{batch.id}.csv", "content_type": "text/csv", "content": output.getvalue()}
+    return Response(content=output.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="payroll-{batch.id}.csv"'})
 
 
 @router.post("/hr/payroll/payment-batches/{batch_id}/authorize")
@@ -675,6 +677,14 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
              AccountingAccount.is_active==True, AccountingAccount.id.in_(ids)).all()
     if {a.id for a in accounts} != ids:
         raise HTTPException(404, "One or more mapped accounts are not active tenant accounts")
+    by_id={a.id:a for a in accounts}
+    if by_id[int(mapping["salary_expense"])].account_type != "expense":
+        raise HTTPException(422, "Salary expense must map to an expense account")
+    for key in keys - {"salary_expense"}:
+        if by_id[int(mapping[key])].account_type != "liability":
+            raise HTTPException(422, f"{key} must map to a liability account")
+    from app.api.routes import _accounting_assert_period_open
+    _accounting_assert_period_open(db,membership.organization_id,run.pay_date)
     credits = {
         "paye_payable": totals["paye"],
         "nssf_payable": totals["nssf_employee"] + totals["nssf_employer"],
