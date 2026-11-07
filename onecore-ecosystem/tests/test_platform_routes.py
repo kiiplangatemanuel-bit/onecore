@@ -18,3 +18,23 @@ def test_dismissal_is_unique_per_user_and_notice():
     constraints = [c for c in NoticeDismissal.__table__.constraints if getattr(c, "name", None) == "ix_notice_dismissal_user_notice"]
     indexes = [i for i in NoticeDismissal.__table__.indexes if i.name == "ix_notice_dismissal_user_notice"]
     assert constraints or indexes
+
+def test_hostname_validation():
+    import pytest
+    from fastapi import HTTPException
+    from app.api.platform_routes import _hostname
+    assert _hostname("Shop.Example.com") == "shop.example.com"
+    with pytest.raises(HTTPException):
+        _hostname("localhost")
+    with pytest.raises(HTTPException):
+        _hostname("bad host.example.com")
+    with pytest.raises(HTTPException):
+        _hostname("customer.onecore.co.ke")
+
+def test_invitation_role_validation():
+    import pytest
+    from pydantic import ValidationError
+    from app.api.platform_routes import InvitationIn
+    assert InvitationIn(email="staff@example.com", role="staff").role == "staff"
+    with pytest.raises(ValidationError):
+        InvitationIn(email="staff@example.com", role="root_superadmin")
