@@ -163,3 +163,13 @@ TLS provisioning or UAT approval is claimed.
 - Updated the test to inspect the generated OpenAPI path map instead. Correction
   commit: `68b7904`. Its CI result is pending; verify before treating the inventory
   slice as passing.
+
+
+### Verified inventory CI result
+
+- Corrected inventory test run: commit `68b79041c2ea5aa2afcfe82f22a91abb81418f12`.
+- GitHub Actions run `42361801378` completed successfully: migrations upgraded,
+  downgraded and upgraded again; Python compilation passed; pytest reported
+  **25 passed, 5 warnings**.
+- The subsequent tracker-only commit may trigger another run; the above is the
+  recorded code verification result for the inventory test correction.
