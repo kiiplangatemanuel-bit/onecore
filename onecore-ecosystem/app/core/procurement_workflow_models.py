@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, JSON, Index, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, JSON, Index, Boolean, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -32,7 +32,12 @@ class ProcurementSettlement(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("ix_procurement_settlement_org_key", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index("ix_procurement_settlement_org_key", "organization_id", "idempotency_key", unique=True),
+        Index("uq_procurement_mpesa_receipt", "provider_reference", unique=True,
+              postgresql_where=text("provider = 'mpesa' AND provider_reference <> ''"),
+              sqlite_where=text("provider = 'mpesa' AND provider_reference <> ''")),
+    )
 
 class ProcurementSettlementAllocation(Base):
     __tablename__ = "procurement_settlement_allocations"
