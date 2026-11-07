@@ -779,6 +779,55 @@ def post_payroll_journal(run_id: int, payload: dict=Body(...), membership=Depend
             "debits":str(money(debit)),"credits":str(money(credit)),"balanced":True}
 
 
+@router.post("/hr/payroll/payment-batches/{batch_id}/post-settlement-journal")
+def post_salary_settlement_journal(batch_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                                   user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    batch=db.query(Record).filter_by(id=batch_id,organization_id=membership.organization_id,
+        module_key=MODULE,record_type="payment_batch").with_for_update().first()
+    if not batch or batch.data.get("status")!="paid":
+        raise HTTPException(409,"All salary instructions must be verified as paid before settlement posting")
+    if _record(db,membership.organization_id,"payroll_settlement_journal").filter(Record.data["batch_id"].as_integer()==batch_id).first():
+        raise HTTPException(409,"Settlement journal already exists for this payment batch")
+    salary_payable_id=int(payload.get("salary_payable_account_id",0))
+    cash_bank_id=int(payload.get("cash_bank_account_id",0))
+    accounts=db.query(AccountingAccount).filter(AccountingAccount.organization_id==membership.organization_id,
+        AccountingAccount.is_active==True,AccountingAccount.id.in_([salary_payable_id,cash_bank_id])).all()
+    by_id={a.id:a for a in accounts}
+    if set(by_id)!={salary_payable_id,cash_bank_id}:
+        raise HTTPException(404,"Settlement accounts must be active tenant-owned accounts")
+    if by_id[salary_payable_id].account_type!="liability" or by_id[cash_bank_id].account_type!="asset":
+        raise HTTPException(422,"Salary payable must be a liability and cash/bank clearing must be an asset")
+    run=db.query(HRPayrollRun).filter_by(id=batch.data["run_id"],organization_id=membership.organization_id).first()
+    entry_date=date.today()
+    from app.api.routes import _accounting_assert_period_open
+    _accounting_assert_period_open(db,membership.organization_id,entry_date)
+    amount=money(sum((D(row["amount"]) for row in batch.data["rows"] if row["status"]=="paid"),ZERO))
+    if amount<=0:
+        raise HTTPException(409,"No verified salary payments to settle")
+    journal=AccountingJournal(organization_id=membership.organization_id,branch_id=None,
+        journal_number="PAYSET-"+uuid.uuid4().hex[:12].upper(),reference=f"PAY-BATCH-{batch.id}",
+        memo=f"Salary settlement for {run.run_number}",status="posted",
+        entry_date=datetime.combine(entry_date,datetime.min.time(),tzinfo=timezone.utc),
+        created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+    db.add(journal);db.flush()
+    db.add_all([
+        AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=salary_payable_id,description="Clear verified salary payable",debit=amount,credit=ZERO),
+        AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=cash_bank_id,description="Salary paid through bank/M-Pesa clearing",debit=ZERO,credit=amount)
+    ])
+    _save_record(db,membership.organization_id,user.id,"payroll_settlement_journal",
+        {"key":str(batch_id),"batch_id":batch_id,"journal_id":journal.id,
+         "salary_payable_account_id":salary_payable_id,"cash_bank_account_id":cash_bank_id,
+         "amount":str(amount),"created_at":datetime.now(timezone.utc).isoformat()})
+    _audit(db,membership.organization_id,user.id,"hr.payroll.payment.settlement_journal_posted",
+           "accounting_journal",journal.id,f"batch:{batch_id};amount:{amount}")
+    db.commit()
+    return {"batch_id":batch_id,"journal_id":journal.id,"journal_number":journal.journal_number,
+            "amount":str(amount),"status":"posted","balanced":True}
+
+
 @router.post("/hr/payroll/payment-batches/{batch_id}/bank-reconcile")
 def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(active_membership),
                    user=Depends(current_user), db: Session=Depends(get_db)):
@@ -833,7 +882,30 @@ def reverse_salary_payment(batch_id: int, employee_id: int, payload: dict=Body(.
     reversal={"batch_id":batch_id,"employee_id":employee_id,"amount":row["amount"],
         "original_reference":row["provider_reference"],"reversal_reference":payload["reversal_reference"],
         "reason":payload["reason"],"created_by":user.id,"created_at":datetime.now(timezone.utc).isoformat()}
-    _save_record(db,membership.organization_id,user.id,"payment_reversal",reversal)
+    reversal_record=_save_record(db,membership.organization_id,user.id,"payment_reversal",reversal)
+    settlement=_record(db,membership.organization_id,"payroll_settlement_journal").filter(Record.data["batch_id"].as_integer()==batch_id).first()
+    if settlement:
+        cash_bank_id=int(settlement.data["cash_bank_account_id"])
+        salary_payable_id=int(settlement.data["salary_payable_account_id"])
+        from app.api.routes import _accounting_assert_period_open
+        reversal_date=date.today()
+        _accounting_assert_period_open(db,membership.organization_id,reversal_date)
+        reversal_amount=money(row["amount"])
+        journal=AccountingJournal(organization_id=membership.organization_id,branch_id=None,
+            journal_number="PAYREV-"+uuid.uuid4().hex[:12].upper(),reference=str(payload["reversal_reference"]),
+            memo=f"Reverse salary payment for employee {employee_id}",status="posted",
+            entry_date=datetime.combine(reversal_date,datetime.min.time(),tzinfo=timezone.utc),
+            created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+        db.add(journal);db.flush()
+        db.add_all([
+            AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+                account_id=cash_bank_id,description="Reverse cash/bank salary payment",debit=reversal_amount,credit=ZERO),
+            AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+                account_id=salary_payable_id,description="Reinstate salary payable after reversal",debit=ZERO,credit=reversal_amount)
+        ])
+        reversal_record.data={**reversal_record.data,"reversal_journal_id":journal.id}
+        _audit(db,membership.organization_id,user.id,"hr.payroll.payment.reversal_journal_posted",
+               "accounting_journal",journal.id,f"batch:{batch_id};employee:{employee_id}")
     row["status"]="reversed"; row["reversal_reference"]=payload["reversal_reference"]
     d["status"]="partial"
     batch.data=d
