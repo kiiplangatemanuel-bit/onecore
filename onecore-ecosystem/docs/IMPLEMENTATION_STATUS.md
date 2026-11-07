@@ -184,3 +184,34 @@ TLS provisioning or UAT approval is claimed.
 - GitHub Actions run `42361861523` for `af299e4c34f3eadd03efc61d4fc890e906a30e5a`
   completed successfully: migration upgrade, downgrade/re-upgrade, compilation and
   pytest all passed; **25 passed, 5 warnings**.
+
+
+## Accounting ledger foundation (7 November 2026)
+
+Implemented on `main`:
+
+- Tenant-scoped chart of accounts with unique account codes per organization and
+  account types asset/liability/equity/revenue/expense.
+- Double-entry journal header and line models with decimal KES precision, branch
+  references and immutable posted state at the API boundary.
+- Journal posting validates at least two lines, exactly one debit or credit per line,
+  positive totals and exact debit/credit equality; header and lines commit atomically.
+- Tenant/branch authorization for account, journal and trial-balance endpoints.
+- Audit events for account creation and journal posting.
+- APIs: GET/POST `/api/v1/accounting/accounts`, POST/GET
+  `/api/v1/accounting/journals`, GET `/api/v1/accounting/trial-balance`.
+- Basic accessible UI at `/accounting`; migration `0003_accounting`;
+  domain service `app/services/accounting.py`; tests in `tests/test_accounting.py`;
+  operator/domain notes in `docs/ACCOUNTING.md`.
+- Key commits: `c803b1b` (models), `0c42192` (schemas), `4ec214f`
+  (journal rules), `3ecde60` (API), `61ec668` (migration), `293a67b` (tests),
+  `effd19b` (UI), `b1a8fb0` (UI route), `fc59ecb` (documentation).
+
+Accounting remains incomplete: AP/AR, invoicing and subledgers, cash/bank books and
+reconciliation, fiscal periods/close, approvals and reversals, budgets, cost centres,
+assets/depreciation, statutory tax, financial statements, multi-currency, consolidation,
+opening balance imports, full reporting UI, security/performance/UAT testing.
+
+CI for this increment must complete migration upgrade/downgrade/re-upgrade,
+compilation and pytest before this accounting slice is considered verified. Do not
+claim production readiness or statutory compliance.
