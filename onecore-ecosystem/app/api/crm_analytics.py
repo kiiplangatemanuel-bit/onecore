@@ -1,6 +1,7 @@
 """Advanced CRM forecasting, quotas, campaign attribution and scheduler monitoring."""
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
@@ -36,10 +37,19 @@ def _settings(db,org):
     return (row.stage_probabilities if row else DEFAULT_PROBABILITIES,
         row.scenario_multipliers if row else DEFAULT_MULTIPLIERS)
 
+def _org_period_bounds(db,org_id,first,last):
+    zone_name=db.query(Organization.timezone).filter_by(id=org_id).scalar() or "UTC"
+    try:zone=ZoneInfo(zone_name)
+    except Exception:zone=ZoneInfo("UTC")
+    start=datetime.combine(first,time.min,zone).astimezone(timezone.utc)
+    end=datetime.combine(last+timedelta(days=1),time.min,zone).astimezone(timezone.utc)
+    return start,end
+
 def _leads(db,m,first,last,rep=None):
+    start_utc,end_utc=_org_period_bounds(db,m.organization_id,first,last)
     q=db.query(CRMLead).filter(CRMLead.organization_id==m.organization_id,
-        CRMLead.expected_close_date>=datetime.combine(first,time.min,timezone.utc),
-        CRMLead.expected_close_date<datetime.combine(last+timedelta(days=1),time.min,timezone.utc),
+        CRMLead.expected_close_date>=start_utc,
+        CRMLead.expected_close_date<end_utc,
         CRMLead.stage.notin_(["won","lost"]))
     q=_scope(q,m,CRMLead)
     if rep is not None:q=q.filter(CRMLead.assigned_to==rep)
@@ -242,10 +252,10 @@ def forecast_accuracy(period_type:str=Query("month",pattern="^(month|quarter|yea
         latest.setdefault((row.rep_key,row.currency,row.scenario),row)
     output=[]
     for (_,currency,scenario),snap in latest.items():
+        actual_start,actual_end=_org_period_bounds(db,m.organization_id,first,last)
         actual_q=db.query(func.coalesce(func.sum(func.coalesce(CRMLead.actual_value,CRMLead.estimated_value)),0)).filter(
             CRMLead.organization_id==m.organization_id,CRMLead.stage=="won",CRMLead.currency==currency,
-            CRMLead.actual_closed_at>=datetime.combine(first,time.min,timezone.utc),
-            CRMLead.actual_closed_at<datetime.combine(last+timedelta(days=1),time.min,timezone.utc))
+            CRMLead.actual_closed_at>=actual_start,CRMLead.actual_closed_at<actual_end)
         actual_q=_scope(actual_q,m,CRMLead)
         if snap.rep_key=="unassigned":actual_q=actual_q.filter(CRMLead.assigned_to.is_(None))
         elif snap.assigned_to is not None:actual_q=actual_q.filter(CRMLead.assigned_to==snap.assigned_to)
