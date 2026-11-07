@@ -161,13 +161,26 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         raise HTTPException(422, str(exc)) from exc
     timestamp = _timestamp()
     callback_token = secrets.token_urlsafe(32)
-    intent = MpesaPaymentIntent(
-        organization_id=membership.organization_id, branch_id=sale.branch_id,
-        payment_id=payment.id, phone_number=phone, amount=amount,
-        callback_token_hash=hashlib.sha256(callback_token.encode()).hexdigest(),
-        status="initiating",
-    )
-    db.add(intent)
+    if existing:
+        intent = existing
+        intent.phone_number = phone
+        intent.amount = amount
+        intent.callback_token_hash = hashlib.sha256(callback_token.encode()).hexdigest()
+        intent.checkout_request_id = None
+        intent.merchant_request_id = ""
+        intent.result_code = ""
+        intent.result_description = ""
+        intent.mpesa_receipt_number = ""
+        intent.completed_at = None
+        intent.status = "initiating"
+    else:
+        intent = MpesaPaymentIntent(
+            organization_id=membership.organization_id, branch_id=sale.branch_id,
+            payment_id=payment.id, phone_number=phone, amount=amount,
+            callback_token_hash=hashlib.sha256(callback_token.encode()).hexdigest(),
+            status="initiating",
+        )
+        db.add(intent)
     db.flush()
     # Persist before the network call to avoid duplicate charges after a timeout.
     db.commit()
