@@ -12,6 +12,7 @@ def upgrade():
     op.add_column("crm_leads", sa.Column("actual_closed_at", sa.DateTime(timezone=True), nullable=True))
     op.create_index("ix_crm_lead_org_close_date", "crm_leads", ["organization_id", "expected_close_date"])
     op.add_column("crm_campaigns", sa.Column("budget_amount", sa.Numeric(18, 2), nullable=False, server_default="0"))
+    op.add_column("crm_campaigns", sa.Column("budget_currency", sa.String(3), nullable=False, server_default="KES"))
     op.create_table("crm_forecast_settings",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False, unique=True),
@@ -87,6 +88,7 @@ def downgrade():
     op.drop_table("crm_forecast_snapshots")
     op.drop_table("crm_sales_targets")
     op.drop_table("crm_forecast_settings")
+    op.drop_column("crm_campaigns", "budget_currency")
     op.drop_column("crm_campaigns", "budget_amount")
     op.drop_index("ix_crm_lead_org_close_date", table_name="crm_leads")
     op.drop_column("crm_leads", "actual_closed_at")
