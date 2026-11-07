@@ -34,7 +34,13 @@ MODULE = "hr-payroll"
 
 
 def money(v):
-    return D(str(v or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+    try:
+        value = D(str(v or 0))
+        if not value.is_finite() or value < 0:
+            raise ValueError("Amount must be a finite non-negative number")
+        return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    except (ValueError, TypeError, ArithmeticError) as exc:
+        raise HTTPException(422, f"Invalid payroll amount: {exc}")
 
 
 def _record(db, org_id, kind, key=None):
@@ -157,7 +163,8 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     certificate_valid = bool(extra.get("disability_exemption_certificate_number")) and bool(certificate_expiry)
     if certificate_valid:
         try:
-            certificate_valid = date.fromisoformat(certificate_expiry) >= date.today()
+            as_at = date.fromisoformat(extra.get("as_at_date", date.today().isoformat()))
+            certificate_valid = date.fromisoformat(certificate_expiry) >= as_at
         except ValueError:
             certificate_valid = False
     disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid else ZERO
@@ -322,14 +329,20 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         gross = money(line.base_pay + earnings)
         employee = db.query(HREmployee).filter_by(id=line.employee_id, organization_id=membership.organization_id).first()
         extras = (payload.get("employees") or {}).get(str(line.employee_id), {})
+        if not isinstance(extras, dict):
+            raise HTTPException(422, "Each employee payroll input must be an object")
+        extras = {**extras, "as_at_date": run.period_end.isoformat()}
         period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
         days_employed = int(extras.get("days_employed", period_days))
         if period_days < 1 or days_employed < 0 or days_employed > period_days:
             raise HTTPException(422, "Invalid payroll proration days")
         prorated_base = money(D(str(line.base_pay)) * D(days_employed) / D(period_days))
         hourly_rate = money(extras.get("hourly_rate", 0))
-        overtime_hours = D(str(extras.get("overtime_hours", 0)))
-        overtime_multiplier = D(str(extras.get("overtime_multiplier", "1.5")))
+        try:
+            overtime_hours = D(str(extras.get("overtime_hours", 0)))
+            overtime_multiplier = D(str(extras.get("overtime_multiplier", "1.5")))
+        except (ValueError, TypeError, ArithmeticError):
+            raise HTTPException(422, "Invalid overtime input")
         if overtime_hours < 0 or overtime_multiplier <= 0 or overtime_hours > D("744"):
             raise HTTPException(422, "Invalid overtime hours or multiplier")
         overtime_pay = money(hourly_rate * overtime_hours * overtime_multiplier)
