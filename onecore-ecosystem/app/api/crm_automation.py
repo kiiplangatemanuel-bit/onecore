@@ -151,6 +151,10 @@ def create_template(payload:dict,m=Depends(active_membership),u:User=Depends(cur
     _branch(db,m,branch_id)
     _asset_manage_scope(m,branch_id)
     variables=_validate_template(subject,body,payload.get("variables",[]))
+    active_versions=db.query(CRMCommunicationTemplate).filter_by(
+        organization_id=m.organization_id,name=name,is_active=True).all()
+    if any(x.branch_id!=branch_id for x in active_versions):
+        raise HTTPException(409,"A template with this name is already active in another branch scope")
     version=(db.query(func.max(CRMCommunicationTemplate.version)).filter_by(
         organization_id=m.organization_id,name=name).scalar() or 0)+1
     db.query(CRMCommunicationTemplate).filter_by(
@@ -192,6 +196,10 @@ def update_template(template_id:int,payload:dict,m=Depends(active_membership),
     _branch(db,m,branch_id)
     _asset_manage_scope(m,branch_id)
     variables=_validate_template(subject,body,payload.get("variables",old.variables or []))
+    active_versions=db.query(CRMCommunicationTemplate).filter_by(
+        organization_id=m.organization_id,name=name,is_active=True).all()
+    if any(x.id!=old.id and x.branch_id!=branch_id for x in active_versions):
+        raise HTTPException(409,"A template with this name is already active in another branch scope")
     version=(db.query(func.max(CRMCommunicationTemplate.version)).filter_by(
         organization_id=m.organization_id,name=name).scalar() or 0)+1
     old.is_active=False
