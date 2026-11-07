@@ -288,6 +288,8 @@ def create_statutory_rules(payload: dict=Body(...), membership=Depends(active_me
         raise HTTPException(422, "Version, effective_from, parameters and authoritative sources are required")
     _validate_rule_parameters(payload["parameters"])
     _validate_authority_sources(payload["sources"])
+    if _record(db, membership.organization_id, "statutory_rule_set", payload["version"]).first():
+        raise HTTPException(409, "Statutory rule-set version already exists; choose a new immutable version identifier")
     try:
         start = date.fromisoformat(payload["effective_from"])
         end = date.fromisoformat(payload["effective_to"]) if payload.get("effective_to") else None
@@ -311,6 +313,8 @@ def activate_statutory_rules(rule_id: int, membership=Depends(active_membership)
     if not row:
         raise HTTPException(404, "Statutory rule set not found")
     d = row.data
+    if row.created_by == user.id:
+        raise HTTPException(403, "Statutory rule-set creator cannot activate the same version")
     if not d.get("sources") or not d.get("version") or not d.get("parameters"):
         raise HTTPException(422, "Rule set requires a version, parameters and evidence sources")
     _validate_rule_parameters(d["parameters"])
