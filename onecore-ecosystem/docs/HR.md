@@ -125,7 +125,7 @@ payment or statutory filing.
 - Every employee calculation stores an immutable SHA-256 snapshot with the full statutory rule version and component breakdown. Recalculation of the same run is rejected; create a new run for corrected payroll.
 - `GET /api/v1/hr/payroll/runs/{id}/snapshots` provides the review view.
 - `POST /api/v1/hr/payroll/runs/{id}/approve-calculation` enforces maker-checker separation and validates snapshot integrity/count.
-- `POST /api/v1/hr/payroll/runs/{id}/post-journal` posts a balanced journal using explicit tenant-owned chart-of-account IDs. Map salary expense, PAYE, NSSF, SHIF, Housing Levy, pension and other deduction liabilities. A duplicate payroll journal is rejected.
+- `POST /api/v1/hr/payroll/runs/{id}/post-journal` posts a balanced accrual journal using explicit tenant-owned chart-of-account IDs. Map salary expense, salary payable, PAYE, NSSF, SHIF, Housing Levy, pension and other deduction liabilities. A duplicate payroll journal is rejected.
 - `GET /api/v1/hr/payroll/my-history` returns only the signed-in employee's approved/paid payroll snapshots.
 
 ### Payment processing and reconciliation
@@ -135,6 +135,7 @@ payment or statutory filing.
 - M-Pesa salary submission uses Safaricom Daraja B2C when `INTEGRATION_MPESA_ENABLED=true`, `MPESA_BASE_URL`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_INITIATOR_NAME`, `MPESA_SECURITY_CREDENTIAL`, `MPESA_B2C_RESULT_URL` and `MPESA_B2C_TIMEOUT_URL` are configured. Optional `MPESA_B2C_COMMAND_ID` defaults to `SalaryPayment`. The callback gateway must sign normalized payloads using `PAYROLL_PROVIDER_CALLBACK_SECRET`. It sends one employee instruction at a time and does not mark payment paid from an accepted/queued response. B2C amount must be whole KES; decimal salaries are rejected rather than silently rounded.
 - Provider callbacks must arrive through a trusted webhook gateway that validates Daraja's callback and forwards a normalized payload signed with `PAYROLL_PROVIDER_CALLBACK_SECRET`. The application verifies HMAC signatures, requires a provider transaction reference and prevents a settled payment from being downgraded.
 - Failed payments can be retried; verified payment reversals require an external reversal reference and reason. Bank reconciliation matches statement references and exact amounts, and reports unmatched rows.
+- `POST /api/v1/hr/payroll/payment-batches/{id}/post-settlement-journal` posts the balanced debit to salary payable / credit to bank or M-Pesa clearing journal after every instruction in the batch is verified paid. A reversal after settlement posts a compensating debit to the cash/bank clearing account and credit to salary payable.
 - Payment and reversal records are audited. No M-Pesa or bank credential is stored in payroll records.
 
 ### Reports
