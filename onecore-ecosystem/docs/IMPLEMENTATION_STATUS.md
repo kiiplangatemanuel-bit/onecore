@@ -719,3 +719,21 @@ Validation status: GitHub Actions on the new PR head is required to establish mi
 - The closing journal and period lock are committed atomically; period-specific reference prevents duplicate close journals.
 - Added Accounting workspace preview and confirmation forms plus OpenAPI/schema tests.
 - Remaining exclusions: tax provision, statutory reserve/dividend calculations, FX translation, consolidation, restatement, external sign-off and auditor certification.
+
+
+## POS product tax, discounts and accurate return valuation increment
+
+Branch: `feature/pos-tax-discounts-returns`; pull request #34.
+
+- Inventory products now store a configurable tax percentage. Product creation with a non-zero tax rate and tax-rate updates require manage permission; updates are audited.
+- POS catalogue responses expose configured product tax rates.
+- POS checkout accepts line-level discount percentages. Any non-zero discount requires manage permission; the discount is included in offline idempotency hashing.
+- Sale totals use Decimal arithmetic: gross subtotal, discount, tax on the discounted base and final total. Tax and discount are snapshotted on the sale header and lines.
+- Receipts expose sale and line subtotal/discount/tax/final amounts.
+- Partial/full returns use original discounted, tax-inclusive sale-line values and preserve return discount/tax amounts. The final quantity return absorbs rounding residue.
+- Cash refund records reduce expected cash when a cashier shift is closed.
+- Added migration `0023_pos_tax_discounts`, tests, Inventory tax configuration form, POS checkout/receipt updates and POS docs.
+
+CI run 42399313757 passed migration upgrade, downgrade/re-upgrade, Python compilation and pytest on initial PR head `8b0d1caad36d850e017b63875937d22cb660b362`. Subsequent fixes and tests were committed after that run; a fresh CI run on the latest head is still required before merge.
+
+Boundaries: tax is an organization-configured percentage, not an eTIMS/KRA tax classification or filing integration. Discounts use manage permission rather than a threshold approval matrix. Refund records do not execute external payment rails. Production PostgreSQL race testing, finance/security review and pilot UAT remain outstanding.
