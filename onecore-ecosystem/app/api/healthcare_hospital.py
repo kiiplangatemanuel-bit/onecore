@@ -7,6 +7,7 @@ jobs until a verified provider adapter is configured; no live payer response is 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64, binascii, hashlib
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -17,11 +18,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import (
     User, HealthcarePatient, HealthcareResource, HealthcareEvent, HealthcareAccessAudit,
-    HealthcareBreakGlassSession,
+    HealthcareBreakGlassSession, AuditEvent,
 )
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import can_access_branch
+from app.services.datetime_utils import as_utc
 from app.api.healthcare_privacy import (
     _require, _patient, _audit, _treatment_allowed, encrypt, decrypt,
 )
@@ -145,9 +147,13 @@ def _create(db, m, u, kind: str, data: dict, branch_id=None, patient_id=None,
 
 
 def _event(db, m, u, patient_id, branch_id, event_type, detail, resource_id=None, idempotency_key=None):
+    event_key=f"{event_type}:{idempotency_key}" if idempotency_key else None
+    if event_key and db.query(HealthcareEvent.id).filter_by(
+        organization_id=m.organization_id,idempotency_key=event_key).first():
+        return
     row = HealthcareEvent(organization_id=m.organization_id, branch_id=branch_id,
         patient_id=patient_id, resource_id=resource_id, event_type=event_type,
-        idempotency_key=idempotency_key, encrypted_detail=encrypt(detail), actor_user_id=u.id)
+        idempotency_key=event_key, encrypted_detail=encrypt(detail), actor_user_id=u.id)
     db.add(row)
     return row
 
@@ -776,9 +782,15 @@ def add_clinical_document(patient_id: int, payload: dict, m=Depends(active_membe
     if mime not in {"application/pdf","image/jpeg","image/png","text/plain","application/dicom"}:
         raise HTTPException(422,"Unsupported clinical document MIME type")
     content=str(payload.get("content_base64",""))
-    if not content or len(content)>8_000_000:raise HTTPException(422,"Document content is required and limited to 6 MiB encoded")
+    if not content or len(content)>8_400_000:raise HTTPException(422,"Document content is required and limited to 6 MiB")
+    try: binary=base64.b64decode(content,validate=True)
+    except (binascii.Error,ValueError): raise HTTPException(422,"Document content_base64 is invalid")
+    if len(binary)>6*1024*1024: raise HTTPException(413,"Clinical document exceeds 6 MiB")
+    digest=hashlib.sha256(binary).hexdigest()
+    supplied=str(payload.get("sha256","")).lower()
+    if supplied and supplied!=digest: raise HTTPException(422,"Clinical document SHA-256 does not match its content")
     row=_create(db,m,u,"clinical_document",{"title":_required_text(payload,"title"),
-        "mime_type":mime,"content_base64":content,"sha256":str(payload.get("sha256",""))[:64],
+        "mime_type":mime,"content_base64":content,"sha256":digest,
         "document_type":str(payload.get("document_type","clinical"))[:60],"uploaded_at":NOW().isoformat()},
         patient.branch_id,patient.id,status="stored",idempotency_key=payload.get("idempotency_key"))
     _audit(db,m,u,patient,"clinical.document.created","",emergency);db.commit();return _view(row)
@@ -807,7 +819,7 @@ def privacy_monitor(branch_id: str, since_hours: int=Query(24,ge=1,le=720),
         and can_access_branch(m,patient_branches[x.patient_id])]
     sessions=db.query(HealthcareBreakGlassSession).filter_by(
         organization_id=m.organization_id,ended_at=None).all()
-    active=[x for x in sessions if x.expires_at>NOW() and x.patient_id in patient_branches
+    active=[x for x in sessions if as_utc(x.expires_at)>NOW() and x.patient_id in patient_branches
         and can_access_branch(m,patient_branches[x.patient_id])]
     return {"window_hours":since_hours,"access_events":len(audits),
         "emergency_access_events":sum(1 for x in audits if x.emergency),
@@ -829,6 +841,7 @@ def set_retention_policy(payload: dict, branch_id: str, m=Depends(active_members
         prior.encrypted_payload=encrypt(policy);prior.updated_by=u.id;prior.updated_at=NOW();row=prior
     else:
         row=_create(db,m,u,"retention_policy",policy,branch_id,status="active",external_key=f"policy:{branch_id}")
+    db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="healthcare.retention.policy.updated",resource_type="healthcare_resource",resource_id=str(row.id),detail=f"branch:{branch_id};years:{years}"))
     db.commit()
     return _view(row)
 
