@@ -71,3 +71,13 @@ def test_paye_relief_does_not_reduce_tax_below_zero():
     result = calculate_kenya_payroll(Decimal("10000"), {"resident_for_tax": True}, KENYA_2026_RULES)
     assert Decimal(result["paye"]) == Decimal("0.00")
     assert Decimal(result["net_pay"]) >= Decimal("0.00")
+
+
+def test_shif_defaults_to_gross_salary_wage_while_housing_levy_uses_kra_fixed_pay_base():
+    result = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES, {
+        "nssf_pensionable_base": "40000",
+        "housing_levy_contribution_base": "40000",
+    })
+    assert Decimal(result["nssf_employee"]) == Decimal("2400.00")
+    assert Decimal(result["housing_levy_employee"]) == Decimal("600.00")
+    assert Decimal(result["shif_employee"]) == Decimal("2750.00")
