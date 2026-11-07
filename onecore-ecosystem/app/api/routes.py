@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
@@ -503,7 +503,10 @@ def list_crm_contacts(membership=Depends(active_membership), db: Session = Depen
         q = q.filter(CRMContact.branch_id.in_(allowed))
     rows = q.order_by(CRMContact.id.desc()).limit(limit).all()
     return [{"id": x.id, "full_name": x.full_name, "email": x.email, "phone": x.phone,
-             "company": x.company, "branch_id": x.branch_id} for x in rows]
+             "company": x.company, "branch_id": x.branch_id, "expected_close_date": x.expected_close_date.isoformat() if x.expected_close_date else None,
+             "probability_override": str(x.probability_override) if x.probability_override is not None else None,
+             "actual_value": str(x.actual_value) if x.actual_value is not None else None,
+             "source_campaign_id": x.source_campaign_id} for x in rows]
 
 
 @router.post("/crm/contacts", status_code=201)
@@ -597,6 +600,8 @@ def update_crm_lead_stage(lead_id: int, payload: CRMLeadStageIn,
     validate_stage_transition(previous, payload.stage)
     row.stage = payload.stage
     row.next_step = payload.next_step
+    row.actual_closed_at = datetime.now(timezone.utc) if payload.stage == "won" else None
+    row.actual_value = row.estimated_value if payload.stage == "won" else None
     db.commit()
     audit(db, user.id, membership.organization_id, "crm.lead.stage_changed",
           "crm_lead", row.id, f"{previous}->{row.stage}")
@@ -3158,6 +3163,11 @@ def accept_crm_quote(quote_id:int,membership=Depends(active_membership),
         row.status="expired";db.commit()
         raise HTTPException(409,"Quote validity has expired")
     row.status="accepted";row.accepted_at=datetime.now(timezone.utc)
+    lead=db.query(CRMLead).filter_by(id=row.lead_id,organization_id=membership.organization_id).first() if row.lead_id else None
+    if lead and lead.source_campaign_id:
+        db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
+            contact_id=row.contact_id,lead_id=lead.id,event_type="quote_accepted",revenue_amount=Decimal("0"),
+            currency=row.currency,idempotency_key="quote-accepted-%s"%row.id,occurred_at=row.accepted_at,created_by=user.id))
     db.commit();audit(db,user.id,membership.organization_id,"crm.quote.accepted","crm_quote",row.id)
     return {"id":row.id,"status":row.status,"accepted_at":row.accepted_at.isoformat()}
 
@@ -3220,6 +3230,12 @@ def convert_crm_quote_to_order(quote_id: int, payload: CRMQuoteConvertIn,
                 quantity=line.quantity, unit_price=line.unit_price, tax_rate=line.tax_rate,
                 subtotal=line.subtotal, tax_amount=line.tax_amount, total=line.total,
             ))
+        lead=db.query(CRMLead).filter_by(id=quote.lead_id,organization_id=membership.organization_id).first() if quote.lead_id else None
+        if lead and lead.source_campaign_id:
+            db.add(CRMCampaignAttribution(organization_id=membership.organization_id,campaign_id=lead.source_campaign_id,
+                contact_id=order.contact_id,lead_id=lead.id,sales_order_id=order.id,event_type="sales_order_confirmed",
+                revenue_amount=Decimal("0"),currency=order.currency,idempotency_key="order-confirmed-%s"%order.id,
+                occurred_at=order.confirmed_at,created_by=user.id))
         db.commit()
     except IntegrityError:
         db.rollback()
