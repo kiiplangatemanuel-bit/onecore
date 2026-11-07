@@ -326,7 +326,10 @@ def release_reservation(reservation_id:int,membership=Depends(active_membership)
 @router.post("/reservations/expire")
 def expire_reservations(membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
-    rows=db.query(InventoryReservation).filter_by(organization_id=membership.organization_id,status="active").all()
+    q=db.query(InventoryReservation).join(InventoryWarehouse,InventoryWarehouse.id==InventoryReservation.warehouse_id).filter(InventoryReservation.organization_id==membership.organization_id,InventoryReservation.status=="active")
+    allowed=branch_scope_ids(membership)
+    if allowed is not None: q=q.filter(InventoryWarehouse.branch_id.in_(allowed)) if allowed else q.filter(False)
+    rows=q.all()
     now=datetime.now(timezone.utc);count=0
     for row in rows:
         exp=row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
@@ -574,11 +577,42 @@ def set_price(price_list_id:int,payload:PriceIn,membership=Depends(active_member
 def list_price_lists(branch_id:str|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
     q=db.query(InventoryPriceList).filter_by(organization_id=membership.organization_id,is_active=True)
+    allowed=branch_scope_ids(membership)
     if branch_id:
         if not can_access_branch(membership,branch_id):raise HTTPException(404,"Price list not found")
         q=q.filter((InventoryPriceList.branch_id==None)|(InventoryPriceList.branch_id==branch_id))
+    elif allowed is not None:
+        q=q.filter((InventoryPriceList.branch_id==None)|(InventoryPriceList.branch_id.in_(allowed))) if allowed else q.filter(InventoryPriceList.branch_id==None)
     return [{"id":p.id,"name":p.name,"currency":p.currency,"branch_id":p.branch_id,"starts_at":p.starts_at.isoformat() if p.starts_at else None,
         "ends_at":p.ends_at.isoformat() if p.ends_at else None} for p in q.all()]
+
+
+@router.get("/warehouses/{warehouse_id}/stock")
+def warehouse_stock(warehouse_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    wh=get_warehouse(db,membership.organization_id,warehouse_id,membership)
+    rows=db.query(InventoryProduct).filter_by(organization_id=membership.organization_id,is_active=True).order_by(InventoryProduct.name).all()
+    result=[]
+    for product in rows:
+        on_hand=warehouse_qty(db,membership.organization_id,wh,product.id)
+        reserved=active_reserved(db,membership.organization_id,wh.id,product.id)
+        if on_hand or reserved:
+            result.append({"warehouse_id":wh.id,"branch_id":wh.branch_id,"product_id":product.id,"sku":product.sku,
+                "name":product.name,"on_hand":str(on_hand),"reserved":str(reserved),"available":str(on_hand-reserved)})
+    return result
+
+
+@router.get("/price-lists/{price_list_id}/prices")
+def get_price_list_prices(price_list_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    pl=db.query(InventoryPriceList).filter_by(id=price_list_id,organization_id=membership.organization_id,is_active=True).first()
+    if not pl or (pl.branch_id and not can_access_branch(membership,pl.branch_id)): raise HTTPException(404,"Price list not found")
+    rows=db.query(InventoryPrice,InventoryProduct).join(InventoryProduct,InventoryProduct.id==InventoryPrice.product_id).filter(
+        InventoryPrice.organization_id==membership.organization_id,InventoryPrice.price_list_id==pl.id).all()
+    return [{"product_id":p.id,"sku":p.sku,"name":p.name,"unit_price":str(price.unit_price),
+        "promotion_percent":str(price.promotion_percent),
+        "effective_price":str((dec(price.unit_price)*(Decimal("1")-dec(price.promotion_percent)/Decimal("100"))).quantize(MONEY,rounding=ROUND_HALF_UP))}
+        for price,p in rows]
 
 
 @router.get("/valuation")
