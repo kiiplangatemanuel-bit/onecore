@@ -44,8 +44,8 @@ def create_template(payload:CRMTemplateIn,membership=Depends(active_membership),
                     user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage");_branch(db,membership,payload.branch_id)
     version=(db.query(func.max(CRMMessageTemplate.version)).filter_by(
-        organization_id=membership.organization_id,name=payload.name).scalar() or 0)+1
-    row=CRMMessageTemplate(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        organization_id=membership.organization_id,name=payload.name.strip()).scalar() or 0)+1
+    row=CRMMessageTemplate(organization_id=membership.organization_id,branch_id=payload.branch_id or None,
         name=payload.name.strip(),channel=payload.channel,purpose=payload.purpose,
         subject=payload.subject,body=payload.body,version=version,is_active=True,created_by=user.id)
     db.add(row)
