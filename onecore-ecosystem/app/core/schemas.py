@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Any
+from datetime import datetime
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -754,4 +755,68 @@ class HRPayrollItemIn(BaseModel):
 
 
 class HRPayrollApproveIn(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+
+class HealthcarePatientIn(BaseModel):
+    patient_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    date_of_birth: date | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: EmailStr | None = None
+    branch_id: str | None = Field(default=None, max_length=36)
+    emergency_contact_name: str = Field(default="", max_length=180)
+    emergency_contact_phone: str = Field(default="", max_length=32)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def patient_names_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Patient name is required")
+        return value
+
+
+class HealthcareAppointmentIn(BaseModel):
+    patient_id: int = Field(gt=0)
+    branch_id: str | None = Field(default=None, max_length=36)
+    provider_user_id: int = Field(gt=0)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def valid_appointment_window(self):
+        if self.starts_at.tzinfo is None or self.starts_at.utcoffset() is None:
+            raise ValueError("Appointment start must include a timezone")
+        if self.ends_at.tzinfo is None or self.ends_at.utcoffset() is None:
+            raise ValueError("Appointment end must include a timezone")
+        if self.ends_at <= self.starts_at:
+            raise ValueError("Appointment end must be after its start")
+        return self
+
+
+class HealthcareAppointmentStatusIn(BaseModel):
+    status: str = Field(pattern=r"^(checked_in|completed|cancelled|no_show)$")
+    note: str = Field(default="", max_length=500)
+
+
+class HealthcareEncounterIn(BaseModel):
+    chief_complaint: str = Field(min_length=2, max_length=500)
+    clinical_notes: str = Field(default="", max_length=12000)
+    assessment: str = Field(default="", max_length=6000)
+    plan: str = Field(default="", max_length=6000)
+
+    @field_validator("chief_complaint")
+    @classmethod
+    def complaint_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Chief complaint is required")
+        return value
+
+
+class HealthcareEncounterSignIn(BaseModel):
     note: str = Field(default="", max_length=500)
