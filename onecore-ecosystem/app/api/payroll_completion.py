@@ -62,6 +62,39 @@ def _active_rule(db, org_id, on_date):
     return active[0]
 
 
+def _validate_rule_parameters(parameters):
+    try:
+        paye = parameters["paye"]
+        bands = paye["bands"]
+        if len(bands) < 2:
+            raise ValueError("At least two PAYE bands are required")
+        previous = D("0")
+        for index, band in enumerate(bands):
+            lower = D(str(band["lower"]))
+            rate = D(str(band["rate"]))
+            upper = D(str(band["upper"])) if band.get("upper") is not None else None
+            if lower != previous or rate < 0 or rate > 1:
+                raise ValueError("PAYE bands must be contiguous and rates between zero and one")
+            if upper is not None and upper <= lower:
+                raise ValueError("PAYE band upper limits must exceed lower limits")
+            if index < len(bands)-1 and upper is None:
+                raise ValueError("Only the final PAYE band may be unlimited")
+            previous = upper if upper is not None else previous
+        if bands[-1].get("upper") is not None:
+            raise ValueError("Final PAYE band must be unlimited")
+        nssf = parameters["nssf"]
+        if not (D("0") < D(str(nssf["rate"])) <= D("1") and D(str(nssf["upper_earnings_limit"])) >= D(str(nssf["lower_earnings_limit"])) > 0):
+            raise ValueError("Invalid NSSF contribution limits or rate")
+        shif = parameters["shif"]
+        housing = parameters["housing_levy"]
+        if not (D("0") <= D(str(shif["rate"])) <= D("1") and D(str(shif["minimum"])) >= 0):
+            raise ValueError("Invalid SHIF rate or minimum")
+        if not (D("0") <= D(str(housing["employee_rate"])) <= D("1") and D("0") <= D(str(housing["employer_rate"])) <= D("1")):
+            raise ValueError("Invalid Housing Levy rates")
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise HTTPException(422, f"Invalid statutory rule parameters: {exc}")
+
+
 def _progressive_tax(taxable, bands):
     remaining = max(ZERO, money(taxable))
     tax = ZERO
@@ -196,6 +229,7 @@ def create_statutory_rules(payload: dict=Body(...), membership=Depends(active_me
     required = {"version", "effective_from", "parameters", "sources"}
     if not required.issubset(payload) or not payload["sources"]:
         raise HTTPException(422, "Version, effective_from, parameters and authoritative sources are required")
+    _validate_rule_parameters(payload["parameters"])
     try:
         start = date.fromisoformat(payload["effective_from"])
         end = date.fromisoformat(payload["effective_to"]) if payload.get("effective_to") else None
@@ -221,6 +255,7 @@ def activate_statutory_rules(rule_id: int, membership=Depends(active_membership)
     d = row.data
     if not d.get("sources") or not d.get("version") or not d.get("parameters"):
         raise HTTPException(422, "Rule set requires a version, parameters and evidence sources")
+    _validate_rule_parameters(d["parameters"])
     start = date.fromisoformat(d["effective_from"])
     for other in _record(db, membership.organization_id, "statutory_rule_set").all():
         if other.id == row.id or other.data.get("status") != "active":
@@ -743,3 +778,32 @@ def reverse_salary_payment(batch_id: int, employee_id: int, payload: dict=Body(.
            f"employee:{employee_id};reference:{payload['reversal_reference']}")
     db.commit()
     return {"batch_id":batch_id,"employee_id":employee_id,"status":"reversed","amount":row["amount"]}
+
+
+
+@router.post("/hr/payroll/statutory-rules/{rule_id}/close")
+def close_statutory_rules(rule_id: int, payload: dict=Body(...), membership=Depends(active_membership),
+                          user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_manage(membership)
+    row=db.query(Record).filter_by(id=rule_id,organization_id=membership.organization_id,
+        module_key=MODULE,record_type="statutory_rule_set").with_for_update().first()
+    if not row or row.data.get("status")!="active":
+        raise HTTPException(404,"Active statutory rule set not found")
+    try:
+        end=date.fromisoformat(payload["effective_to"])
+        start=date.fromisoformat(row.data["effective_from"])
+    except (KeyError,ValueError):
+        raise HTTPException(422,"A valid effective_to date is required")
+    if end < start:
+        raise HTTPException(422,"Effective end date precedes start date")
+    for other in _record(db,membership.organization_id,"statutory_rule_set").all():
+        if other.id != row.id and other.data.get("status")=="active":
+            other_start=date.fromisoformat(other.data["effective_from"])
+            if other_start <= end:
+                raise HTTPException(409,"Closing date overlaps another active rule set")
+    data=dict(row.data); data["effective_to"]=end.isoformat()
+    data["closed_by"]=user.id; data["closed_at"]=datetime.now(timezone.utc).isoformat()
+    row.data=data
+    _audit(db,membership.organization_id,user.id,"hr.payroll.statutory_rules.closed","statutory_rule_set",row.id,data["effective_to"])
+    db.commit()
+    return {"id":row.id,"version":data["version"],"effective_to":data["effective_to"]}
