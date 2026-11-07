@@ -20,7 +20,7 @@ class LoginRateLimiter:
     def allow(self, key: str) -> bool:
         now = monotonic()
         with self._lock:
-            if len(self._attempts) > 10000:
+            if len(self._attempts) >= 10000 and key not in self._attempts:
                 cutoff = now - self.window_seconds
                 for candidate in list(self._attempts):
                     bucket = self._attempts[candidate]
@@ -28,6 +28,8 @@ class LoginRateLimiter:
                         bucket.popleft()
                     if not bucket:
                         self._attempts.pop(candidate, None)
+                if len(self._attempts) >= 10000:
+                    return False
             bucket = self._attempts[key]
             cutoff = now - self.window_seconds
             while bucket and bucket[0] <= cutoff:
