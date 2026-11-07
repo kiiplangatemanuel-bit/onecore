@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, User, AuditEvent
+from app.core.models import CustomDomain, SystemNotice, NoticeDismissal, Organization, Membership, User, AuditEvent
 from app.core.security import current_user, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission
@@ -126,6 +126,10 @@ def create_notice(payload:NoticeIn,user:User=Depends(require_platform_admin),db:
 
 @router.get("/notices")
 def active_notices(user:User=Depends(current_user),x_organization_id:int|None=Header(default=None,alias="X-Organization-ID"),db:Session=Depends(get_db)):
+    if x_organization_id is not None:
+        membership=db.query(Membership).filter_by(user_id=user.id,organization_id=x_organization_id,is_active=True).first()
+        if not membership:
+            raise HTTPException(404,"Organization not found")
     now=datetime.now(timezone.utc)
     q=db.query(SystemNotice).filter(SystemNotice.status=="published",SystemNotice.starts_at<=now)
     q=q.filter((SystemNotice.expires_at.is_(None))|(SystemNotice.expires_at>now))
@@ -147,7 +151,6 @@ def dismiss_notice(notice_id:int,user:User=Depends(current_user),db:Session=Depe
     row=db.get(SystemNotice,notice_id)
     if not row or row.status!="published": raise HTTPException(404,"Notice not found")
     if row.organization_id is not None:
-        from app.core.models import Membership
         if not db.query(Membership).filter_by(user_id=user.id,organization_id=row.organization_id,is_active=True).first():
             raise HTTPException(404,"Notice not found")
     if not db.query(NoticeDismissal).filter_by(notice_id=notice_id,user_id=user.id).first():
