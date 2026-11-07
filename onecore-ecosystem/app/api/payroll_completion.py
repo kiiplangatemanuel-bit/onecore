@@ -734,8 +734,11 @@ def statutory_report(period_start: date, period_end: date, membership=Depends(ac
              and period_start.isoformat() <= r.data.get("period_end", "") <= period_end.isoformat()]
     totals = {}
     for s in snaps:
-        for key in ("paye", "nssf_employee", "nssf_employer", "shif_employee", "housing_levy_employee", "housing_levy_employer"):
-            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"][key])))
+        for key in ("gross_pay", "taxable_pay", "paye", "nssf_employee", "nssf_employer",
+                    "shif_employee", "housing_levy_employee", "housing_levy_employer",
+                    "employee_pension", "post_retirement_medical_fund", "other_deductions",
+                    "employer_statutory_cost", "net_pay"):
+            totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"].get(key, "0"))))
     return {"period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
             "employee_count": len(snaps), "totals": totals, "snapshots": snaps}
 
@@ -775,7 +778,7 @@ def year_end_reconciliation(year: int, membership=Depends(active_membership), us
     for s in snaps:
         for key in ("gross_pay","paye","nssf_employee","nssf_employer","shif_employee",
                     "housing_levy_employee","housing_levy_employer","employee_pension",
-                    "other_deductions","net_pay","employer_statutory_cost"):
+                    "post_retirement_medical_fund","other_deductions","net_pay","employer_statutory_cost"):
             totals[key] = str(money(D(totals.get(key, "0")) + D(s["calculation"].get(key, "0"))))
     return {"year": year, "months_covered": sorted({s["period_end"][:7] for s in snaps}),
             "employee_months": len(snaps), "totals": totals,
