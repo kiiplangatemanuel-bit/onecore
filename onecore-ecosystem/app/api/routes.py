@@ -4595,6 +4595,16 @@ def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
     ).with_for_update().first()
     if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Laboratory order not found")
+    existing = db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).first()
+    if existing:
+        if (existing.accession_number == payload.accession_number.strip().upper()
+                and existing.specimen_type == payload.specimen_type.strip().lower()):
+            return {"id": existing.id, "order_id": order.id,
+                    "accession_number": existing.accession_number,
+                    "specimen_type": existing.specimen_type, "status": "already_recorded"}
+        raise HTTPException(409, "A different sample is already registered for this order")
     if order.status != "ordered":
         raise HTTPException(409, "Only newly ordered tests can have a sample collected")
     lines = db.query(LaboratoryOrderLine).filter_by(
@@ -4602,11 +4612,6 @@ def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
     ).all()
     if not lines or any(line.specimen_type != payload.specimen_type.strip().lower() for line in lines):
         raise HTTPException(422, "Sample specimen type does not match every ordered test")
-    existing = db.query(LaboratorySample).filter_by(
-        organization_id=membership.organization_id, order_id=order.id
-    ).first()
-    if existing:
-        raise HTTPException(409, "A sample is already registered for this order")
     row = LaboratorySample(
         organization_id=membership.organization_id, order_id=order.id,
         accession_number=payload.accession_number.strip().upper(),
