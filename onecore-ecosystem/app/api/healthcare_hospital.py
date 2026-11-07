@@ -249,14 +249,20 @@ def admit_patient(payload: dict, m=Depends(active_membership), u: User=Depends(c
     patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=True)
     _need(db, m, u, "admissions.manage", patient.branch_id)
     patient = db.query(HealthcarePatient).filter_by(id=patient.id, organization_id=m.organization_id).with_for_update().first()
-    if payload.get("idempotency_key"):\n        retry = db.query(HealthcareResource).filter_by(organization_id=m.organization_id, resource_type="admission", idempotency_key=payload["idempotency_key"]).first()\n        if retry:\n            if retry.patient_id != patient.id: raise HTTPException(409, "Idempotency key belongs to another patient")\n            return _view(retry)\n    active = db.query(HealthcareResource.id).filter_by(\n        organization_id=m.organization_id, patient_id=patient.id, resource_type="admission", status="admitted").first()
-    if active:
-        raise HTTPException(409, "Patient already has an active inpatient admission")
+    if payload.get("idempotency_key"):
+        retry = db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
+            resource_type="admission", idempotency_key=payload["idempotency_key"]).first()
+        if retry:
+            if retry.patient_id != patient.id: raise HTTPException(409, "Idempotency key belongs to another patient")
+            return _view(retry)
+    active = db.query(HealthcareResource.id).filter_by(organization_id=m.organization_id,
+        patient_id=patient.id, resource_type="admission", status="admitted").first()
+    if active: raise HTTPException(409, "Patient already has an active inpatient admission")
     bed = _resource(db, m, int(payload.get("bed_id", 0)), "bed", lock=True)
     if bed.branch_id != patient.branch_id or bed.status != "available":
         raise HTTPException(409, "Selected bed is not available in the patient's branch")
-    now = NOW().isoformat()
-    admission_data = {"admitted_at": now, "admission_reason": _required_text(payload, "admission_reason", 1000),
+    admission_data = {"admitted_at": NOW().isoformat(),
+        "admission_reason": _required_text(payload, "admission_reason", 1000),
         "admitting_doctor_id": u.id, "bed_id": bed.id, "ward_room_id": bed.parent_id,
         "diagnosis_code": str(payload.get("diagnosis_code", ""))[:40], "discharge_summary": ""}
     row = _create(db, m, u, "admission", admission_data, patient.branch_id, patient.id,
@@ -703,10 +709,18 @@ def list_clinical_documents(patient_id: int, m=Depends(active_membership), u: Us
 def privacy_monitor(branch_id: str, since_hours: int=Query(24,ge=1,le=720),
                     m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     _need(db,m,u,"privacy.monitor",branch_id)
-    cutoff=NOW()-__import__("datetime").timedelta(hours=since_hours)
-    audits=db.query(HealthcareAccessAudit).filter_by(organization_id=m.organization_id).filter(\n        HealthcareAccessAudit.created_at>=cutoff).all()\n    patient_branches={x.id:x.branch_id for x in db.query(HealthcarePatient).filter_by(organization_id=m.organization_id).all()}\n    audits=[x for x in audits if x.patient_id in patient_branches and can_access_branch(m, patient_branches[x.patient_id])]
-    sessions=db.query(HealthcareBreakGlassSession).filter_by(organization_id=m.organization_id,ended_at=None).all()
-    active=[x for x in sessions if x.expires_at>NOW() and x.patient_id in patient_branches and can_access_branch(m,patient_branches[x.patient_id])]
+    from datetime import timedelta
+    cutoff=NOW()-timedelta(hours=since_hours)
+    audits=db.query(HealthcareAccessAudit).filter_by(organization_id=m.organization_id).filter(
+        HealthcareAccessAudit.created_at>=cutoff).all()
+    patient_branches={x.id:x.branch_id for x in db.query(HealthcarePatient).filter_by(
+        organization_id=m.organization_id).all()}
+    audits=[x for x in audits if x.patient_id in patient_branches
+        and can_access_branch(m,patient_branches[x.patient_id])]
+    sessions=db.query(HealthcareBreakGlassSession).filter_by(
+        organization_id=m.organization_id,ended_at=None).all()
+    active=[x for x in sessions if x.expires_at>NOW() and x.patient_id in patient_branches
+        and can_access_branch(m,patient_branches[x.patient_id])]
     return {"window_hours":since_hours,"access_events":len(audits),
         "emergency_access_events":sum(1 for x in audits if x.emergency),
         "active_break_glass_sessions":[{"id":x.id,"patient_id":x.patient_id,"user_id":x.user_id,
@@ -717,11 +731,18 @@ def privacy_monitor(branch_id: str, since_hours: int=Query(24,ge=1,le=720),
 def set_retention_policy(payload: dict, branch_id: str, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     _need(db,m,u,"retention.manage",branch_id)
     years=payload.get("clinical_record_years")
-    if not isinstance(years,int) or years<7 or years>100:raise HTTPException(422,"Clinical retention must be 7–100 years; verify local statutory policy")
-    prior=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,branch_id=branch_id,resource_type="retention_policy",external_key=f"policy:{branch_id}").with_for_update().first()\n    policy={"clinical_record_years":years,"legal_hold":bool(payload.get("legal_hold",True)),
-        "reviewed_by":u.id,"reviewed_at":NOW().isoformat(),"note":str(payload.get("note",""))[:1000]},
-        branch_id,status="active",external_key=f"policy:{branch_id}")
-    db.commit();return _view(row)
+    if not isinstance(years,int) or years<7 or years>100:
+        raise HTTPException(422,"Clinical retention must be 7–100 years; verify local statutory policy")
+    prior=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
+        branch_id=branch_id,resource_type="retention_policy",external_key=f"policy:{branch_id}").with_for_update().first()
+    policy={"clinical_record_years":years,"legal_hold":bool(payload.get("legal_hold",True)),
+        "reviewed_by":u.id,"reviewed_at":NOW().isoformat(),"note":str(payload.get("note",""))[:1000]}
+    if prior:
+        prior.encrypted_payload=encrypt(policy);prior.updated_by=u.id;prior.updated_at=NOW();row=prior
+    else:
+        row=_create(db,m,u,"retention_policy",policy,branch_id,status="active",external_key=f"policy:{branch_id}")
+    db.commit()
+    return _view(row)
 
 
 @router.post("/recovery/drills", status_code=201)
