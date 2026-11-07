@@ -77,13 +77,27 @@ def _validate_authority_sources(sources):
     for source in sources:
         url=str(source.get("url",""))
         host=(urlparse(url).hostname or "").lower()
-        authority=str(source.get("authority","")).lower()
+        authority=str(source.get("authority","")).strip().lower()
         if not url.startswith("https://") or not any(host == d or host.endswith("."+d) for d in
-                ("kra.go.ke","nssf.or.ke","kenyalaw.org","new.kenyalaw.org","sha.go.ke","health.go.ke")):
+                ("kra.go.ke","nssf.or.ke","kenyalaw.org","sha.go.ke","health.go.ke")):
             raise HTTPException(422, "Statutory evidence must link to an official KRA, NSSF, SHA or Kenya Law HTTPS source")
-        authorities.add(authority)
-    combined=" ".join(authorities)
-    if "kra" not in combined or "nssf" not in combined or not ("sha" in combined or "kenya law" in combined):
+        if host == "kra.go.ke" or host.endswith(".kra.go.ke"):
+            if "kra" not in authority:
+                raise HTTPException(422, "KRA source authority does not match its domain")
+            authorities.add("kra")
+        elif host == "nssf.or.ke" or host.endswith(".nssf.or.ke"):
+            if "nssf" not in authority:
+                raise HTTPException(422, "NSSF source authority does not match its domain")
+            authorities.add("nssf")
+        elif host == "sha.go.ke" or host.endswith(".sha.go.ke") or host == "health.go.ke" or host.endswith(".health.go.ke"):
+            if "sha" not in authority:
+                raise HTTPException(422, "SHA source authority does not match its domain")
+            authorities.add("sha")
+        else:
+            if "kenya law" not in authority:
+                raise HTTPException(422, "Kenya Law source authority does not match its domain")
+            authorities.add("kenya law")
+    if "kra" not in authorities or "nssf" not in authorities or not ({"sha", "kenya law"} & authorities):
         raise HTTPException(422, "Rule evidence must cover KRA, NSSF and SHA/Kenya Law")
 
 
@@ -179,7 +193,7 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
     paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief - money(extra.get("other_tax_relief", 0))))
     other_deductions = money(extra.get("other_deductions", 0))
-    net = money(gross - nssf - shif - ahl - paye - pension - other_deductions)
+    net = money(gross - nssf - shif - ahl - paye - pension - prmf - other_deductions)
     if net < 0:
         raise HTTPException(422, "Deductions exceed gross pay; review employee declarations and payroll items")
     return {
@@ -348,13 +362,17 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         if "resident_for_tax" in extras and not isinstance(extras["resident_for_tax"], bool):
             raise HTTPException(422, "resident_for_tax must be a verified boolean employee tax status")
         extras.setdefault("resident_for_tax", True)
+        period_days = (run.period_end - run.period_start).days + 1
+        employment_start = max(run.period_start, employee.start_date)
+        employment_end = min(run.period_end, employee.end_date or run.period_end)
+        eligible_days = max(0, (employment_end - employment_start).days + 1)
         try:
-            period_days = int(extras.get("period_days", (run.period_end - run.period_start).days + 1))
-            days_employed = int(extras.get("days_employed", period_days))
+            supplied_period_days = int(extras.get("period_days", period_days))
+            days_employed = int(extras.get("days_employed", eligible_days))
         except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(422, "Invalid employment proration day counts")
-        if period_days < 1 or days_employed < 0 or days_employed > period_days:
-            raise HTTPException(422, "Invalid payroll proration days")
+        if supplied_period_days != period_days or period_days < 1 or days_employed < 0 or days_employed > eligible_days:
+            raise HTTPException(422, "Proration must use the calendar-month length and cannot exceed actual employment days")
         prorated_base = money(D(str(line.base_pay)) * D(days_employed) / D(period_days))
         hourly_rate = money(extras.get("hourly_rate", 0))
         try:
@@ -499,6 +517,8 @@ def authorize_batch(batch_id: int, payload: dict=Body(default={}), membership=De
     run = db.query(HRPayrollRun).filter_by(id=batch.data["run_id"], organization_id=membership.organization_id).first()
     if not run or run.approved_by == user.id:
         raise HTTPException(403, "Payment authorizer must be independent of payroll approver")
+    if not _record(db, membership.organization_id, "payroll_journal").filter(Record.data["run_id"].as_integer() == run.id).first():
+        raise HTTPException(409, "Post the approved payroll accrual journal before authorizing salary payments")
     d = dict(batch.data); d["status"] = "authorized"; d["authorized_by"] = user.id
     d["authorized_at"] = datetime.now(timezone.utc).isoformat(); batch.data = d
     _audit(db, membership.organization_id, user.id, "hr.payroll.payment_batch.authorized", "payment_batch", batch.id)
@@ -592,12 +612,16 @@ def payment_callback(batch_id: int, payload: dict=Body(...), signature: str=Head
     if not batch:
         raise HTTPException(404, "Payment batch not found")
     d = dict(batch.data)
+    if d.get("method") != "mpesa":
+        raise HTTPException(409, "Provider callback is only valid for M-Pesa salary batches")
     if d.get("status") not in ("authorized", "processing", "partial", "failed"):
         raise HTTPException(409, "Payment batch must be authorized before provider callbacks")
     item_id = int(payload.get("employee_id", 0))
     row = next((x for x in d["rows"] if x["employee_id"] == item_id), None)
     if not row:
         raise HTTPException(404, "Payment instruction not found")
+    if row.get("conversation_id") and payload.get("conversation_id") != row.get("conversation_id"):
+        raise HTTPException(409, "Provider callback conversation does not match the submitted payment")
     status = payload.get("status")
     if status not in ("paid", "failed"):
         raise HTTPException(422, "Callback status must be paid or failed")
@@ -667,7 +691,9 @@ def reconcile_payments(batch_id: int, membership=Depends(active_membership), use
 @router.get("/hr/payroll/reports/statutory")
 def statutory_report(period_start: date, period_end: date, membership=Depends(active_membership),
                      user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
+    _require_manage(membership)
+    if period_end < period_start:
+        raise HTTPException(422, "Report end date cannot precede start date")
     approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
                     .filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
     snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
@@ -683,7 +709,7 @@ def statutory_report(period_start: date, period_end: date, membership=Depends(ac
 
 @router.get("/hr/payroll/reports/analytics")
 def payroll_analytics(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
+    _require_manage(membership)
     runs = db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).all()
     finalized = [r for r in runs if r.status in ("approved","paid","partial_paid")]
     return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid","partial_paid")},
@@ -694,7 +720,7 @@ def payroll_analytics(membership=Depends(active_membership), user=Depends(curren
 
 @router.get("/hr/payroll/year-end/{year}")
 def year_end_reconciliation(year: int, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
+    _require_manage(membership)
     if year < 2000 or year > 2200:
         raise HTTPException(422, "Invalid year")
     approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
@@ -852,6 +878,8 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
         module_key=MODULE,record_type="payment_batch").with_for_update().first()
     if not batch or batch.data.get("method")!="bank":
         raise HTTPException(404,"Bank payment batch not found")
+    if batch.data.get("status") not in ("authorized", "partial", "processing", "failed"):
+        raise HTTPException(409, "Bank payment batch must be authorized before reconciliation")
     statement=payload.get("transactions")
     if not isinstance(statement,list):
         raise HTTPException(422,"transactions must be a list of bank statement rows")
@@ -860,7 +888,7 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
     seen=set()
     for tx in statement:
         ref=str(tx.get("reference","")); row=expected.get(ref)
-        if not row or row["status"] == "reversed" or ref in seen or money(tx.get("amount",0)) != money(row["amount"]):
+        if not row or row["status"] != "pending" or ref in seen or money(tx.get("amount",0)) != money(row["amount"]):
             unmatched.append({"reference":ref,"amount":str(tx.get("amount","")),"reason":"unknown_duplicate_or_amount_mismatch"})
             continue
         seen.add(ref); row["status"]="paid"; row["provider_reference"]=ref
@@ -868,12 +896,12 @@ def bank_reconcile(batch_id: int, payload: dict=Body(...), membership=Depends(ac
         matched.append(ref)
     d["bank_reconciliation"]={"matched":matched,"unmatched":unmatched,
         "reconciled_by":user.id,"reconciled_at":datetime.now(timezone.utc).isoformat()}
-    d["status"]="paid" if all(x["status"]=="paid" for x in d["rows"]) else ("partial" if matched else "failed")
+    d["status"]="paid" if all(x["status"]=="paid" for x in d["rows"]) else ("partial" if any(x["status"]=="paid" for x in d["rows"]) else "failed")
     batch.data=d
-    if d["status"] == "paid":
+    if any(x["status"]=="paid" for x in d["rows"]):
         paid_run=db.query(HRPayrollRun).filter_by(id=d["run_id"],organization_id=membership.organization_id).with_for_update().first()
         if paid_run:
-            paid_run.status="paid"
+            paid_run.status="paid" if d["status"] == "paid" else "partial_paid"
     _audit(db,membership.organization_id,user.id,"hr.payroll.bank.reconciled","payment_batch",batch.id,
            f"matched:{len(matched)};unmatched:{len(unmatched)}")
     db.commit()
