@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, model_validator, field_validator
 from typing import Any
+from decimal import Decimal
 from datetime import date
 from datetime import datetime
 
@@ -933,3 +934,79 @@ class LaboratoryResultIn(BaseModel):
 
 class LaboratoryValidateIn(BaseModel):
     note: str = Field(default="", max_length=500)
+
+
+
+class SaccoMemberIn(BaseModel):
+    member_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    full_name: str = Field(min_length=2, max_length=180)
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: EmailStr | None = None
+    branch_id: str | None = Field(default=None, max_length=36)
+
+    @field_validator("full_name")
+    @classmethod
+    def member_name_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Member name is required")
+        return value
+
+
+class SaccoKYCDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(verified|rejected)$")
+    note: str = Field(min_length=3, max_length=500)
+
+
+class SaccoAccountIn(BaseModel):
+    member_id: int = Field(gt=0)
+    account_type: str = Field(pattern=r"^(savings|shares|contributions)$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+
+
+class SaccoTransactionIn(BaseModel):
+    transaction_type: str = Field(pattern=r"^(deposit|withdrawal|share_contribution|contribution)$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class SaccoLoanProductIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    name: str = Field(min_length=2, max_length=180)
+    minimum_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    maximum_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    annual_interest_rate: Decimal = Field(ge=0, le=100, multiple_of=Decimal("0.0001"))
+    minimum_term_months: int = Field(ge=1, le=600)
+    maximum_term_months: int = Field(ge=1, le=600)
+    interest_method: str = Field(default="reducing", pattern=r"^(flat|reducing)$")
+    requires_guarantor: bool = False
+
+    @model_validator(mode="after")
+    def valid_product_limits(self):
+        if self.maximum_principal < self.minimum_principal:
+            raise ValueError("Maximum principal must be at least minimum principal")
+        if self.maximum_term_months < self.minimum_term_months:
+            raise ValueError("Maximum term must be at least minimum term")
+        return self
+
+
+class SaccoLoanApplicationIn(BaseModel):
+    member_id: int = Field(gt=0)
+    loan_product_id: int = Field(gt=0)
+    requested_principal: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    term_months: int = Field(ge=1, le=600)
+    purpose: str = Field(min_length=5, max_length=1000)
+
+    @field_validator("purpose")
+    @classmethod
+    def loan_purpose_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("Loan purpose is required")
+        return value
+
+
+class SaccoLoanDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(min_length=3, max_length=500)
