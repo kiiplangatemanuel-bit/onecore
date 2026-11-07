@@ -13,6 +13,7 @@ from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import can_access_branch
 from app.services.healthcare_crypto import encrypt_health_data, decrypt_health_data
+from app.services.datetime_utils import as_utc
 
 router=APIRouter(prefix="/api/v1/healthcare",tags=["Healthcare privacy"])
 
@@ -48,20 +49,20 @@ def _roles(db,membership,user,branch_id):
 
 def _breakglass(db,org,user,patient_id):
     now=datetime.now(timezone.utc)
-    return db.query(HealthcareBreakGlassSession).filter(
+    rows=db.query(HealthcareBreakGlassSession).filter(
         HealthcareBreakGlassSession.organization_id==org,
         HealthcareBreakGlassSession.user_id==user.id,
         HealthcareBreakGlassSession.patient_id==patient_id,
         HealthcareBreakGlassSession.ended_at.is_(None),
-        HealthcareBreakGlassSession.expires_at>now,
-    ).order_by(HealthcareBreakGlassSession.id.desc()).first()
+    ).order_by(HealthcareBreakGlassSession.id.desc()).all()
+    return next((row for row in rows if as_utc(row.expires_at)>now),None)
 
 
 def _has_grant(db,org,user,patient_id,permission):
     now=datetime.now(timezone.utc)
     rows=db.query(HealthcarePatientAccessGrant).filter_by(
         organization_id=org,user_id=user.id,patient_id=patient_id,revoked_at=None).all()
-    return any(permission in (x.permissions or []) and (x.expires_at is None or x.expires_at>now) for x in rows)
+    return any(permission in (x.permissions or []) and (x.expires_at is None or as_utc(x.expires_at)>now) for x in rows)
 
 
 def _authorize(db,membership,user,permission,branch_id=None,patient_id=None,allow_breakglass=False,allow_unscoped=False):
@@ -103,7 +104,7 @@ def _active_consent(db,org,patient_id,purpose):
     row=db.query(HealthcarePatientConsent).filter_by(
         organization_id=org,patient_id=patient_id,purpose=purpose).order_by(
         HealthcarePatientConsent.id.desc()).first()
-    return bool(row and row.decision=="granted" and (row.expires_at is None or row.expires_at>datetime.now(timezone.utc)))
+    return bool(row and row.decision=="granted" and (row.expires_at is None or as_utc(row.expires_at)>datetime.now(timezone.utc)))
 
 
 @router.post("/access/roles",status_code=201)
