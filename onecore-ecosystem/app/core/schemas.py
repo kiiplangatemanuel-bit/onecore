@@ -174,7 +174,7 @@ class POSShiftOpenIn(BaseModel):
 
 class POSShiftCloseIn(BaseModel):
     closing_cash: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
-    cash_count: dict[str,int] = Field(default_factory=dict, max_length=10)
+    cash_count: dict[str,int] = Field(min_length=1, max_length=10)
     note: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
