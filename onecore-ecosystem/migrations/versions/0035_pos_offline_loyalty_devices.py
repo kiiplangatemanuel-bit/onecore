@@ -23,6 +23,9 @@ def upgrade():
     op.create_index("uq_pos_device_org_key","pos_devices",["organization_id","device_key"],unique=True)
     op.create_index("ix_pos_devices_organization_id","pos_devices",["organization_id"])
     op.create_index("ix_pos_devices_branch_id","pos_devices",["branch_id"])
+    op.add_column("pos_shifts", sa.Column("device_id",sa.Integer(),nullable=True))
+    op.create_foreign_key("fk_pos_shift_device","pos_shifts","pos_devices",["device_id"],["id"])
+    op.create_index("ix_pos_shifts_device_id","pos_shifts",["device_id"])
     op.create_table("pos_offline_conflicts",
         sa.Column("id",sa.Integer(),primary_key=True),sa.Column("organization_id",sa.Integer(),sa.ForeignKey("organizations.id"),nullable=False),
         sa.Column("branch_id",sa.String(36),sa.ForeignKey("branches.id"),nullable=False),sa.Column("device_id",sa.Integer(),sa.ForeignKey("pos_devices.id"),nullable=False),
@@ -81,4 +84,7 @@ def downgrade():
     op.drop_table("pos_loyalty_entries")
     op.drop_table("pos_customers")
     op.drop_table("pos_offline_conflicts")
+    op.drop_index("ix_pos_shifts_device_id",table_name="pos_shifts")
+    op.drop_constraint("fk_pos_shift_device","pos_shifts",type_="foreignkey")
+    op.drop_column("pos_shifts","device_id")
     op.drop_table("pos_devices")
