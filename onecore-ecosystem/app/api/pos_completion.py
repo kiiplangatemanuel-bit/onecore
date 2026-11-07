@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import AuditEvent, POSShift, POSSale, POSPayment, POSRefund
+from app.core.models import AuditEvent, Branch, POSShift, POSSale, POSPayment, POSRefund
 from app.core.pos_completion_models import POSDevice, POSOfflineConflict, POSCustomer, POSLoyaltyEntry, POSPeripheralCommand, POSCustomerSale
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -20,6 +20,10 @@ def _audit(db, user, org, action, kind, ident, detail=""):
 def _branch(membership, branch_id):
     if not can_access_branch(membership, branch_id):
         raise HTTPException(403, "Branch access denied")
+def _tenant_branch(db, membership, branch_id):
+    _branch(membership, branch_id)
+    if not db.query(Branch).filter_by(id=branch_id,organization_id=membership.organization_id,is_active=True).first():
+        raise HTTPException(404,"Branch not found in this organization")
 def _hash(value):
     return hashlib.sha256(value.encode()).hexdigest()
 def _device(db, membership, device_id, token, branch_id=None):
@@ -74,7 +78,7 @@ class SettlementIn(BaseModel):
 
 @router.post("/devices/register",status_code=201)
 def register_device(payload:DeviceIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage"); _branch(membership,payload.branch_id)
+    require_permission(membership,"manage"); _tenant_branch(db,membership,payload.branch_id)
     if not db.query(POSDevice).filter_by(organization_id=membership.organization_id,device_key=payload.device_key).first():
         pass
     else: raise HTTPException(409,"Device key already registered; use device re-enrolment after revocation")
@@ -185,7 +189,7 @@ def sync_monitor(membership=Depends(active_membership),db:Session=Depends(get_db
 
 @router.post("/customers",status_code=201)
 def create_customer(payload:CustomerIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
-    if payload.branch_id:_branch(membership,payload.branch_id)
+    if payload.branch_id:_tenant_branch(db,membership,payload.branch_id)
     if payload.phone and db.query(POSCustomer).filter_by(organization_id=membership.organization_id,phone=payload.phone).first():
         raise HTTPException(409,"Customer phone already exists in this organization")
     row=POSCustomer(organization_id=membership.organization_id,branch_id=payload.branch_id,customer_number="C"+secrets.token_hex(6).upper(),
