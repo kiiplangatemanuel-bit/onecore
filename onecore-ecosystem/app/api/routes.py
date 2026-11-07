@@ -200,7 +200,7 @@ def inventory_products(membership=Depends(active_membership), db: Session = Depe
         organization_id=membership.organization_id, is_active=True
     ).order_by(InventoryProduct.name).all()
     return [{"id": p.id, "sku": p.sku, "name": p.name, "description": p.description,
-             "unit": p.unit, "sale_price": str(p.sale_price),
+             "unit": p.unit, "sale_price": str(p.sale_price), "cost_price": str(p.cost_price),
              "tax_rate": str(p.tax_rate), "is_active": p.is_active} for p in rows]
 
 
@@ -213,7 +213,7 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
         raise HTTPException(409, "SKU already exists in this organization")
     row = InventoryProduct(organization_id=membership.organization_id, sku=sku,
                            name=payload.name.strip(), description=payload.description,
-                           unit=payload.unit, sale_price=payload.sale_price,
+                           unit=payload.unit, sale_price=payload.sale_price, cost_price=payload.cost_price,
                            tax_rate=payload.tax_rate, created_by=user.id)
     db.add(row)
     try:
@@ -224,7 +224,7 @@ def create_inventory_product(payload: InventoryProductIn, membership=Depends(act
     db.refresh(row)
     audit(db, user.id, membership.organization_id, "inventory.product.created", "inventory_product", row.id)
     return {"id": row.id, "sku": row.sku, "name": row.name, "description": row.description,
-            "unit": row.unit, "sale_price": str(row.sale_price),
+            "unit": row.unit, "sale_price": str(row.sale_price), "cost_price": str(row.cost_price),
             "tax_rate": str(row.tax_rate), "is_active": row.is_active}
 
 
