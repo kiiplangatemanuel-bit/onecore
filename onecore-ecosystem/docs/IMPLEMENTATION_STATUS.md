@@ -822,3 +822,17 @@ secret rotation, centralized tamper-evident audit, backup/PITR restore drills,
 metrics/tracing/alerts, production ingress/database/secret-manager configuration,
 penetration testing, load testing, privacy review and production UAT. This baseline
 is not a security certification or evidence of a live production deployment.
+
+
+## CRM campaign automation and healthcare privacy hardening (7 November 2026)
+
+Implemented on `feature/crm-healthcare-privacy-final`:
+- Reusable email/SMS/WhatsApp templates with immutable version history, safe personalization variables and branch ownership.
+- Nested AND/OR audience segmentation, validated field/operator allowlist, preview, edit and deactivate controls.
+- One-time, daily and weekly schedules with IANA timezone handling, branch/template/segment binding, pause/resume/cancel and visible failure details.
+- A supervised scheduler worker that creates child campaign runs, snapshots personalized recipient content, rechecks current channel/purpose consent, renews leases, recovers stale work and reuses provider idempotency/callback/reporting.
+- Healthcare-specific branch roles, patient-level read/write grants, expiry/revocation, append-only purpose-based consent evidence, 15-minute justified break-glass access, encounter closure and appointment scheduling.
+- Patient profiles and clinical notes remain Fernet encrypted; PHI API/UI responses use no-store headers; access events include emergency markers.
+- Added migration `0031_crm_healthcare_privacy_hardening`, CRM and healthcare workspaces, scheduler Docker service, tests and operator docs.
+
+Release boundary: CI migration/pytest checks and production UAT must pass before deployment. Set a separately managed `HEALTHCARE_PHI_ENCRYPTION_KEY` before storing patient data. MFA/step-up, managed key rotation/recovery, retention and data-subject request workflows, legal-hold policy, penetration testing, security monitoring and clinical/legal governance remain production requirements. These controls are not a regulatory certification.

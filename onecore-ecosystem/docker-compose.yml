@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/onecore.db}
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:////app/data/onecore.db}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
       - "127.0.0.1:${PORT:-8000}:8000"
@@ -24,5 +24,25 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+  crm-scheduler:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:////app/data/onecore.db}
+    command: ["python", "-m", "app.workers.crm_scheduler"]
+    volumes:
+      - onecore_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
 volumes:
   onecore_data:
