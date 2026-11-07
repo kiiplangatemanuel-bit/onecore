@@ -206,6 +206,7 @@ def create_snapshot(payload:dict,m=Depends(active_membership),user:User=Depends(
     target_rows=db.query(CRMSalesTarget).filter_by(organization_id=m.organization_id,period_type=kind,
         period_start=datetime.combine(first,time.min,timezone.utc)).all()
     for target in target_rows:
+        if rep is not None and target.assigned_to!=rep:continue
         if target.branch_id is None or can_access_branch(m,target.branch_id):
             key=(int(target.assigned_to) if target.assigned_to is not None else -2,target.currency)
             grouped.setdefault(key,[])
