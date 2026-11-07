@@ -6,11 +6,11 @@ from pydantic import ValidationError
 
 from app.core.models import (
     PharmacyMedicine, PharmacyBatch, LaboratoryTest, LaboratoryOrder,
-    LaboratoryOrderLine, LaboratorySample,
+    LaboratoryOrderLine, LaboratorySample, PharmacyPrescription, PharmacyPrescriptionLine, PharmacyDispense, PharmacyAllergy, PharmacyDrugSafetyRule, PharmacyControlledEvent, PharmacyLabWorkflowRecord, LaboratoryTestPanel, LaboratoryTestPanelLine,
 )
 from app.core.schemas import (
     PharmacyMedicineIn, PharmacyBatchIn, PharmacyBatchQuarantineIn,
-    LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn,
+    LaboratoryTestIn, LaboratoryOrderIn, LaboratorySampleIn, LaboratoryResultIn, PharmacyPrescriptionIn, PharmacyDispenseIn, PharmacyAllergyIn, PharmacySafetyRuleIn, PharmacyStockAdjustmentIn, LaboratoryPanelIn, LaboratoryInstrumentResultIn,
 )
 from app.services.pharmacy_lab import pharmacy_batch_hash, laboratory_order_hash
 from app.main import app
@@ -107,3 +107,65 @@ def test_pharmacy_lab_workspace_has_core_workflow_controls():
     assert 'id="labOrder"' in html
     assert 'id="labSample"' in html
     assert 'id="labResult"' in html
+
+
+def test_pharmacy_and_laboratory_operations_models_are_registered():
+    expected = {
+        "pharmacy_prescriptions", "pharmacy_prescription_lines", "pharmacy_dispenses",
+        "pharmacy_allergies", "pharmacy_drug_safety_rules", "pharmacy_controlled_events",
+        "pharmacy_lab_workflow_records", "laboratory_test_panels", "laboratory_test_panel_lines",
+    }
+    assert expected.issubset(PharmacyPrescription.metadata.tables.keys())
+    assert PharmacyPrescription.__tablename__ == "pharmacy_prescriptions"
+    assert PharmacyDispense.__tablename__ == "pharmacy_dispenses"
+    assert PharmacyLabWorkflowRecord.__tablename__ == "pharmacy_lab_workflow_records"
+
+
+def test_prescription_dispensing_and_safety_schema_validation():
+    rx = PharmacyPrescriptionIn(
+        encounter_id=10, prescription_number="RX-2026-001",
+        valid_until=date.today()+timedelta(days=10),
+        lines=[{"medicine_id":2,"dose":"1 tablet","frequency":"twice daily",
+                "duration_days":5,"quantity":"10","refills_allowed":1}],
+    )
+    assert rx.lines[0].quantity == Decimal("10")
+    dispense = PharmacyDispenseIn(line_id=1,batch_id=2,quantity=Decimal("2"),
+        idempotency_key="dispense-unique-001",verifier_id=9)
+    assert dispense.quantity == Decimal("2")
+    with pytest.raises(ValidationError):
+        PharmacyDispenseIn(line_id=1,batch_id=2,quantity=Decimal("0"),
+            idempotency_key="dispense-unique-001",verifier_id=9)
+    with pytest.raises(ValidationError):
+        PharmacySafetyRuleIn(medicine_a_id=1,rule_type="interaction",
+            severity="block",description="Requires two medicine IDs")
+
+
+def test_lab_panel_and_analyzer_contracts():
+    panel = LaboratoryPanelIn(code="CBC-PANEL",name="Full blood count",test_ids=[1,2])
+    assert panel.test_ids == [1,2]
+    result = LaboratoryInstrumentResultIn(accession_number="ACC-100",
+        test_code="CBC",result_value="4.5",is_critical=True)
+    assert result.is_critical is True
+    with pytest.raises(ValidationError):
+        PharmacyStockAdjustmentIn(quantity_delta=0,reason="No adjustment",verifier_id=3)
+
+
+def test_pharmacy_lab_advanced_routes_are_registered():
+    paths=set(app.openapi()["paths"])
+    expected={
+        "/api/v1/pharmacy/prescriptions","/api/v1/pharmacy/prescriptions/{prescription_id}/dispense",
+        "/api/v1/pharmacy/allergies","/api/v1/pharmacy/safety-rules",
+        "/api/v1/pharmacy/dispenses/{dispense_id}/return",
+        "/api/v1/pharmacy/dispenses/{dispense_id}/reverse",
+        "/api/v1/pharmacy/batches/{batch_id}/recall",
+        "/api/v1/pharmacy/batches/{batch_id}/adjust",
+        "/api/v1/pharmacy/replenishment","/api/v1/pharmacy-lab/billing",
+        "/api/v1/pharmacy-lab/claims/{claim_id}/decision",
+        "/api/v1/lab/panels","/api/v1/lab/samples/{sample_id}/decision",
+        "/api/v1/lab/instruments","/api/v1/lab/instruments/{instrument_id}/results",
+        "/api/v1/lab/instruments/{instrument_id}/qc",
+        "/api/v1/lab/instruments/{instrument_id}/calibration",
+        "/api/v1/lab/critical-alerts","/api/v1/lab/orders/{order_id}/deliver",
+        "/api/v1/lab/public-deliveries/{delivery_id}","/api/v1/pharmacy-lab/traceability",
+    }
+    assert expected.issubset(paths)
