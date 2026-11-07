@@ -509,3 +509,63 @@ class AccountingInvoicePayment(Base):
     __table_args__ = (
         Index("ix_accounting_invoice_payment_org_idempotency", "organization_id", "idempotency_key", unique=True),
     )
+
+
+class AccountingFiscalPeriod(Base):
+    __tablename__ = "accounting_fiscal_periods"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(12), default="open")
+    closed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_period_org_code", "organization_id", "code", unique=True),)
+
+
+class AccountingBudget(Base):
+    __tablename__ = "accounting_budgets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    fiscal_period_id: Mapped[int] = mapped_column(ForeignKey("accounting_fiscal_periods.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AccountingBudgetLine(Base):
+    __tablename__ = "accounting_budget_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    budget_id: Mapped[int] = mapped_column(ForeignKey("accounting_budgets.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AccountingFixedAsset(Base):
+    __tablename__ = "accounting_fixed_assets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    asset_code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    acquisition_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    salvage_value: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    useful_life_months: Mapped[int] = mapped_column()
+    accumulated_depreciation: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    asset_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    accumulated_depreciation_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    depreciation_expense_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_fixed_asset_org_code", "organization_id", "asset_code", unique=True),)
