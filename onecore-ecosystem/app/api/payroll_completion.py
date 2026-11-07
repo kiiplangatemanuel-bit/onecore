@@ -242,7 +242,8 @@ KENYA_2026_RULES = {
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/2099-collection-of-the-affordable-housing-levy-by-kenya-revenue-authority", "verified_on": "2026-11-08"},
         {"authority": "KRA", "url": "https://www.kra.go.ke/news-center/public-notices/1979-affordable-housing-levy-ahl", "verified_on": "2026-11-08"},
         {"authority": "NSSF", "url": "https://www.nssf.or.ke/notice-to-employers-year-4-2026-nssf-contribution-rates", "verified_on": "2026-11-08"},
-        {"authority": "SHA / Ministry of Health", "url": "https://health.go.ke/sites/default/files/2024-11/Social%20Health%20Insurance%20%28General%29%20Regulations%2C%202024_0.pdf", "verified_on": "2026-11-08"}
+        {"authority": "SHA / Ministry of Health", "url": "https://health.go.ke/sites/default/files/2024-11/Social%20Health%20Insurance%20%28General%29%20Regulations%2C%202024_0.pdf", "verified_on": "2026-11-08"},
+        {"authority": "Kenya Law", "url": "https://www.kenyalaw.org/kl/fileadmin/pdfdownloads/LegalNotices/2024/LN49_2024.pdf", "verified_on": "2026-11-08"}
     ],
     "parameters": {
         "paye": {
