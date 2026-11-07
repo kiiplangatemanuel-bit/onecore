@@ -286,6 +286,7 @@ def verify_settlement(payment_id:int,payload:SettlementIn,membership=Depends(act
     if not payment:raise HTTPException(404,"Payment not found")
     sale=db.query(POSSale).filter_by(id=payment.sale_id,organization_id=membership.organization_id).first()
     _branch(membership,sale.branch_id)
+    if payment.method=="mpesa": raise HTTPException(409,"M-Pesa settlement must be verified by the Daraja callback flow")
     if payment.status=="recorded":
         if payment.provider_reference==payload.provider_reference:return {"payment_id":payment.id,"status":"recorded","idempotent":True}
         raise HTTPException(409,"Payment is already recorded against another reference")
@@ -313,3 +314,23 @@ def operations_report(branch_id:str|None=None,membership=Depends(active_membersh
         "pending_review":sum(x.reconciliation_status=="pending_review" for x in shift_rows)},
         "unsettled_tenders":db.query(func.count(POSPayment.id)).join(POSSale,POSPayment.sale_id==POSSale.id).filter(
             POSPayment.organization_id==membership.organization_id,POSPayment.status=="unsettled",POSSale.branch_id.in_(allowed or ["__none__"]) if allowed is not None else True).scalar() or 0}
+
+@router.post("/refunds/{refund_id}/confirm-execution")
+def confirm_refund_execution(refund_id:int,payload:SettlementIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    refund=db.query(POSRefund).filter_by(id=refund_id,organization_id=membership.organization_id).with_for_update().first()
+    if not refund: raise HTTPException(404,"Refund not found")
+    if refund.method=="mpesa": raise HTTPException(409,"M-Pesa refund execution must be confirmed by the Daraja B2C result callback")
+    from app.core.models import POSReturn
+    ret=db.query(POSReturn).filter_by(id=refund.return_id,organization_id=membership.organization_id).first()
+    sale=db.query(POSSale).filter_by(id=ret.sale_id,organization_id=membership.organization_id).first() if ret else None
+    if not sale: raise HTTPException(404,"Original sale not found")
+    _branch(membership,sale.branch_id)
+    if refund.status=="recorded":
+        if refund.provider_reference==payload.provider_reference:return {"refund_id":refund.id,"status":"recorded","idempotent":True}
+        raise HTTPException(409,"Refund already confirmed with another reference")
+    refund.provider_reference=payload.provider_reference
+    refund.status="recorded"
+    _audit(db,user,membership.organization_id,"pos.refund.execution_confirmed","pos_refund",refund.id,payload.evidence_note.strip())
+    db.commit()
+    return {"refund_id":refund.id,"status":refund.status,"note":"Supervisor-confirmed physical/provider evidence recorded; no payment gateway is called by this endpoint."}
