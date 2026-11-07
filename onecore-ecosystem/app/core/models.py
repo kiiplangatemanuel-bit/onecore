@@ -656,6 +656,50 @@ class SaccoLoanRepayment(Base):
     __table_args__ = (Index("ix_sacco_loan_repayment_org_key", "organization_id", "idempotency_key", unique=True),)
 
 
+class SaccoLoanGuarantor(Base):
+    __tablename__ = "sacco_loan_guarantors"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id"), index=True)
+    guaranteed_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    consent_reference: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_sacco_guarantor_org_loan_member", "organization_id", "loan_id", "member_id", unique=True),
+        Index("ix_sacco_guarantor_org_loan_status", "organization_id", "loan_id", "status"),
+    )
+
+
+class SaccoLoanCollateral(Base):
+    __tablename__ = "sacco_loan_collateral"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    loan_id: Mapped[int] = mapped_column(ForeignKey("sacco_loans.id"), index=True)
+    collateral_type: Mapped[str] = mapped_column(String(40))
+    description: Mapped[str] = mapped_column(String(500))
+    owner_name: Mapped[str] = mapped_column(String(180))
+    identifier: Mapped[str] = mapped_column(String(120), default="")
+    estimated_value: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    assessed_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    valuation_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valuation_reference: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_sacco_collateral_org_loan_status", "organization_id", "loan_id", "status"),
+    )
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"
