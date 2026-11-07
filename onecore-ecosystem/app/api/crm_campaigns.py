@@ -100,7 +100,7 @@ def dispatch_campaign(campaign_id:int,batch_size:int=Query(100,ge=1,le=500),
             failed+=1
     remaining=db.query(CRMCampaignRecipient).filter_by(
         organization_id=membership.organization_id,campaign_id=c.id
-    ).filter(or__(
+    ).filter(or_(
         CRMCampaignRecipient.status.in_(["prepared","failed"]),
         CRMCampaignRecipient.status=="sending",
     )).count()
