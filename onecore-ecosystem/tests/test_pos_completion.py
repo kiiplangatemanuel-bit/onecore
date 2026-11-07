@@ -3,6 +3,8 @@ from app.core.pos_completion_models import POSDevice, POSOfflineConflict, POSCus
 
 def test_pos_completion_models_registered():
     assert POSDevice.__tablename__ == "pos_devices"
+    from app.core.models import POSShift
+    assert "device_id" in POSShift.__table__.columns
     assert POSOfflineConflict.__tablename__ == "pos_offline_conflicts"
     assert POSCustomer.__tablename__ == "pos_customers"
     assert POSLoyaltyEntry.__tablename__ == "pos_loyalty_entries"
@@ -14,6 +16,7 @@ def test_pos_completion_routes_registered():
     expected={
         "/api/v1/pos/devices/register",
         "/api/v1/pos/devices/{device_id}/approve",
+        "/api/v1/pos/devices/{device_id}/bind-shift",
         "/api/v1/pos/devices/{device_id}/revoke",
         "/api/v1/pos/devices/{device_id}/conflicts",
         "/api/v1/pos/conflicts",
