@@ -11,7 +11,7 @@ def validate_segment_filters(node,depth=0):
     if set(node)=={"logic","conditions"}:
         logic=node["logic"]
         conditions=node["conditions"]
-        if logic not in {"and","or"} or not isinstance(conditions,list) or not 1<=len(conditions)<=20:
+        if logic not in {"and","or"} or not isinstance(conditions,list) or len(conditions)>20:
             raise HTTPException(422,"Each audience group needs AND/OR and 1–20 conditions")
         for item in conditions:
             validate_segment_filters(item,depth+1)
