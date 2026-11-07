@@ -186,8 +186,8 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
             certificate_valid = False
     disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid and resident else ZERO
     declared_noncash_benefits = money(extra.get("non_cash_benefits", 0))
-    taxable_benefits = money(extra.get("taxable_benefits", 0)) + max(
-        ZERO, money(declared_noncash_benefits - D(str(cfg["paye"].get("noncash_benefit_exemption_monthly", "5000")))))
+    taxable_benefits = money(extra.get("taxable_benefits", 0)) + money(max(
+        ZERO, declared_noncash_benefits - D(str(cfg["paye"].get("noncash_benefit_exemption_monthly", "5000")))))
     taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
