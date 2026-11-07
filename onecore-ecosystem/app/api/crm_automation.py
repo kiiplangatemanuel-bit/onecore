@@ -87,8 +87,8 @@ def compile_rules(node,depth=0):
     clauses=[]
     for group in ("all","any"):
         items=node.get(group,[])
-        if not isinstance(items,list) or len(items)>20:
-            raise HTTPException(422,"Each audience group supports at most 20 conditions")
+        if not isinstance(items,list) or not 1<=len(items)<=20:
+            raise HTTPException(422,"Each audience group must contain 1–20 conditions")
         nested=[]
         for item in items:
             if isinstance(item,dict) and ({"all","any"} & set(item)):
