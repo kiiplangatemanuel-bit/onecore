@@ -318,6 +318,7 @@ def schedule_campaign(campaign_id:int,payload:dict,m=Depends(active_membership),
     if row is None:
         row=CRMCampaignSchedule(organization_id=m.organization_id,campaign_id=campaign.id,created_by=u.id)
         db.add(row)
+    row.created_by=u.id
     row.scheduled_at=at.astimezone(timezone.utc);row.timezone_name=zone
     row.recurrence=recurrence;row.template_id=template.id if template else None
     row.segment_id=segment.id if segment else None;row.next_run_at=row.scheduled_at
@@ -369,7 +370,7 @@ def resume_schedule(campaign_id:int,m=Depends(active_membership),u:User=Depends(
     if not campaign or not can_access_branch(m,campaign.branch_id):raise HTTPException(404,"Schedule not found")
     if row.recurrence=="once" and row.run_count:raise HTTPException(409,"One-time schedule already ran")
     row.status="scheduled";row.next_run_at=max(_utc(row.scheduled_at),datetime.now(timezone.utc))
-    row.lease_until=None;row.claimed_at=None;row.last_error=""
+    row.created_by=u.id;row.lease_until=None;row.claimed_at=None;row.last_error=""
     db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,action="crm.schedule.resumed",
         resource_type="crm_campaign_schedule",resource_id=str(row.id)));db.commit()
     return {"campaign_id":campaign_id,"status":row.status,"next_run_at":row.next_run_at.isoformat()}
