@@ -407,11 +407,65 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
                                        module_key=MODULE, record_type="payment_batch").with_for_update().first()
     if not batch or batch.data["method"] != "mpesa" or batch.data["status"] != "authorized":
         raise HTTPException(409, "An authorized M-Pesa batch is required")
-    # Submission is deliberately delegated to a configured Daraja adapter. Never
-    # synthesize a successful payment or treat a queued request as settled.
-    if not os.getenv("MPESA_PAYROLL_ADAPTER_URL") or not os.getenv("MPESA_PAYROLL_ADAPTER_TOKEN"):
-        raise HTTPException(503, "M-Pesa payroll adapter is not configured")
-    raise HTTPException(501, "Connect a signed Daraja B2C adapter through the provider integration gateway")
+    from app.core.config import settings
+    import httpx
+    required = (settings.mpesa_base_url, settings.mpesa_consumer_key, settings.mpesa_consumer_secret,
+                settings.mpesa_shortcode, os.getenv("MPESA_INITIATOR_NAME"),
+                os.getenv("MPESA_SECURITY_CREDENTIAL"), os.getenv("MPESA_B2C_RESULT_URL"),
+                os.getenv("MPESA_B2C_TIMEOUT_URL"))
+    if not settings.integration_mpesa_enabled or not all(required):
+        raise HTTPException(503, "Daraja B2C payroll credentials and callback URLs are not fully configured")
+    employee_id = int(payload.get("employee_id", 0))
+    row = next((x for x in batch.data["rows"] if x["employee_id"] == employee_id), None)
+    if not row or row["status"] not in ("pending", "failed"):
+        raise HTTPException(409, "A pending or failed employee payment instruction is required")
+    if not row.get("phone"):
+        raise HTTPException(422, "Employee mobile number is missing")
+    phone = "".join(ch for ch in row["phone"] if ch.isdigit())
+    if phone.startswith("0"):
+        phone = "254" + phone[1:]
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if not phone.startswith("254") or len(phone) != 12:
+        raise HTTPException(422, "Employee phone must be a valid Kenyan MSISDN")
+    base = settings.mpesa_base_url.rstrip("/")
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            token_response = client.get(base + "/oauth/v1/generate?grant_type=client_credentials",
+                auth=(settings.mpesa_consumer_key, settings.mpesa_consumer_secret))
+            token_response.raise_for_status()
+            access_token = token_response.json()["access_token"]
+            body = {"InitiatorName": os.getenv("MPESA_INITIATOR_NAME"),
+                "SecurityCredential": os.getenv("MPESA_SECURITY_CREDENTIAL"),
+                "CommandID": os.getenv("MPESA_B2C_COMMAND_ID", "BusinessPayment"),
+                "Amount": int(D(row["amount"]).quantize(D("1"), rounding=ROUND_HALF_UP)),
+                "PartyA": settings.mpesa_shortcode, "PartyB": phone,
+                "Remarks": f"Salary {batch.data['run_id']}"[:100],
+                "QueueTimeOutURL": os.getenv("MPESA_B2C_TIMEOUT_URL"),
+                "ResultURL": os.getenv("MPESA_B2C_RESULT_URL"),
+                "Occasion": f"PAY-{batch.id}-{employee_id}"}
+            response = client.post(base + "/mpesa/b2c/v1/paymentrequest", json=body,
+                headers={"Authorization": "Bearer " + access_token, "Content-Type": "application/json"})
+            response.raise_for_status()
+            provider = response.json()
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        raise HTTPException(502, f"Daraja B2C request failed: {type(exc).__name__}")
+    if str(provider.get("ResponseCode")) != "0":
+        raise HTTPException(502, "Daraja did not accept the B2C payment request")
+    d = dict(batch.data); rows = list(d["rows"])
+    for item in rows:
+        if item["employee_id"] == employee_id:
+            item.update({"status":"pending","originator_conversation_id":provider.get("OriginatorConversationID"),
+                         "conversation_id":provider.get("ConversationID"),
+                         "response_description":provider.get("ResponseDescription",""),
+                         "submitted_at":datetime.now(timezone.utc).isoformat()})
+    d["rows"] = rows; d["status"] = "processing"; batch.data = d
+    _audit(db,membership.organization_id,user.id,"hr.payroll.mpesa.submitted","payment_batch",batch.id,
+           f"employee:{employee_id};conversation:{provider.get('ConversationID','')}")
+    db.commit()
+    return {"batch_id":batch.id,"employee_id":employee_id,"status":"submitted",
+            "conversation_id":provider.get("ConversationID"),
+            "originator_conversation_id":provider.get("OriginatorConversationID")}
 
 
 @router.post("/hr/payroll/payment-batches/{batch_id}/provider-callback")
