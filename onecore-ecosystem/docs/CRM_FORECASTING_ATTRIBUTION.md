@@ -6,7 +6,7 @@ Every open lead can carry an expected close date and optional probability overri
 
 Best case is gross open pipeline multiplied by the configured best-case multiplier. Expected is probability-weighted open pipeline multiplied by the expected multiplier. Worst case is probability-weighted pipeline multiplied by the worst-case multiplier. Default stage probabilities are illustrative and must be configured by each organization.
 
-Targets are upserted by period, representative/team, branch and currency. Forecast attainment compares expected pipeline with the matching target. Snapshot records are immutable and preserve forecast amount and opportunity count at capture time. Accuracy compares the latest snapshot with won leads that have an actual close timestamp. This migration does not invent historical close dates for previously won opportunities.
+Targets are upserted by period, representative/team, branch and currency. Forecast attainment compares expected pipeline with the matching target. Snapshot records are immutable and preserve forecast amount and opportunity count at capture time. Accuracy compares the latest snapshot with won leads that have an actual close timestamp and uses the recorded actual_value when supplied (otherwise the lead estimated value is the initial fallback). New wins capture their close timestamp and initialize actual value from the estimate; managers can correct the realized value. This migration does not invent historical close dates for previously won opportunities.
 
 ## APIs
 
