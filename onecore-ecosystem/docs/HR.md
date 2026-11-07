@@ -33,3 +33,24 @@ permission; an employee cannot approve their own request.
 
 Do not use this module to calculate or pay statutory payroll obligations until
 jurisdiction-specific rules and professional validation are implemented.
+
+
+## Attendance and timekeeping
+
+- `POST /api/v1/hr/attendance/clock-in` starts a server-timestamped attendance session
+  for the active employee profile linked to the signed-in user.
+- `POST /api/v1/hr/attendance/clock-out` closes the current UTC-day session and
+  calculates completed whole minutes from server timestamps.
+- `GET /api/v1/hr/my-attendance` lists the signed-in employee's recent sessions.
+- `GET /api/v1/hr/attendance` provides a branch-scoped team report to HR managers.
+- Unique organization/employee/date constraint prevents duplicate sessions; repeated
+  clock-in/out requests return HTTP 409 instead of silently changing time records.
+- Clock actions require the employee's own active linked profile and create audit
+  events. Team reporting requires manage permission.
+
+This increment records one session per UTC calendar day. It does not yet support
+organization time zones, shifts, breaks, overtime, geofencing, biometric devices,
+offline attendance, manager corrections, multiple sessions per day, approval,
+payroll integration or statutory time calculations. Worked minutes are elapsed
+clock minutes, not paid hours. Deployments in other time zones should not use the
+UTC date as a local payroll day until organization timezone handling is added.
