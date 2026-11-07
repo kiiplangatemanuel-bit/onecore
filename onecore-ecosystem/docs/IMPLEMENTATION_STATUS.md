@@ -568,3 +568,17 @@ import/export, team assignment and UAT.
 - Added migration 0016_procurement_completion, frontend forms, API schemas/routes, docs/PROCUREMENT.md and automated validation/OpenAPI/UI tests.
 - GitHub Actions run 42372561387 passed: dependency installation, migration upgrade, migration downgrade/re-upgrade, Python compilation and 68 passed pytest checks (5 warnings).
 - Explicit remaining integration work: matched supplier invoices are recorded but not posted to AP journals or paid; credit-note references are captured but not posted to AP; no external supplier portal/email delivery, approval delegation/escalation, supplier statement reconciliation, or end-to-end production UAT yet.
+
+
+## Accounting counterparty statements increment (in review)
+
+- Added tenant- and branch-scoped customer and supplier statement API.
+- Statements aggregate posted, partially paid and paid invoices with recorded
+  invoice settlements; opening balances include pre-period activity and the
+  response provides dated transactions and closing balance.
+- Draft invoices are excluded; customer contacts and suppliers are resolved only
+  inside the active organization.
+- Added API contract test and updated docs/ACCOUNTING.md.
+- Branch: feature/accounting-counterparty-statements.
+- Verification is pending GitHub Actions. This increment does not yet provide
+  statement PDF/export/email delivery or an accounting workspace UI.
