@@ -2,16 +2,16 @@
   "category_number": 9,
   "name": "Pharmacy and Laboratory Management",
   "scope_from_master_specification": "Medicine catalogue/classification, prescriptions/dispensing, batches/expiry, stock, suppliers, pricing and billing; lab catalogue, sample registration/tracking, processing, result validation, reports, doctor access, equipment, inventory and quality control.",
-  "status": "scaffold",
+  "status": "implemented_with_external_release_gates",
   "required_before_production": [
-    "domain schema and migrations",
-    "service layer and API contracts",
-    "tenant and branch authorization",
-    "validation and approval rules",
-    "audit events",
-    "frontend workflows",
-    "automated tests and UAT",
-    "monitoring, backup and recovery",
-    "operator and user documentation"
+    "Pass current PR-head migration, compilation and full test CI",
+    "Complete pharmacy and laboratory clinical user acceptance testing",
+    "Approve maintained drug allergy, interaction, formulary and controlled medicine rules",
+    "Complete vendor-specific analyzer HL7/ASTM/POCT adapters and site validation",
+    "Configure monitored critical-result notification escalation",
+    "Complete insurer and payment provider sandbox/UAT and credential provisioning",
+    "Complete privacy, security, penetration and data-protection review",
+    "Complete PostgreSQL concurrency/load testing and backup/restore drills",
+    "Obtain authorized clinical, pharmacy and laboratory operational sign-off"
   ]
 }
