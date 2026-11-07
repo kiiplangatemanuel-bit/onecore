@@ -1775,7 +1775,9 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
           "pos_return", result.id, f"sale:{sale.id};refund:{total};reason:{payload.reason.strip()}")
     return {"id": result.id, "sale_id": sale.id, "status": "recorded",
             "refund_total": str(result.refund_total), "currency": sale.currency,
-            "stock_reintegrated": True, "refunds_executed": False}
+            "stock_reintegrated": True, "refunds_executed": False,
+            "accounting_status": accounting_link.status,
+            "accounting_journal_id": accounting_link.journal_id}
 
 
 @router.get("/pos/shifts/current")
