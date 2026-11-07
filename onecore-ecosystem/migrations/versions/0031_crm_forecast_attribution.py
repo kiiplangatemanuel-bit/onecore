@@ -7,6 +7,8 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
+    op.add_column("crm_leads", sa.Column("source_campaign_id", sa.Integer(), sa.ForeignKey("crm_campaigns.id"), nullable=True))
+    op.create_index("ix_crm_lead_source_campaign", "crm_leads", ["organization_id", "source_campaign_id"])
     op.add_column("crm_leads", sa.Column("expected_close_date", sa.DateTime(timezone=True), nullable=True))
     op.add_column("crm_leads", sa.Column("probability_override", sa.Numeric(5, 2), nullable=True))
     op.add_column("crm_leads", sa.Column("actual_closed_at", sa.DateTime(timezone=True), nullable=True))
@@ -94,3 +96,5 @@ def downgrade():
     op.drop_column("crm_leads", "actual_closed_at")
     op.drop_column("crm_leads", "probability_override")
     op.drop_column("crm_leads", "expected_close_date")
+    op.drop_index("ix_crm_lead_source_campaign", table_name="crm_leads")
+    op.drop_column("crm_leads", "source_campaign_id")
