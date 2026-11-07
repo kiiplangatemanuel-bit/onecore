@@ -338,3 +338,47 @@ def post_pending_pos_accounting(membership=Depends(active_membership),
     db.commit()
     return {"processed": len(results), "posted": sum(1 for item in results if item["status"] == "posted"),
             "pending": sum(1 for item in results if item["status"] == "pending"), "results": results}
+
+
+@router.post("/pos-integrations/backfill")
+def backfill_pos_accounting(membership=Depends(active_membership),
+                            user=Depends(current_user), db: Session = Depends(get_db)):
+    """Create missing bridge links and post legacy POS sources in bounded batches."""
+    require_permission(membership, "manage")
+    allowed = branch_scope_ids(membership)
+    sale_query = db.query(POSSale).filter_by(
+        organization_id=membership.organization_id, status="posted"
+    ).filter(~POSSale.id.in_(
+        db.query(POSAccountingLink.source_id).filter_by(
+            organization_id=membership.organization_id, source_type="sale"
+        )
+    ))
+    return_query = db.query(POSReturn).filter_by(
+        organization_id=membership.organization_id
+    ).filter(~POSReturn.id.in_(
+        db.query(POSAccountingLink.source_id).filter_by(
+            organization_id=membership.organization_id, source_type="return"
+        )
+    ))
+    if allowed is not None:
+        sale_query = sale_query.filter(POSSale.branch_id.in_(allowed))
+        return_query = return_query.filter(POSReturn.branch_id.in_(allowed))
+    sales = sale_query.order_by(POSSale.id).limit(500).all()
+    remaining = max(0, 500 - len(sales))
+    returns = return_query.order_by(POSReturn.id).limit(remaining).all()
+    results = []
+    for source in sales:
+        link = post_pos_source(db, membership.organization_id, source.branch_id,
+                               "sale", source.id, user.id)
+        results.append({"source_type": "sale", "source_id": source.id,
+                        "status": link.status, "journal_id": link.journal_id,
+                        "failure_reason": link.failure_reason})
+    for source in returns:
+        link = post_pos_source(db, membership.organization_id, source.branch_id,
+                               "return", source.id, user.id)
+        results.append({"source_type": "return", "source_id": source.id,
+                        "status": link.status, "journal_id": link.journal_id,
+                        "failure_reason": link.failure_reason})
+    db.commit()
+    return {"processed": len(results), "posted": sum(1 for item in results if item["status"] == "posted"),
+            "pending": sum(1 for item in results if item["status"] == "pending"), "results": results}
