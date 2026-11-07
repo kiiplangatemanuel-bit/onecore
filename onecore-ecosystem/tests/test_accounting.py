@@ -56,3 +56,11 @@ def test_accounting_tables_and_routes_exist():
     assert "/api/v1/accounting/accounts" in paths
     assert "/api/v1/accounting/journals" in paths
     assert "/api/v1/accounting/trial-balance" in paths
+
+
+def test_accounting_subledger_reconciliation_route_contract():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/accounting/subledger-reconciliation"
+    assert endpoint in paths
+    params = {item["name"] for item in paths[endpoint]["get"]["parameters"]}
+    assert {"invoice_type", "as_of"} <= params
