@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/v1/healthcare", tags=["Healthcare hospital opera
 NOW = lambda: datetime.now(timezone.utc)
 RESOURCE_TYPES = {
     "ward", "room", "bed", "admission", "vital_observation", "nursing_task", "care_plan",
-    "doctor_order", "treatment_plan", "invoice", "insurance_policy", "insurance_claim",
+    "doctor_order", "treatment_plan", "invoice", "invoice_payment", "insurance_policy", "insurance_claim",
     "preauthorization", "settlement", "pharmacy_job", "laboratory_job", "emergency_visit",
     "theatre", "procedure", "clinical_document", "retention_policy", "recovery_drill",
     "integration_job",
@@ -479,6 +479,39 @@ def create_invoice(patient_id: int, payload: dict, m=Depends(active_membership),
     return _view(row)
 
 
+
+@router.post("/invoices/{invoice_id}/payments", status_code=201)
+def record_invoice_payment(invoice_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    invoice = _resource(db,m,invoice_id,"invoice",lock=True)
+    patient, emergency, _ = _patient_access(db,m,u,invoice.patient_id,"patient.read",write=False)
+    _need(db,m,u,"billing.manage",patient.branch_id)
+    if invoice.status not in {"issued","partially_paid"}:
+        raise HTTPException(409,"Invoice is not open for payment")
+    amount = _money(payload.get("amount"))
+    data = _payload(invoice)
+    paid = Decimal(data.get("paid_amount","0.00"))
+    balance = Decimal(data.get("balance",str(invoice.amount or "0")))
+    if amount > balance:
+        raise HTTPException(422,"Payment exceeds the outstanding invoice balance")
+    reference = _required_text(payload,"reference",100)
+    method = payload.get("method")
+    if method not in {"cash","card","bank","mpesa","insurance"}:
+        raise HTTPException(422,"Unsupported payment method")
+    payment = _create(db,m,u,"invoice_payment",{"invoice_id":invoice.id,"reference":reference,
+        "method":method,"paid_at":NOW().isoformat(),"recorded_by":u.id},patient.branch_id,patient.id,
+        status="posted",external_key=reference,amount=amount,currency=invoice.currency,
+        idempotency_key=payload.get("idempotency_key"))
+    paid += amount; balance -= amount
+    data.update({"paid_amount":str(paid),"balance":str(balance)})
+    invoice.encrypted_payload=encrypt(data);invoice.status="paid" if balance==0 else "partially_paid"
+    invoice.updated_by=u.id;invoice.updated_at=NOW()
+    _audit(db,m,u,patient,"billing.invoice.payment", "",emergency)
+    _event(db,m,u,patient.id,patient.branch_id,"invoice.payment.recorded",
+        {"invoice_id":invoice.id,"payment_id":payment.id,"amount":str(amount)},invoice.id,payload.get("idempotency_key"))
+    db.commit()
+    return {"invoice":_view(invoice),"payment":_view(payment)}
+
+
 @router.post("/patients/{patient_id}/insurance/eligibility")
 def record_eligibility(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
     patient, emergency, _ = _patient_access(db, m, u, patient_id, "patient.read", write=False)
@@ -515,7 +548,7 @@ def decide_preauthorization(preauth_id: int, payload: dict, m=Depends(active_mem
     if row.status != "pending": raise HTTPException(409, "Preauthorization is no longer pending")
     decision = payload.get("decision")
     if decision not in {"approved", "partially_approved", "denied", "more_information"}: raise HTTPException(422, "Invalid payer decision")
-    approved = _money(payload.get("approved_amount")) if decision == "partially_approved" else (row.amount or Decimal("0"))
+    approved = (_money(payload.get("approved_amount")) if decision == "partially_approved" else\n        ((row.amount or Decimal("0")) if decision == "approved" else Decimal("0")))
     if approved > (row.amount or Decimal("0")): raise HTTPException(422, "Approved amount exceeds request")
     data = _payload(row); data.update({"decision": decision, "approved_amount": str(approved),
         "decided_at": NOW().isoformat(), "payer_reference": str(payload.get("payer_reference", ""))[:100]})
@@ -529,8 +562,13 @@ def submit_claim(patient_id: int, payload: dict, m=Depends(active_membership), u
     patient, emergency, _ = _patient_access(db, m, u, patient_id, "clinical.read", write=False)
     _need(db, m, u, "insurance.manage", patient.branch_id)
     amount = _money(payload.get("amount"))
+    invoice_id = payload.get("invoice_id")
+    if invoice_id:
+        invoice = _resource(db,m,int(invoice_id),"invoice")
+        if invoice.patient_id != patient.id or amount > (invoice.amount or Decimal("0")):
+            raise HTTPException(422,"Claim invoice must belong to this patient and cover the claim amount")
     row = _create(db, m, u, "insurance_claim", {"payer": _required_text(payload, "payer"),
-        "claim_number": _required_text(payload, "claim_number", 100), "invoice_id": payload.get("invoice_id"),
+        "claim_number": _required_text(payload, "claim_number", 100), "invoice_id": invoice_id,
         "submitted_at": NOW().isoformat(), "settled_amount": "0.00", "adjustment_reason": ""},
         patient.branch_id, patient.id, status="submitted", external_key=_required_text(payload, "claim_number", 100),
         amount=amount, currency=str(payload.get("currency", "KES")).upper(),
@@ -605,7 +643,7 @@ def integration_result(job_id: int, payload: dict, m=Depends(active_membership),
 
 @router.post("/patients/{patient_id}/emergency/triage", status_code=201)
 def emergency_triage(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _ = _patient_access(db,m,u,patient_id,"clinical.write",write=True)
+    patient, emergency, _ = _patient_access(db,m,u,patient_id,"patient.read",write=False)
     _need(db,m,u,"emergency.manage",patient.branch_id)
     acuity=payload.get("acuity")
     if acuity not in {1,2,3,4,5}: raise HTTPException(422,"Acuity must be 1 (highest) to 5 (lowest)")
