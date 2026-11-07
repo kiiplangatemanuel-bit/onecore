@@ -1571,3 +1571,25 @@ class ProcurementSupplierReturnLine(Base):
     receipt_line_id: Mapped[int] = mapped_column(ForeignKey("procurement_goods_receipt_lines.id"), index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SaccoFinanceRecord(Base):
+    """Tenant-scoped append-oriented finance workflow record and idempotency anchor."""
+    __tablename__ = "sacco_finance_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    record_type: Mapped[str] = mapped_column(String(40), index=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey("sacco_members.id"), nullable=True, index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("sacco_accounts.id"), nullable=True, index=True)
+    loan_id: Mapped[int | None] = mapped_column(ForeignKey("sacco_loans.id"), nullable=True, index=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    idempotency_key: Mapped[str] = mapped_column(String(120))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_sacco_finance_org_idempotency", "organization_id", "idempotency_key", unique=True),)

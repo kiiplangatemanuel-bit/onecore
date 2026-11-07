@@ -129,3 +129,26 @@ ageing definitions with the SACCO before operational use.
 - APIs: `GET/POST /api/v1/sacco/loans/{loan_id}/guarantors`, `POST /api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/decision`, `GET/POST /api/v1/sacco/loans/{loan_id}/collateral`, and `POST /api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/decision`.
 
 These records capture evidence and workflow status; they do not establish legal enforceability, perfect security interests, verify external valuations or initiate recovery. Product-level disbursement gating and jurisdiction-specific legal/compliance review remain separate controls.
+
+
+## SACCO finance automation and reconciliation
+
+The finance automation API is registered under `/api/v1/sacco/finance` and is tenant- and branch-scoped.
+
+- Recurring member deposits: create weekly/monthly standing orders and run due instructions through the supervised `POST /standing-orders/run` worker endpoint. Execution is idempotent by standing-order/date; deployments must schedule and monitor this endpoint.
+- Collection settlement: import M-Pesa/mobile-money/bank/cash-office collection references, then reconcile exact provider/bank reference and amount before a savings/share/contribution transaction or loan repayment is posted. Mismatches are quarantined as exceptions.
+- Reversals: independently authorized reversal records append a compensating savings-ledger entry or restore the exact original loan installment allocation; the original settlement record remains auditable.
+- Loan restructuring: request a new amortization schedule, retain the old unpaid schedule snapshot, require a different manager to approve, then replace only unpaid future installments.
+- Refinancing: obtain an outstanding settlement quote, submit a replacement-loan request and require maker-checker approval. Approval allocates the replacement loan proceeds to the original loan; it does not transfer external funds.
+- Statements: `GET /members/{member_id}/statement` returns a dated member ledger and `GET /members/{member_id}/statement.csv` provides a downloadable CSV history.
+- Dividends: allocate a declared pool proportionally to positive share-capital balances, with deterministic cent rounding and an idempotent credit to member savings accounts. Allocation is blocked if any eligible member lacks an active savings account.
+- Share reconciliation: compare member share-ledger totals to a selected posted general-ledger account.
+- Loan impairment: calculate arrears exposure and provision estimates using the supplied ageing rates. Rates are explicit policy inputs and are not represented as statutory or regulator-approved.
+- Accounting bridge: post balanced, idempotent SACCO source journals using two active tenant-owned GL accounts. The operator must choose the correct debit/credit accounts for each source type.
+- Arrears collection: queue dated member notification work items and provide management/regulatory portfolio workpapers.
+
+### Operational and compliance boundaries
+
+The recurring worker endpoint must be scheduled by the deployment's monitored scheduler; it is not a self-starting background daemon. Collection imports are not proof of payment: settlement is verified only after an independent statement/provider reference and amount match. No live M-Pesa Daraja, bank API, USSD or payment execution credentials are provisioned by this code. The notification endpoint queues work but does not send SMS/email without a configured delivery adapter. Refinancing allocates internal loan proceeds and does not make an external disbursement.
+
+The regulatory endpoint is a management workpaper, not a filed prudential return. Provision percentages, interest treatment, dividend policy, early-settlement rebates, IFRS 9/ECL staging, statutory reserves and regulator-specific reporting rules require SACCO-approved policy and Kenyan regulatory/accounting review. The accounting posting endpoint requires explicit GL mappings per posting request; automatic event-driven posting for every legacy transaction and a full period-close reconciliation remain release gates. PostgreSQL race/load testing, bank/provider UAT, penetration testing, reconciliation acceptance and production finance sign-off are required before live regulated use.

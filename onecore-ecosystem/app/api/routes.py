@@ -5399,7 +5399,7 @@ def _sacco_account_balance(db, organization_id, account_id):
     balance = Decimal("0.00")
     for transaction_type, amount in rows:
         amount = Decimal(str(amount))
-        if transaction_type == "withdrawal":
+        if transaction_type in {"withdrawal", "reversal"}:
             balance -= amount
         else:
             balance += amount
@@ -5588,7 +5588,7 @@ def list_sacco_transactions(account_id: int,
     result = []
     for row in rows:
         amount = Decimal(str(row.amount))
-        balance += -amount if row.transaction_type == "withdrawal" else amount
+        balance += -amount if row.transaction_type in {"withdrawal", "reversal"} else amount
         result.append({"id": row.id, "transaction_type": row.transaction_type,
             "amount": str(row.amount), "reference": row.reference,
             "created_at": row.created_at.isoformat(), "running_balance": str(balance)})
