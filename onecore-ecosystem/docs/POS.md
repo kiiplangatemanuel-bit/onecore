@@ -283,3 +283,6 @@ Hardware and live payment boundaries:
 
 
 The POS page now includes a supervisor workspace for trusted terminal approval/rejection/revocation, sync-health and dead-letter visibility, open conflict resolution, branch totals, customer membership creation/update, and linked customer purchase/loyalty history. Checkout accepts an optional customer reference and preserves it in the offline request fingerprint. The browser UI still needs device credential provisioning and transmission to the sync endpoint before a device-enrolled branch can use that UI for offline sync.
+
+
+The browser sync client now stores the trusted-device credential encrypted in the existing IndexedDB/WebCrypto vault after device registration, supplies the device ID/secret headers on sale sync, reports attempting/synced/retrying/dead-letter/conflict telemetry, records 409 conflict snapshots with payment phone details redacted, and applies exponential retry backoff capped at one hour. After an application reload, queued sales remain encrypted and recoverable; the cashier must authenticate again before synchronization can resume. This is durable queue recovery, not offline user re-authentication or a 24-hour offline entitlement.
