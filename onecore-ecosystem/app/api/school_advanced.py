@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import Record, AuditEvent, User, SchoolClass, SchoolLearner, SchoolAssessment, SchoolMark
+from app.core.models import Record, AuditEvent, User, SchoolClass, SchoolLearner, SchoolAssessment, SchoolMark, SchoolEnrollmentHistory
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
@@ -242,6 +242,50 @@ def save_ranking_config(payload: RankingConfigIn, m=Depends(active_membership),
     return _data(row)
 
 
+
+@router.get("/school/rankings")
+def school_rankings(academic_year:int,class_id:int|None=None,subject_id:int|None=None,
+                    m=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(m,"read")
+    configs=_rows(db,m,"ranking_config")
+    config=next((x.data for x in configs if x.data.get("academic_year")==academic_year
+                 and x.data.get("class_id")==class_id and x.data.get("subject_id")==subject_id),{})
+    q=db.query(SchoolAssessment).filter_by(organization_id=m.organization_id,academic_year=academic_year,status="published")
+    if class_id is not None: q=q.filter(SchoolAssessment.class_id==class_id)
+    if subject_id is not None: q=q.filter(SchoolAssessment.subject_id==subject_id)
+    assessments=q.all()
+    if not assessments: return {"academic_year":academic_year,"rankings":[],"configuration":config}
+    assessment_ids=[x.id for x in assessments]
+    by_id={x.id:x for x in assessments}
+    marks=db.query(SchoolMark).filter(SchoolMark.organization_id==m.organization_id,
+        SchoolMark.assessment_id.in_(assessment_ids)).all()
+    totals={}
+    for mark in marks:
+        assessment=by_id[mark.assessment_id]
+        key=mark.learner_id
+        entry=totals.setdefault(key,{"weighted_score":Decimal("0"),"weight":Decimal("0"),"class_id":assessment.class_id})
+        weight=Decimal(assessment.weight)
+        entry["weighted_score"]+=(Decimal(mark.score)/Decimal(assessment.maximum_score))*Decimal("100")*weight
+        entry["weight"]+=weight
+    results=[]
+    for learner_id,entry in totals.items():
+        learner=_learner(db,m,learner_id)
+        if class_id is not None and learner.class_id!=class_id: continue
+        if not entry["weight"]: continue
+        results.append({"learner_id":learner_id,"admission_number":learner.admission_number,
+            "learner_name":learner.first_name+" "+learner.last_name,
+            "class_id":learner.class_id,"average_percent":str((entry["weighted_score"]/entry["weight"]).quantize(Decimal("0.01")))})
+    results.sort(key=lambda x:Decimal(x["average_percent"]),reverse=True)
+    method=config.get("ranking_method","competition")
+    previous=None; rank=0
+    for index,item in enumerate(results,1):
+        score=Decimal(item["average_percent"])
+        if score!=previous: rank=index if method in ("competition","ordinal") else (rank+1)
+        item["rank"]=index if method=="ordinal" else rank
+        previous=score
+    return {"academic_year":academic_year,"configuration":config,"rankings":results}
+
+
 @router.post("/school/exam-timetables", status_code=201)
 def create_exam_timetable(payload: ExamTimetableIn, m=Depends(active_membership),
                           u: User=Depends(current_user), db: Session=Depends(get_db)):
@@ -404,9 +448,11 @@ def bulk_promote(payload:BulkPromotionIn,m=Depends(active_membership),
     for learner in learners:
         learner.class_id=target.id
         learner.branch_id=target.branch_id
-        hist=_create(db,m,u,"placement_history",{"learner_id":learner.id,"from_class_id":source.id,
-            "to_class_id":target.id,"change_type":payload.change_type,"effective_date":payload.effective_date.isoformat(),
-            "reason":payload.reason.strip(),"actor_user_id":u.id})
+        hist=SchoolEnrollmentHistory(organization_id=m.organization_id,learner_id=learner.id,
+            from_class_id=source.id,to_class_id=target.id,
+            effective_date=datetime.combine(payload.effective_date,datetime.min.time(),tzinfo=timezone.utc),
+            change_type=payload.change_type,reason=payload.reason.strip(),changed_by=u.id)
+        db.add(hist); db.flush()
         moved.append({"learner_id":learner.id,"history_id":hist.id})
     _audit(db,m,u,"school.learners.bulk_placement","school_learner",source.id,
            f"target_class={target.id};moved={len(moved)};skipped={len(missing)}")
