@@ -6031,16 +6031,24 @@ def receive_instrument_result(instrument_id:int,payload:LaboratoryInstrumentResu
         raise HTTPException(401,"Invalid instrument credential")
     sample=db.query(LaboratorySample).filter_by(
         organization_id=membership.organization_id,accession_number=payload.accession_number.strip().upper()).first()
-    if not sample or sample.status not in {"accepted","collected"}:raise HTTPException(404,"Accepted sample not found")
+    if not sample or sample.status!="accepted":raise HTTPException(404,"Accepted sample not found")
     order=db.query(LaboratoryOrder).filter_by(
         id=sample.order_id,organization_id=membership.organization_id).first()
     if not order or not can_access_branch(membership,order.branch_id):raise HTTPException(404,"Order not found")
     line=db.query(LaboratoryOrderLine).filter_by(
         organization_id=membership.organization_id,order_id=order.id,test_code=payload.test_code.strip().upper()).with_for_update().first()
     if not line or line.status!="pending":raise HTTPException(409,"Matching pending test line not found")
-    failed_qc=db.query(PharmacyLabWorkflowRecord).filter_by(
-        organization_id=membership.organization_id,record_type="lab_qc",parent_id=instrument.id,status="failed").first()
-    if failed_qc:raise HTTPException(409,"Instrument is blocked by failed quality control")
+    latest_qc=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="lab_qc",parent_id=instrument.id).order_by(
+        PharmacyLabWorkflowRecord.created_at.desc(),PharmacyLabWorkflowRecord.id.desc()).first()
+    if latest_qc and latest_qc.status!="passed":
+        raise HTTPException(409,"Instrument is blocked by latest failed quality control")
+    latest_cal=db.query(PharmacyLabWorkflowRecord).filter_by(
+        organization_id=membership.organization_id,record_type="lab_calibration",parent_id=instrument.id).order_by(
+        PharmacyLabWorkflowRecord.created_at.desc(),PharmacyLabWorkflowRecord.id.desc()).first()
+    if latest_cal and (latest_cal.status!="passed" or
+        date.fromisoformat(latest_cal.payload["next_due"])<date.today()):
+        raise HTTPException(409,"Instrument calibration is failed or overdue")
     line.result_value=payload.result_value.strip();line.result_notes=payload.result_notes.strip()
     line.entered_by=instrument.created_by;line.status="entered"
     order_lines=db.query(LaboratoryOrderLine).filter_by(
@@ -6116,7 +6124,7 @@ def queue_laboratory_result_delivery(order_id:int,payload:dict,
         organization_id=membership.organization_id,order_id=order.id,status="validated").all()
     content=[{"test_code":x.test_code,"test_name":x.test_name,"result":x.result_value,
               "unit":x.result_unit,"reference_range":x.reference_range_snapshot} for x in lines]
-    key=f"lab-delivery:{order.id}:{recipient_type}:{recipient_id}"
+    key=f"lab-delivery:{order.id}:{recipient_type}:{recipient_id}:"+uuid.uuid4().hex
     access_token=uuid.uuid4().hex+uuid.uuid4().hex if recipient_type=="patient" else None
     delivery_payload={"order_id":order.id,"patient_id":order.patient_id,"recipient_type":recipient_type,
          "recipient_id":recipient_id,"results":content,"delivery_channel":"secure_in_app",
