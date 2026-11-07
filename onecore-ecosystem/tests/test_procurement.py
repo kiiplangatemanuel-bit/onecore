@@ -44,3 +44,5 @@ def test_procurement_models_and_routes_are_registered():
     assert "/api/v1/procurement/orders" in paths
     assert "/api/v1/procurement/orders/{order_id}/approve" in paths
     assert "/api/v1/procurement/orders/{order_id}/receive" in paths
+    assert "/api/v1/procurement/orders/{order_id}" in paths
+    assert "/procurement" in paths
