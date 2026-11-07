@@ -444,3 +444,68 @@ class SchoolGradeBand(Base):
     maximum_percent: Mapped[Decimal] = mapped_column(Numeric(6, 3))
     points: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=Decimal("0"))
     __table_args__ = (Index("ix_school_grade_org_scale_grade", "organization_id", "scale_name", "grade", unique=True),)
+
+
+class AccountingInvoice(Base):
+    """Tenant-owned AR/AP invoice; posted invoice lines are immutable."""
+    __tablename__ = "accounting_invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    invoice_type: Mapped[str] = mapped_column(String(12))  # receivable or payable
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("procurement_suppliers.id"), nullable=True, index=True)
+    invoice_number: Mapped[str] = mapped_column(String(60))
+    issue_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    control_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    posted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_invoice_org_number", "organization_id", "invoice_number", unique=True),
+        Index("ix_accounting_invoice_org_status_due", "organization_id", "status", "due_date"),
+    )
+
+
+class AccountingInvoiceLine(Base):
+    __tablename__ = "accounting_invoice_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    tax_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_accounts.id"), nullable=True)
+    description: Mapped[str] = mapped_column(String(240))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), default=Decimal("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AccountingInvoicePayment(Base):
+    __tablename__ = "accounting_invoice_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    payment_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    payment_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_invoice_payment_org_idempotency", "organization_id", "idempotency_key", unique=True),
+    )
