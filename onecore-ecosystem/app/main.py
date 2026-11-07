@@ -30,6 +30,16 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
 app.include_router(router)
 app.include_router(platform_router)
 
+@app.get("/pos", response_class=HTMLResponse)
+def pos_ui():
+    page = Path(__file__).resolve().parent / "web" / "pos.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/pos-sw.js", response_class=HTMLResponse)
+def pos_service_worker():
+    page = Path(__file__).resolve().parent / "web" / "pos-sw.js"
+    return HTMLResponse(page.read_text(encoding="utf-8"), media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
+
 @app.get("/procurement", response_class=HTMLResponse)
 def procurement_ui():
     page = Path(__file__).resolve().parent / "web" / "procurement.html"
