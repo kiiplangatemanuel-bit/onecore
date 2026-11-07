@@ -382,3 +382,25 @@ class SchoolAttendanceIn(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Each learner may appear only once per attendance register")
         return self
+
+
+class ProcurementRequisitionLineIn(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+
+
+class ProcurementRequisitionIn(BaseModel):
+    branch_id: str | None = Field(default=None, max_length=36)
+    justification: str = Field(min_length=5, max_length=1000)
+    lines: list[ProcurementRequisitionLineIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_products(self):
+        ids = [line.product_id for line in self.lines]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each product may appear only once in a requisition")
+        return self
+
+
+class ProcurementRequisitionReviewIn(BaseModel):
+    reason: str = Field(default="", max_length=500)
