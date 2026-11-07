@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 from decimal import Decimal
 import hashlib
 import secrets
@@ -165,6 +165,7 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
     if set(by_id) != set(invoice_ids):
         raise HTTPException(404, "One or more supplier invoices were not found")
     currency = None
+    branch_ids = set()
     total = Decimal("0.00")
     for item in payload.allocations:
         invoice = by_id[item.invoice_id]
@@ -174,6 +175,7 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
             raise HTTPException(409, "Only posted and partially paid AP invoices can be settled")
         if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
             raise HTTPException(404, "Supplier invoice not found")
+        branch_ids.add(invoice.branch_id)
         balance = Decimal(invoice.total) - Decimal(invoice.amount_paid)
         if item.amount > balance:
             raise HTTPException(422, f"Allocation exceeds invoice {invoice.invoice_number} outstanding balance")
@@ -182,6 +184,8 @@ def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(a
         elif currency != invoice.currency:
             raise HTTPException(422, "A settlement cannot combine invoices in different currencies")
         total += item.amount
+    if len(branch_ids) > 1:
+        raise HTTPException(422, "A settlement batch cannot span multiple branches")
     if currency != cash_currency(db, membership.organization_id):
         # The ledger is single-base-currency; foreign-currency payments require a configured FX workflow.
         raise HTTPException(422, "Settlement currency must equal the organization's accounting base currency")
@@ -271,7 +275,7 @@ def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
     journal = _accounting_make_journal(
         db, membership, user, settlement.payment_date.date(), payload.provider_reference.strip(),
         "Supplier settlement " + settlement.reference, lines,
-        invoices[0].branch_id if len({x.branch_id for x in invoices}) == 1 else None,
+        invoices[0].branch_id,
     )
     for allocation in allocations:
         invoice = by_id[allocation.invoice_id]
@@ -450,8 +454,8 @@ def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
     rules = [x for x in rules if x.maximum_amount is None or amount <= x.maximum_amount]
     if not rules:
         raise HTTPException(409, "No approval policy applies to this purchase order")
-    if principal_membership.role != rules[0].approver_role:
-        raise HTTPException(403, "Delegating principal does not hold the role required for the next approval tier")
+    if delegation.principal_user_id == order.created_by:
+        raise HTTPException(403, "The purchase-order creator cannot delegate approval of their own order")
     actions = db.query(ProcurementApprovalAction).filter_by(
         organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
     ).all()
@@ -495,7 +499,7 @@ def create_supplier_portal_token(payload: PortalTokenIn, membership=Depends(acti
         raise HTTPException(404, "Supplier not found")
     expires = payload.expires_at if payload.expires_at.tzinfo else payload.expires_at.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
-    if expires <= now or expires > now.replace(year=now.year + 1):
+    if expires <= now or expires > now + timedelta(days=366):
         raise HTTPException(422, "Portal token expiry must be within the next 12 months")
     raw = secrets.token_urlsafe(32)
     row = ProcurementSupplierPortalToken(
