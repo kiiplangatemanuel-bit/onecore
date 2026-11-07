@@ -4604,17 +4604,16 @@ def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
     if not order or not can_access_branch(membership, order.branch_id):
         raise HTTPException(404, "Laboratory order not found")
     existing = db.query(LaboratorySample).filter_by(
-        organization_id=membership.organization_id, order_id=order.id
-    ).first()
+        organization_id=membership.organization_id, order_id=order.id,
+        accession_number=payload.accession_number.strip().upper()).first()
     if existing:
-        if (existing.accession_number == payload.accession_number.strip().upper()
-                and existing.specimen_type == payload.specimen_type.strip().lower()):
+        if existing.specimen_type == payload.specimen_type.strip().lower():
             return {"id": existing.id, "order_id": order.id,
                     "accession_number": existing.accession_number,
                     "specimen_type": existing.specimen_type, "status": "already_recorded"}
-        raise HTTPException(409, "A different sample is already registered for this order")
-    if order.status != "ordered":
-        raise HTTPException(409, "Only newly ordered tests can have a sample collected")
+        raise HTTPException(409, "Accession number is already assigned to another specimen")
+    if order.status not in {"ordered","sample_collected","sample_rejected"}:
+        raise HTTPException(409, "Order is not accepting new or replacement samples")
     lines = db.query(LaboratoryOrderLine).filter_by(
         organization_id=membership.organization_id, order_id=order.id
     ).all()
@@ -6015,7 +6014,12 @@ def decide_laboratory_sample(sample_id:int,payload:LaboratorySampleDecisionIn,
     if not order or not can_access_branch(membership,order.branch_id):raise HTTPException(404,"Sample not found")
     if sample.status not in {"collected","accepted"}:raise HTTPException(409,"Sample is already rejected or processing")
     if payload.decision=="rejected":
-        sample.status="rejected";order.status="sample_rejected"
+        sample.status="rejected"
+        other_accepted=db.query(LaboratorySample).filter(
+            LaboratorySample.organization_id==membership.organization_id,
+            LaboratorySample.order_id==order.id,LaboratorySample.status=="accepted",
+            LaboratorySample.id!=sample.id).first()
+        order.status="sample_collected" if other_accepted else "sample_rejected"
     else:
         sample.status="accepted";order.status="sample_collected"
     _pharm_lab_record(db,membership,user,"lab_chain_of_custody",None,
