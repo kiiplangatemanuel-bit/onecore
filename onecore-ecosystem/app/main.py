@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -28,6 +29,11 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
 app.include_router(platform_router)
+
+@app.get("/inventory", response_class=HTMLResponse)
+def inventory_ui():
+    page = Path(__file__).resolve().parent / "web" / "inventory.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
 
 @app.get("/health")
 def health():
