@@ -175,7 +175,9 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     insurance_relief = min(money(insurance_premium * D(str(cfg["paye"]["insurance_relief_rate"]))),
                             D(str(cfg["paye"]["insurance_relief_monthly_limit"]))) if resident else ZERO
     deductible = money(ahl + shif + pension + mortgage + prmf + nssf)
-    meal_exemption = min(money(extra.get("meal_benefit", 0)), D(str(cfg["paye"].get("meal_benefit_exemption_monthly", "5000"))))
+    meal_benefit = money(extra.get("meal_benefit", 0))
+    meal_exemption = D(str(cfg["paye"].get("meal_benefit_exemption_monthly", "5000")))
+    taxable_meal_benefit = money(max(ZERO, meal_benefit - meal_exemption))
     certificate_expiry = extra.get("disability_exemption_valid_until")
     certificate_valid = bool(extra.get("disability_exemption_certificate_number")) and bool(certificate_expiry)
     if certificate_valid:
@@ -186,9 +188,9 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
             certificate_valid = False
     disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid and resident else ZERO
     declared_noncash_benefits = money(extra.get("non_cash_benefits", 0))
-    taxable_benefits = money(extra.get("taxable_benefits", 0)) + money(max(
-        ZERO, declared_noncash_benefits - D(str(cfg["paye"].get("noncash_benefit_exemption_monthly", "5000")))))
-    taxable = max(ZERO, money(gross + taxable_benefits - deductible - meal_exemption - disability_exemption))
+    taxable_benefits = money(money(extra.get("taxable_benefits", 0)) + taxable_meal_benefit + money(max(
+        ZERO, declared_noncash_benefits - D(str(cfg["paye"].get("noncash_benefit_exemption_monthly", "5000"))))))
+    taxable = max(ZERO, money(gross + taxable_benefits - deductible - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if resident else ZERO
     paye = money(max(ZERO, gross_tax - personal_relief - insurance_relief))
@@ -205,7 +207,7 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
         "mortgage_interest": str(mortgage), "post_retirement_medical_fund": str(prmf),
         "other_deductions": str(other_deductions), "net_pay": str(net),
         "employer_statutory_cost": str(money(employer_nssf + employer_ahl)),
-        "total_employer_cost": str(money(gross + employer_nssf + employer_ahl)),
+        "total_employer_cost": str(money(gross + employer_nssf + employer_ahl + declared_noncash_benefits + meal_benefit + money(extra.get("taxable_benefits", 0)))),
     }
 
 
@@ -404,7 +406,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         taxable_benefits = money(extras.get("taxable_benefits", 0))
         noncash_benefits = money(extras.get("non_cash_benefits", 0))
         meal_benefit = money(extras.get("meal_benefit", 0))
-        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + regular_allowances + meal_benefit)
+        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + regular_allowances)
         statutory_base = money(prorated_base + regular_allowances)
         extras = {**extras,
             "nssf_pensionable_base": extras.get("nssf_pensionable_base", statutory_base),
