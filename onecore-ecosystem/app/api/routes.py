@@ -1,6 +1,6 @@
 import json, re, uuid
 from decimal import Decimal
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -583,6 +583,16 @@ def list_crm_activities(membership=Depends(active_membership), db: Session = Dep
                         limit: int = Query(default=100, ge=1, le=500)):
     require_permission(membership, "read")
     q = db.query(CRMActivity).filter_by(organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        q = q.outerjoin(CRMContact, CRMActivity.contact_id == CRMContact.id).outerjoin(
+            CRMLead, CRMActivity.lead_id == CRMLead.id
+        ).filter(or_(
+            and_(CRMActivity.contact_id.isnot(None), CRMContact.branch_id.in_(allowed)),
+            and_(CRMActivity.lead_id.isnot(None), CRMLead.branch_id.in_(allowed))
+        ))
     rows = q.order_by(CRMActivity.id.desc()).limit(limit).all()
     return [{"id": x.id, "contact_id": x.contact_id, "lead_id": x.lead_id,
              "activity_type": x.activity_type, "subject": x.subject, "notes": x.notes,
@@ -597,14 +607,18 @@ def create_crm_activity(payload: CRMActivityIn, membership=Depends(active_member
     require_permission(membership, "create")
     if bool(payload.contact_id) == bool(payload.lead_id):
         raise HTTPException(422, "Specify exactly one contact or lead")
-    if payload.contact_id and not db.query(CRMContact).filter_by(
-        id=payload.contact_id, organization_id=membership.organization_id
-    ).first():
-        raise HTTPException(404, "Contact not found")
-    if payload.lead_id and not db.query(CRMLead).filter_by(
-        id=payload.lead_id, organization_id=membership.organization_id
-    ).first():
-        raise HTTPException(404, "Lead not found")
+    if payload.contact_id:
+        contact = db.query(CRMContact).filter_by(
+            id=payload.contact_id, organization_id=membership.organization_id
+        ).first()
+        if not contact or not can_access_branch(membership, contact.branch_id):
+            raise HTTPException(404, "Contact not found")
+    if payload.lead_id:
+        lead = db.query(CRMLead).filter_by(
+            id=payload.lead_id, organization_id=membership.organization_id
+        ).first()
+        if not lead or not can_access_branch(membership, lead.branch_id):
+            raise HTTPException(404, "Lead not found")
     row = CRMActivity(organization_id=membership.organization_id,
                       contact_id=payload.contact_id, lead_id=payload.lead_id,
                       activity_type=payload.activity_type, subject=payload.subject.strip(),
