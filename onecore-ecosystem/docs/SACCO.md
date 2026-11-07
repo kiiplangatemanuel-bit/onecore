@@ -117,3 +117,15 @@ penalties, restructure loans, apply non-performing-loan rules, issue notices,
 allocate recovery costs or create accounting journals. It does not reconcile
 receipts with bank/mobile-money settlement. Validate policies and regulatory
 ageing definitions with the SACCO before operational use.
+
+
+## Guarantor and collateral records
+
+- Guarantors are persisted against an existing active loan with an active, KYC-verified SACCO member, a positive guaranteed amount and a recorded consent reference.
+- A borrower cannot guarantee their own loan. Duplicate guarantor/member records on one loan are rejected.
+- Guarantor registration is pending until a different authorized officer approves or rejects it. Approved guarantees may later be released with a reason.
+- Collateral records capture type, description, owner, identifier and estimated value. Acceptance requires an assessed value, valuation reference and valuation date.
+- Collateral can be rejected or released through an audited review action. Review actions use tenant/branch-scoped loan lookup and maker-checker separation for acceptance/rejection.
+- APIs: `GET/POST /api/v1/sacco/loans/{loan_id}/guarantors`, `POST /api/v1/sacco/loans/{loan_id}/guarantors/{guarantor_id}/decision`, `GET/POST /api/v1/sacco/loans/{loan_id}/collateral`, and `POST /api/v1/sacco/loans/{loan_id}/collateral/{collateral_id}/decision`.
+
+These records capture evidence and workflow status; they do not establish legal enforceability, perfect security interests, verify external valuations or initiate recovery. Product-level disbursement gating and jurisdiction-specific legal/compliance review remain separate controls.

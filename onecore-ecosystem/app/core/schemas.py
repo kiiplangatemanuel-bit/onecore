@@ -1065,3 +1065,44 @@ class SaccoLoanRepaymentIn(BaseModel):
 class SaccoLoanDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected)$")
     note: str = Field(min_length=3, max_length=500)
+
+
+
+class SaccoLoanGuarantorIn(BaseModel):
+    member_id: int = Field(gt=0)
+    guaranteed_amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    consent_reference: str = Field(min_length=3, max_length=120)
+
+    @field_validator("consent_reference")
+    @classmethod
+    def consent_reference_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("A verifiable guarantor consent reference is required")
+        return value
+
+
+class SaccoLoanCollateralIn(BaseModel):
+    collateral_type: str = Field(min_length=2, max_length=40)
+    description: str = Field(min_length=5, max_length=500)
+    owner_name: str = Field(min_length=2, max_length=180)
+    identifier: str = Field(default="", max_length=120)
+    estimated_value: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+    @field_validator("collateral_type", "description", "owner_name", "identifier")
+    @classmethod
+    def trim_collateral_text(cls, value):
+        return value.strip()
+
+
+class SaccoLoanGuarantorDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected|released)$")
+    note: str = Field(min_length=3, max_length=500)
+
+
+class SaccoLoanCollateralDecisionIn(BaseModel):
+    decision: str = Field(pattern=r"^(approved|rejected|released)$")
+    note: str = Field(min_length=3, max_length=500)
+    assessed_value: Decimal | None = Field(default=None, gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    valuation_reference: str = Field(default="", max_length=120)
+    valuation_date: date | None = None
