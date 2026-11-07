@@ -5441,15 +5441,24 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
     ).first()
     if not learner or not can_access_branch(membership, learner.branch_id):
         raise HTTPException(404, "Learner not found")
-    if not learner.class_id:
-        raise HTTPException(409, "Learner has no current class placement")
-    school_class = db.query(SchoolClass).filter_by(
-        id=learner.class_id, organization_id=membership.organization_id
-    ).first()
-    if not school_class or not can_access_branch(membership, school_class.branch_id):
-        raise HTTPException(404, "Learner class not found")
-    if school_class.academic_year != academic_year:
-        raise HTTPException(422, "Requested academic year does not match the learner's current class")
+    class_ids = {learner.class_id} if learner.class_id else set()
+    placement_history = db.query(SchoolEnrollmentHistory).filter_by(
+        organization_id=membership.organization_id, learner_id=learner.id
+    ).all()
+    for placement in placement_history:
+        class_ids.add(placement.from_class_id)
+        class_ids.add(placement.to_class_id)
+    class_ids.discard(None)
+    historical_classes = db.query(SchoolClass).filter(
+        SchoolClass.organization_id == membership.organization_id,
+        SchoolClass.id.in_(class_ids),
+        SchoolClass.academic_year == academic_year,
+    ).order_by(SchoolClass.name, SchoolClass.stream).all() if class_ids else []
+    if not historical_classes:
+        raise HTTPException(404, "No learner class placement found for the requested academic year")
+    if any(not can_access_branch(membership, item.branch_id) for item in historical_classes):
+        raise HTTPException(404, "Learner class placement not found")
+    report_class_ids = [item.id for item in historical_classes]
     if (attendance_start is None) != (attendance_end is None):
         raise HTTPException(422, "Provide both attendance_start and attendance_end")
     if attendance_start and attendance_end and attendance_start > attendance_end:
@@ -5463,7 +5472,7 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
         SchoolMark.organization_id == membership.organization_id,
     )).filter(
         SchoolAssessment.organization_id == membership.organization_id,
-        SchoolAssessment.class_id == school_class.id,
+        SchoolAssessment.class_id.in_(report_class_ids),
         SchoolAssessment.academic_year == academic_year,
         SchoolAssessment.term == term,
         SchoolAssessment.status == "published",
@@ -5505,8 +5514,12 @@ def get_school_learner_report_card(learner_id: int, academic_year: int,
         "learner": {"id": learner.id, "admission_number": learner.admission_number,
             "name": f"{learner.first_name} {learner.last_name}",
             "guardian_name": learner.guardian_name},
-        "class": {"id": school_class.id, "name": school_class.name,
-            "stream": school_class.stream, "academic_year": school_class.academic_year},
+        "class": {"id": historical_classes[0].id if len(historical_classes) == 1 else None,
+            "name": " / ".join(f"{item.name} {item.stream}".strip() for item in historical_classes),
+            "stream": historical_classes[0].stream if len(historical_classes) == 1 else "Multiple placements",
+            "academic_year": academic_year},
+        "class_placements": [{"id": item.id, "name": item.name,
+            "stream": item.stream, "branch_id": item.branch_id} for item in historical_classes],
         "academic_year": academic_year, "term": term,
         "publication_basis": "Published assessments only",
         **report, "attendance": attendance,
