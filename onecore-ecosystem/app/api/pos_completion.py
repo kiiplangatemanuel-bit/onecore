@@ -336,9 +336,29 @@ def operations_report(branch_id:str|None=None,membership=Depends(active_membersh
         POSPayment.organization_id==membership.organization_id,POSPayment.status=="unsettled")
     if branch_id:tender_query=tender_query.filter(POSSale.branch_id==branch_id)
     elif allowed is not None:tender_query=tender_query.filter(POSSale.branch_id.in_(allowed or ["__none__"]))
+    from app.core.pos_completion_models import POSDevice
+    device_ids={x.device_id for x in shift_rows if x.device_id is not None}
+    devices=db.query(POSDevice).filter(POSDevice.organization_id==membership.organization_id,
+        POSDevice.id.in_(device_ids or [-1])).all()
+    device_names={x.id:x.name for x in devices}
+    terminal_groups={}
+    for shift_row in shift_rows:
+        terminal_groups.setdefault(shift_row.device_id,[]).append(shift_row)
+    by_terminal=[]
+    for terminal_id, terminal_shifts in sorted(terminal_groups.items(),key=lambda item:(item[0] is None,item[0] or 0)):
+        shift_ids={x.id for x in terminal_shifts}
+        terminal_sales=[x for x in rows if x.shift_id in shift_ids]
+        by_terminal.append({"device_id":terminal_id,"terminal":device_names.get(terminal_id,"Unbound terminal"),
+            "branch_ids":sorted({x.branch_id for x in terminal_shifts}),
+            "sales_count":len(terminal_sales),
+            "sales_total":str(sum((Decimal(x.total_amount) for x in terminal_sales),Decimal("0"))),
+            "open_shifts":sum(x.status=="open" for x in terminal_shifts),
+            "closed_shifts":sum(x.status!="open" for x in terminal_shifts),
+            "pending_review":sum(x.reconciliation_status=="pending_review" for x in terminal_shifts)})
     return {"sales_count":len(rows),"sales_total":str(sum((Decimal(x.total_amount) for x in rows),Decimal("0"))),
         "by_branch":[{"branch_id":b,"sales_count":sum(x.branch_id==b for x in rows),
         "sales_total":str(sum((Decimal(x.total_amount) for x in rows if x.branch_id==b),Decimal("0")))} for b in sorted({x.branch_id for x in rows})],
+        "by_terminal":by_terminal,
         "shifts":{"open":sum(x.status=="open" for x in shift_rows),"closed":sum(x.status!="open" for x in shift_rows),
         "pending_review":sum(x.reconciliation_status=="pending_review" for x in shift_rows)},
         "unsettled_tenders":tender_query.scalar() or 0}
