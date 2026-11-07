@@ -1,0 +1,803 @@
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
+import hashlib
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.models import (
+    AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AccountingJournalLine,
+    AccountingBankStatementLine, ProcurementSupplier, ProcurementPurchaseOrder,
+    ProcurementPurchaseOrderLine, ProcurementApprovalRule, ProcurementApprovalAction,
+    ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, Record, Membership, User,
+)
+from app.core.procurement_workflow_models import (
+    ProcurementSettlement, ProcurementSettlementAllocation, ProcurementApprovalDelegation,
+    ProcurementSupplierPortalToken, ProcurementInvoiceDiscrepancy,
+    ProcurementSupplierStatement, ProcurementSupplierStatementLine,
+)
+from app.core.security import current_user
+from app.core.tenancy import active_membership
+from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
+from app.api.routes import _accounting_make_journal, _accounting_assert_period_open, audit
+
+router = APIRouter(prefix="/api/v1/procurement", tags=["procurement-settlement-and-governance"])
+CENT = Decimal("0.01")
+
+
+class SettlementAllocationIn(BaseModel):
+    invoice_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, multiple_of=CENT, le=Decimal("9999999999999999"))
+
+
+class SettlementCreateIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    payment_account_id: int = Field(gt=0)
+    payment_date: date
+    provider: str = Field(default="manual", pattern=r"^(manual|bank_transfer|mpesa)$")
+    provider_reference: str = Field(default="", max_length=120)
+    reference: str = Field(min_length=2, max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    allocations: list[SettlementAllocationIn] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_invoices(self):
+        ids = [x.invoice_id for x in self.allocations]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each AP invoice may be allocated once per settlement")
+        return self
+
+
+class SettlementVerifyIn(BaseModel):
+    provider_reference: str = Field(min_length=2, max_length=120)
+    verification_note: str = Field(default="", max_length=500)
+
+
+class DelegationIn(BaseModel):
+    branch_id: str | None = Field(default=None, max_length=36)
+    principal_user_id: int = Field(gt=0)
+    delegate_user_id: int = Field(gt=0)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class PortalTokenIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    expires_at: datetime
+
+
+class SupplierStatementLineIn(BaseModel):
+    transaction_date: date
+    description: str = Field(min_length=1, max_length=240)
+    reference: str = Field(default="", max_length=120)
+    amount: Decimal = Field(ne=0, multiple_of=CENT, le=Decimal("9999999999999999"), ge=Decimal("-9999999999999999"))
+
+
+class SupplierStatementIn(BaseModel):
+    supplier_id: int = Field(gt=0)
+    statement_reference: str = Field(min_length=2, max_length=80)
+    start_date: date
+    end_date: date
+    opening_balance: Decimal
+    closing_balance: Decimal
+    lines: list[SupplierStatementLineIn] = Field(min_length=0, max_length=5000)
+
+
+class StatementMatchIn(BaseModel):
+    invoice_id: int | None = Field(default=None, gt=0)
+    payment_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def one_target(self):
+        if bool(self.invoice_id) == bool(self.payment_id):
+            raise ValueError("Choose exactly one invoice or payment")
+        return self
+
+
+class DiscrepancyIn(BaseModel):
+    code: str = Field(pattern=r"^(price|quantity|tax|currency|duplicate|receipt|other)$")
+    details: dict = Field(default_factory=dict)
+
+
+class DiscrepancyResolveIn(BaseModel):
+    resolution_note: str = Field(min_length=5, max_length=500)
+
+
+def _visible_invoice(db, membership, invoice_id, lock=False):
+    q = db.query(AccountingInvoice).filter_by(
+        id=invoice_id, organization_id=membership.organization_id, invoice_type="payable"
+    )
+    if lock:
+        q = q.with_for_update()
+    row = q.first()
+    if not row or (row.branch_id and not can_access_branch(membership, row.branch_id)):
+        raise HTTPException(404, "Supplier payable invoice not found")
+    return row
+
+
+def _settlement_response(row):
+    return {
+        "id": row.id, "supplier_id": row.supplier_id, "amount": str(row.amount),
+        "currency": row.currency, "provider": row.provider, "provider_reference": row.provider_reference,
+        "reference": row.reference, "status": row.status, "journal_id": row.journal_id,
+        "payment_date": row.payment_date.date().isoformat(),
+    }
+
+
+@router.post("/supplier-settlements", status_code=201)
+def create_supplier_settlement(payload: SettlementCreateIn, membership=Depends(active_membership),
+                               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Create an idempotent settlement instruction; money is not marked paid until independently verified."""
+    require_permission(membership, "manage")
+    existing = db.query(ProcurementSettlement).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if existing:
+        same = (existing.supplier_id == payload.supplier_id
+                and existing.payment_account_id == payload.payment_account_id
+                and existing.reference == payload.reference.strip()
+                and existing.amount == sum((x.amount for x in payload.allocations), Decimal("0.00")))
+        if not same:
+            raise HTTPException(409, "Settlement idempotency key was used for different payment data")
+        return {**_settlement_response(existing), "status": "already_exists"}
+    supplier = db.query(ProcurementSupplier).filter_by(
+        id=payload.supplier_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
+    cash = db.query(AccountingAccount).filter_by(
+        id=payload.payment_account_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not cash or cash.account_type != "asset":
+        raise HTTPException(422, "Settlement account must be an active cash/bank asset account")
+    invoice_ids = sorted(x.invoice_id for x in payload.allocations)
+    invoices = db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id == membership.organization_id,
+        AccountingInvoice.id.in_(invoice_ids),
+    ).order_by(AccountingInvoice.id).with_for_update().all()
+    by_id = {x.id: x for x in invoices}
+    if set(by_id) != set(invoice_ids):
+        raise HTTPException(404, "One or more supplier invoices were not found")
+    currency = None
+    total = Decimal("0.00")
+    for item in payload.allocations:
+        invoice = by_id[item.invoice_id]
+        if invoice.invoice_type != "payable" or invoice.supplier_id != supplier.id:
+            raise HTTPException(422, "Every allocation must target a payable invoice for this supplier")
+        if invoice.status not in {"posted", "partially_paid"}:
+            raise HTTPException(409, "Only posted and partially paid AP invoices can be settled")
+        if invoice.branch_id and not can_access_branch(membership, invoice.branch_id):
+            raise HTTPException(404, "Supplier invoice not found")
+        balance = Decimal(invoice.total) - Decimal(invoice.amount_paid)
+        if item.amount > balance:
+            raise HTTPException(422, f"Allocation exceeds invoice {invoice.invoice_number} outstanding balance")
+        if currency is None:
+            currency = invoice.currency
+        elif currency != invoice.currency:
+            raise HTTPException(422, "A settlement cannot combine invoices in different currencies")
+        total += item.amount
+    if currency != cash_currency(db, membership.organization_id):
+        # The ledger is single-base-currency; foreign-currency payments require a configured FX workflow.
+        raise HTTPException(422, "Settlement currency must equal the organization's accounting base currency")
+    row = ProcurementSettlement(
+        organization_id=membership.organization_id, supplier_id=supplier.id,
+        payment_account_id=cash.id, amount=total, currency=currency,
+        provider=payload.provider, provider_reference=payload.provider_reference.strip(),
+        reference=payload.reference.strip(), status="pending_verification",
+        payment_date=datetime.combine(payload.payment_date, time.min, tzinfo=timezone.utc),
+        idempotency_key=payload.idempotency_key, created_by=user.id,
+    )
+    db.add(row)
+    db.flush()
+    for item in payload.allocations:
+        db.add(ProcurementSettlementAllocation(
+            organization_id=membership.organization_id, settlement_id=row.id,
+            invoice_id=item.invoice_id, amount=item.amount,
+        ))
+    audit(db, user.id, membership.organization_id, "procurement.settlement.initiated",
+          "procurement_settlement", row.id, f"{row.amount}:{row.provider}:{row.reference}")
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Settlement conflicts with another request")
+    db.refresh(row)
+    return _settlement_response(row)
+
+
+def cash_currency(db, organization_id):
+    from app.core.models import Organization
+    org = db.query(Organization).filter_by(id=organization_id, is_active=True).first()
+    return org.currency if org else None
+
+
+@router.post("/supplier-settlements/{settlement_id}/verify")
+def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
+                               membership=Depends(active_membership), user: User = Depends(current_user),
+                               db: Session = Depends(get_db)):
+    """Verify a bank/provider-confirmed payment and atomically post AP allocations and cash journal."""
+    require_permission(membership, "manage")
+    settlement = db.query(ProcurementSettlement).filter_by(
+        id=settlement_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not settlement:
+        raise HTTPException(404, "Settlement not found")
+    if settlement.status == "settled":
+        if settlement.provider_reference != payload.provider_reference.strip():
+            raise HTTPException(409, "Settlement is already verified against a different provider reference")
+        return {**_settlement_response(settlement), "status": "already_settled"}
+    if settlement.status != "pending_verification":
+        raise HTTPException(409, "Only pending settlements can be verified")
+    allocations = db.query(ProcurementSettlementAllocation).filter_by(
+        organization_id=membership.organization_id, settlement_id=settlement.id
+    ).order_by(ProcurementSettlementAllocation.invoice_id).all()
+    if not allocations or sum((Decimal(x.amount) for x in allocations), Decimal("0.00")) != Decimal(settlement.amount):
+        raise HTTPException(409, "Settlement allocation total does not reconcile to payment amount")
+    invoice_ids = sorted(x.invoice_id for x in allocations)
+    invoices = db.query(AccountingInvoice).filter(
+        AccountingInvoice.organization_id == membership.organization_id,
+        AccountingInvoice.id.in_(invoice_ids),
+    ).order_by(AccountingInvoice.id).with_for_update().all()
+    by_id = {x.id: x for x in invoices}
+    if set(by_id) != set(invoice_ids):
+        raise HTTPException(409, "An allocated AP invoice is no longer available")
+    cash = db.query(AccountingAccount).filter_by(
+        id=settlement.payment_account_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not cash or cash.account_type != "asset":
+        raise HTTPException(409, "Settlement cash/bank account is no longer active")
+    _accounting_assert_period_open(db, membership.organization_id, settlement.payment_date.date())
+    lines = []
+    for allocation in allocations:
+        invoice = by_id[allocation.invoice_id]
+        if invoice.invoice_type != "payable" or invoice.supplier_id != settlement.supplier_id:
+            raise HTTPException(409, "Settlement allocation no longer matches supplier payable")
+        if invoice.status not in {"posted", "partially_paid"}:
+            raise HTTPException(409, "Allocated invoice is not in a payable settlement state")
+        amount = Decimal(allocation.amount)
+        if amount > Decimal(invoice.total) - Decimal(invoice.amount_paid):
+            raise HTTPException(409, "Invoice balance changed after settlement instruction")
+        lines.append({"account_id": invoice.control_account_id,
+                      "description": "Settle supplier invoice " + invoice.invoice_number,
+                      "debit": amount, "credit": Decimal("0.00")})
+    lines.append({"account_id": cash.id, "description": "Supplier payment " + settlement.reference,
+                  "debit": Decimal("0.00"), "credit": Decimal(settlement.amount)})
+    journal = _accounting_make_journal(
+        db, membership, user, settlement.payment_date.date(), payload.provider_reference.strip(),
+        "Supplier settlement " + settlement.reference, lines,
+        invoices[0].branch_id if len({x.branch_id for x in invoices}) == 1 else None,
+    )
+    for allocation in allocations:
+        invoice = by_id[allocation.invoice_id]
+        amount = Decimal(allocation.amount)
+        payment = AccountingInvoicePayment(
+            organization_id=membership.organization_id, invoice_id=invoice.id,
+            payment_account_id=cash.id, journal_id=journal.id, amount=amount,
+            payment_date=settlement.payment_date, reference=payload.provider_reference.strip(),
+            idempotency_key=f"proc-settlement-{settlement.id}-{invoice.id}", created_by=user.id,
+        )
+        db.add(payment)
+        db.flush()
+        allocation.accounting_payment_id = payment.id
+        invoice.amount_paid = Decimal(invoice.amount_paid) + amount
+        invoice.status = "paid" if invoice.amount_paid == invoice.total else "partially_paid"
+    settlement.provider_reference = payload.provider_reference.strip()
+    settlement.status = "settled"
+    settlement.journal_id = journal.id
+    settlement.verified_by = user.id
+    settlement.verified_at = datetime.now(timezone.utc)
+    audit(db, user.id, membership.organization_id, "procurement.settlement.verified",
+          "procurement_settlement", settlement.id, payload.verification_note.strip())
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Settlement verification conflicted with another request")
+    return {**_settlement_response(settlement), "status": "settled",
+            "journal_id": journal.id, "allocation_count": len(allocations)}
+
+
+@router.get("/supplier-settlements")
+def list_supplier_settlements(supplier_id: int | None = Query(default=None, gt=0),
+                              membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    q = db.query(ProcurementSettlement).filter_by(organization_id=membership.organization_id)
+    if supplier_id:
+        q = q.filter(ProcurementSettlement.supplier_id == supplier_id)
+    rows = q.order_by(ProcurementSettlement.id.desc()).limit(500).all()
+    return [_settlement_response(x) for x in rows]
+
+
+@router.get("/supplier-settlements/{settlement_id}/remittance")
+def supplier_remittance_advice(settlement_id: int, membership=Depends(active_membership),
+                                db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    row = db.query(ProcurementSettlement).filter_by(
+        id=settlement_id, organization_id=membership.organization_id, status="settled"
+    ).first()
+    if not row:
+        raise HTTPException(404, "Verified supplier settlement not found")
+    supplier = db.query(ProcurementSupplier).filter_by(
+        id=row.supplier_id, organization_id=membership.organization_id
+    ).first()
+    allocations = db.query(ProcurementSettlementAllocation, AccountingInvoice).join(
+        AccountingInvoice, AccountingInvoice.id == ProcurementSettlementAllocation.invoice_id
+    ).filter(ProcurementSettlementAllocation.settlement_id == row.id,
+              ProcurementSettlementAllocation.organization_id == membership.organization_id).all()
+    return {
+        "remittance_number": f"REM-{row.id:08d}", "supplier": supplier.name if supplier else "",
+        "supplier_id": row.supplier_id, "payment_date": row.payment_date.date().isoformat(),
+        "provider": row.provider, "provider_reference": row.provider_reference,
+        "payment_reference": row.reference, "currency": row.currency, "total_paid": str(row.amount),
+        "journal_id": row.journal_id,
+        "allocations": [{"invoice_id": invoice.id, "invoice_number": invoice.invoice_number,
+                         "amount": str(allocation.amount), "balance_after_payment": str(Decimal(invoice.total)-Decimal(invoice.amount_paid))}
+                        for allocation, invoice in allocations],
+        "status": "verified",
+    }
+
+
+@router.post("/approval-delegations", status_code=201)
+def create_approval_delegation(payload: DelegationIn, membership=Depends(active_membership),
+                               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    now = datetime.now(timezone.utc)
+    starts = payload.starts_at if payload.starts_at.tzinfo else payload.starts_at.replace(tzinfo=timezone.utc)
+    ends = payload.ends_at if payload.ends_at.tzinfo else payload.ends_at.replace(tzinfo=timezone.utc)
+    if payload.principal_user_id == payload.delegate_user_id or starts >= ends or ends <= now:
+        raise HTTPException(422, "Delegation users and validity window are invalid")
+    if payload.branch_id and not can_access_branch(membership, payload.branch_id):
+        raise HTTPException(404, "Branch not found")
+    members = db.query(Membership).filter(
+        Membership.organization_id == membership.organization_id, Membership.is_active == True,
+        Membership.user_id.in_([payload.principal_user_id, payload.delegate_user_id])
+    ).all()
+    if {x.user_id for x in members} != {payload.principal_user_id, payload.delegate_user_id}:
+        raise HTTPException(422, "Principal and delegate must be active organization members")
+    overlap = db.query(ProcurementApprovalDelegation).filter(
+        ProcurementApprovalDelegation.organization_id == membership.organization_id,
+        ProcurementApprovalDelegation.principal_user_id == payload.principal_user_id,
+        ProcurementApprovalDelegation.revoked_at.is_(None),
+        ProcurementApprovalDelegation.starts_at < ends,
+        ProcurementApprovalDelegation.ends_at > starts,
+    ).first()
+    if overlap:
+        raise HTTPException(409, "Principal already has an overlapping active delegation")
+    row = ProcurementApprovalDelegation(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        principal_user_id=payload.principal_user_id, delegate_user_id=payload.delegate_user_id,
+        starts_at=starts, ends_at=ends, reason=payload.reason.strip(), created_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.approval.delegation.created",
+          "procurement_approval_delegation", row.id, row.reason)
+    return {"id": row.id, "principal_user_id": row.principal_user_id,
+            "delegate_user_id": row.delegate_user_id, "starts_at": starts.isoformat(),
+            "ends_at": ends.isoformat(), "status": "active"}
+
+
+@router.get("/approval-delegations")
+def list_approval_delegations(membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    rows = db.query(ProcurementApprovalDelegation).filter_by(
+        organization_id=membership.organization_id
+    ).order_by(ProcurementApprovalDelegation.id.desc()).limit(300).all()
+    return [{"id": x.id, "branch_id": x.branch_id, "principal_user_id": x.principal_user_id,
+             "delegate_user_id": x.delegate_user_id, "starts_at": x.starts_at.isoformat(),
+             "ends_at": x.ends_at.isoformat(), "reason": x.reason,
+             "revoked_at": x.revoked_at.isoformat() if x.revoked_at else None} for x in rows]
+
+
+@router.post("/approval-delegations/{delegation_id}/revoke")
+def revoke_approval_delegation(delegation_id: int, membership=Depends(active_membership),
+                               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(ProcurementApprovalDelegation).filter_by(
+        id=delegation_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Delegation not found")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+        audit(db, user.id, membership.organization_id, "procurement.approval.delegation.revoked",
+              "procurement_approval_delegation", row.id)
+    return {"id": row.id, "status": "revoked"}
+
+
+@router.post("/orders/{order_id}/approve-as-delegate")
+def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
+                                       membership=Depends(active_membership),
+                                       user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "create")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or (order.branch_id and not can_access_branch(membership, order.branch_id)):
+        raise HTTPException(404, "Purchase order not found")
+    if order.status != "draft" or order.created_by == user.id:
+        raise HTTPException(409, "Order is not awaiting approval or creator cannot approve")
+    delegation = db.query(ProcurementApprovalDelegation).filter_by(
+        id=delegation_id, organization_id=membership.organization_id,
+        delegate_user_id=user.id, revoked_at=None,
+    ).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    if not delegation or not (delegation.starts_at <= now <= delegation.ends_at):
+        raise HTTPException(403, "No active delegation authorizes this approval")
+    if delegation.branch_id and delegation.branch_id != order.branch_id:
+        raise HTTPException(403, "Delegation does not cover this purchase-order branch")
+    principal_membership = db.query(Membership).filter_by(
+        organization_id=membership.organization_id, user_id=delegation.principal_user_id, is_active=True
+    ).first()
+    if not principal_membership:
+        raise HTTPException(403, "Delegating approver is no longer an active member")
+    lines = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).all()
+    amount = sum((Decimal(x.quantity_ordered) * Decimal(x.unit_cost) for x in lines), Decimal("0.00"))
+    rules = db.query(ProcurementApprovalRule).filter(
+        ProcurementApprovalRule.organization_id == membership.organization_id,
+        ProcurementApprovalRule.is_active == True,
+        ProcurementApprovalRule.minimum_amount <= amount,
+    ).order_by(ProcurementApprovalRule.approval_level).all()
+    rules = [x for x in rules if x.maximum_amount is None or amount <= x.maximum_amount]
+    if not rules:
+        raise HTTPException(409, "No approval policy applies to this purchase order")
+    if principal_membership.role != rules[0].approver_role:
+        raise HTTPException(403, "Delegating principal does not hold the role required for the next approval tier")
+    actions = db.query(ProcurementApprovalAction).filter_by(
+        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
+    ).all()
+    action_levels = {x.approval_level for x in actions if x.action == "approved"}
+    next_rule = next((x for x in rules if x.approval_level not in action_levels), None)
+    if not next_rule or next_rule.approval_level != rules[0].approval_level:
+        # A later level may be delegated only after all earlier levels have approved.
+        next_rule = next((x for x in rules if x.approval_level not in action_levels), None)
+    if not next_rule or next_rule.approver_role != principal_membership.role:
+        raise HTTPException(403, "Delegation principal is not eligible for the current approval level")
+    if db.query(ProcurementApprovalAction).filter_by(
+        organization_id=membership.organization_id, entity_type="purchase_order",
+        entity_id=order.id, approval_level=next_rule.approval_level
+    ).first():
+        raise HTTPException(409, "This approval level has already been decided")
+    db.add(ProcurementApprovalAction(
+        organization_id=membership.organization_id, entity_type="purchase_order",
+        entity_id=order.id, approval_level=next_rule.approval_level,
+        approver_user_id=user.id, action="approved", note=f"Delegated for user {delegation.principal_user_id}",
+    ))
+    approved_levels = action_levels | {next_rule.approval_level}
+    if all(rule.approval_level in approved_levels for rule in rules):
+        order.status = "approved"
+        order.approved_by = user.id
+        order.approved_at = now
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.purchase_order.delegated_approval",
+          "purchase_order", order.id, f"delegation:{delegation.id};level:{next_rule.approval_level}")
+    return {"id": order.id, "status": order.status, "approved_level": next_rule.approval_level,
+            "remaining_levels": [x.approval_level for x in rules if x.approval_level not in approved_levels]}
+
+
+@router.post("/supplier-portal/tokens", status_code=201)
+def create_supplier_portal_token(payload: PortalTokenIn, membership=Depends(active_membership),
+                                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    supplier = db.query(ProcurementSupplier).filter_by(
+        id=payload.supplier_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
+    expires = payload.expires_at if payload.expires_at.tzinfo else payload.expires_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if expires <= now or expires > now.replace(year=now.year + 1):
+        raise HTTPException(422, "Portal token expiry must be within the next 12 months")
+    raw = secrets.token_urlsafe(32)
+    row = ProcurementSupplierPortalToken(
+        organization_id=membership.organization_id, supplier_id=supplier.id,
+        token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        scopes={"read_purchase_orders": True, "read_invoices": True, "read_rfqs": True, "delivery_updates": True},
+        expires_at=expires, created_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.supplier_portal.token_created",
+          "supplier_portal_token", row.id, f"supplier:{supplier.id};expires:{expires.isoformat()}")
+    return {"id": row.id, "supplier_id": supplier.id, "token": raw,
+            "expires_at": expires.isoformat(), "warning": "Store this token securely; it cannot be retrieved again."}
+
+
+def _portal_supplier(token, db):
+    if not token or len(token) > 200:
+        raise HTTPException(401, "Supplier portal token is required")
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    row = db.query(ProcurementSupplierPortalToken).filter_by(token_hash=digest).first()
+    now = datetime.now(timezone.utc)
+    if not row or row.revoked_at or row.expires_at <= now:
+        raise HTTPException(401, "Supplier portal token is invalid or expired")
+    supplier = db.query(ProcurementSupplier).filter_by(
+        id=row.supplier_id, organization_id=row.organization_id, is_active=True
+    ).first()
+    if not supplier:
+        raise HTTPException(401, "Supplier portal access is no longer active")
+    return row, supplier
+
+
+@router.get("/supplier-portal/purchase-orders")
+def supplier_portal_purchase_orders(token: str = Header(default="", alias="X-Supplier-Portal-Token"),
+                                    db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    rows = db.query(ProcurementPurchaseOrder).filter_by(
+        organization_id=access.organization_id, supplier_id=supplier.id
+    ).order_by(ProcurementPurchaseOrder.id.desc()).limit(200).all()
+    return [{"id": x.id, "order_number": x.order_number, "status": x.status,
+             "currency": x.currency, "created_at": x.created_at.isoformat()} for x in rows]
+
+
+@router.get("/supplier-portal/invoices")
+def supplier_portal_invoices(token: str = Header(default="", alias="X-Supplier-Portal-Token"),
+                              db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    rows = db.query(ProcurementSupplierInvoice).filter_by(
+        organization_id=access.organization_id, supplier_id=supplier.id
+    ).order_by(ProcurementSupplierInvoice.id.desc()).limit(200).all()
+    return [{"id": x.id, "invoice_number": x.invoice_number, "invoice_date": x.invoice_date.date().isoformat(),
+             "currency": x.currency, "status": x.status, "subtotal": str(x.subtotal),
+             "tax_total": str(x.tax_total), "total": str(Decimal(x.subtotal)+Decimal(x.tax_total))}
+            for x in rows]
+
+
+@router.post("/supplier-portal/delivery-updates", status_code=201)
+def supplier_portal_delivery_update(payload: dict,
+                                    token: str = Header(default="", alias="X-Supplier-Portal-Token"),
+                                    db: Session = Depends(get_db)):
+    access, supplier = _portal_supplier(token, db)
+    order_id = payload.get("purchase_order_id")
+    status = payload.get("status")
+    note = str(payload.get("note", "")).strip()
+    if not isinstance(order_id, int) or status not in {"dispatched", "in_transit", "delayed", "delivered"} or len(note) > 500:
+        raise HTTPException(422, "Valid purchase_order_id, delivery status and note are required")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=access.organization_id, supplier_id=supplier.id
+    ).first()
+    if not order:
+        raise HTTPException(404, "Purchase order not found")
+    event = Record(organization_id=access.organization_id, module_key="procurement",
+        record_type="supplier_delivery_update",
+        data={"supplier_id": supplier.id, "purchase_order_id": order.id,
+              "status": status, "note": note, "reported_at": datetime.now(timezone.utc).isoformat()},
+        branch_id=order.branch_id, created_by=access.created_by)
+    db.add(event)
+    db.commit()
+    return {"id": event.id, "purchase_order_id": order.id, "status": status, "recorded": True}
+
+
+@router.post("/supplier-statements", status_code=201)
+def import_supplier_statement(payload: SupplierStatementIn, membership=Depends(active_membership),
+                              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    supplier = db.query(ProcurementSupplier).filter_by(
+        id=payload.supplier_id, organization_id=membership.organization_id
+    ).first()
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
+    if payload.end_date < payload.start_date:
+        raise HTTPException(422, "Statement end date cannot precede start date")
+    if len(payload.lines) != len({(x.transaction_date, x.reference, x.description) for x in payload.lines}):
+        raise HTTPException(422, "Duplicate statement lines are not allowed")
+    row = ProcurementSupplierStatement(
+        organization_id=membership.organization_id, supplier_id=supplier.id,
+        statement_reference=payload.statement_reference.strip(),
+        start_date=datetime.combine(payload.start_date, time.min, tzinfo=timezone.utc),
+        end_date=datetime.combine(payload.end_date, time.max, tzinfo=timezone.utc),
+        opening_balance=payload.opening_balance, closing_balance=payload.closing_balance,
+        status="open", created_by=user.id,
+    )
+    db.add(row)
+    db.flush()
+    for number, item in enumerate(payload.lines, start=1):
+        db.add(ProcurementSupplierStatementLine(
+            organization_id=membership.organization_id, statement_id=row.id, line_number=number,
+            transaction_date=datetime.combine(item.transaction_date, time.min, tzinfo=timezone.utc),
+            description=item.description.strip(), reference=item.reference.strip(), amount=item.amount,
+        ))
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.supplier_statement.imported",
+          "supplier_statement", row.id, row.statement_reference)
+    return {"id": row.id, "statement_reference": row.statement_reference,
+            "line_count": len(payload.lines), "status": row.status}
+
+
+@router.get("/supplier-statements/{statement_id}")
+def get_supplier_statement(statement_id: int, membership=Depends(active_membership),
+                           db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    row = db.query(ProcurementSupplierStatement).filter_by(
+        id=statement_id, organization_id=membership.organization_id
+    ).first()
+    if not row:
+        raise HTTPException(404, "Supplier statement not found")
+    lines = db.query(ProcurementSupplierStatementLine).filter_by(
+        statement_id=row.id, organization_id=membership.organization_id
+    ).order_by(ProcurementSupplierStatementLine.line_number).all()
+    return {"id": row.id, "supplier_id": row.supplier_id, "statement_reference": row.statement_reference,
+            "opening_balance": str(row.opening_balance), "closing_balance": str(row.closing_balance),
+            "status": row.status,
+            "lines": [{"id": x.id, "line_number": x.line_number, "date": x.transaction_date.date().isoformat(),
+                       "description": x.description, "reference": x.reference, "amount": str(x.amount),
+                       "matched_invoice_id": x.matched_invoice_id, "matched_payment_id": x.matched_payment_id}
+                      for x in lines]}
+
+
+@router.post("/supplier-statements/{statement_id}/lines/{line_id}/match")
+def match_supplier_statement_line(statement_id: int, line_id: int, payload: StatementMatchIn,
+                                  membership=Depends(active_membership), user: User = Depends(current_user),
+                                  db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    statement = db.query(ProcurementSupplierStatement).filter_by(
+        id=statement_id, organization_id=membership.organization_id, status="open"
+    ).with_for_update().first()
+    line = db.query(ProcurementSupplierStatementLine).filter_by(
+        id=line_id, statement_id=statement_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not statement or not line:
+        raise HTTPException(404, "Open supplier statement line not found")
+    if line.matched_invoice_id or line.matched_payment_id:
+        raise HTTPException(409, "Statement line is already matched")
+    if payload.invoice_id:
+        target = db.query(AccountingInvoice).filter_by(
+            id=payload.invoice_id, organization_id=membership.organization_id,
+            supplier_id=statement.supplier_id, invoice_type="payable",
+        ).first()
+        if not target or Decimal(target.total) != abs(Decimal(line.amount)):
+            raise HTTPException(422, "Invoice supplier or statement amount does not match")
+        line.matched_invoice_id = target.id
+    else:
+        target = db.query(AccountingInvoicePayment).join(
+            AccountingInvoice, AccountingInvoice.id == AccountingInvoicePayment.invoice_id
+        ).filter(AccountingInvoicePayment.id == payload.payment_id,
+                 AccountingInvoicePayment.organization_id == membership.organization_id,
+                 AccountingInvoice.supplier_id == statement.supplier_id).first()
+        if not target or Decimal(target.amount) != abs(Decimal(line.amount)):
+            raise HTTPException(422, "Payment supplier or statement amount does not match")
+        line.matched_payment_id = target.id
+    line.matched_by = user.id
+    line.matched_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"id": line.id, "status": "matched"}
+
+
+@router.post("/supplier-statements/{statement_id}/reconcile")
+def reconcile_supplier_statement(statement_id: int, membership=Depends(active_membership),
+                                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(ProcurementSupplierStatement).filter_by(
+        id=statement_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Supplier statement not found")
+    if row.status == "reconciled":
+        return {"id": row.id, "status": "already_reconciled"}
+    lines = db.query(ProcurementSupplierStatementLine).filter_by(
+        statement_id=row.id, organization_id=membership.organization_id
+    ).all()
+    unmatched = [x.id for x in lines if not x.matched_invoice_id and not x.matched_payment_id]
+    calculated = Decimal(row.opening_balance) + sum((Decimal(x.amount) for x in lines), Decimal("0.00"))
+    if unmatched:
+        raise HTTPException(409, {"message": "All supplier statement lines must be matched", "unmatched_line_ids": unmatched})
+    if calculated != Decimal(row.closing_balance):
+        raise HTTPException(409, {"message": "Supplier statement opening/closing balances do not reconcile",
+                                   "calculated_closing_balance": str(calculated),
+                                   "statement_closing_balance": str(row.closing_balance)})
+    row.status = "reconciled"
+    row.reconciled_by = user.id
+    row.reconciled_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.supplier_statement.reconciled",
+          "supplier_statement", row.id)
+    return {"id": row.id, "status": row.status, "matched_lines": len(lines),
+            "closing_balance": str(calculated)}
+
+
+@router.post("/supplier-invoices/{supplier_invoice_id}/discrepancies", status_code=201)
+def record_supplier_invoice_discrepancy(supplier_invoice_id: int, payload: DiscrepancyIn,
+                                         membership=Depends(active_membership), user: User = Depends(current_user),
+                                         db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    invoice = db.query(ProcurementSupplierInvoice).filter_by(
+        id=supplier_invoice_id, organization_id=membership.organization_id
+    ).first()
+    if not invoice:
+        raise HTTPException(404, "Supplier invoice not found")
+    if invoice.status not in {"matched", "accounted"}:
+        raise HTTPException(409, "Discrepancies can only be raised against a matched or accounted invoice")
+    row = ProcurementInvoiceDiscrepancy(
+        organization_id=membership.organization_id, supplier_invoice_id=invoice.id,
+        code=payload.code, details=payload.details, status="open", created_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.invoice.discrepancy.opened",
+          "supplier_invoice_discrepancy", row.id, payload.code)
+    return {"id": row.id, "supplier_invoice_id": invoice.id, "status": row.status, "code": row.code}
+
+
+@router.post("/invoice-discrepancies/{discrepancy_id}/resolve")
+def resolve_supplier_invoice_discrepancy(discrepancy_id: int, payload: DiscrepancyResolveIn,
+                                          membership=Depends(active_membership), user: User = Depends(current_user),
+                                          db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(ProcurementInvoiceDiscrepancy).filter_by(
+        id=discrepancy_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Invoice discrepancy not found")
+    if row.status == "resolved":
+        return {"id": row.id, "status": "already_resolved"}
+    invoice = db.query(ProcurementSupplierInvoice).filter_by(
+        id=row.supplier_invoice_id, organization_id=membership.organization_id
+    ).first()
+    if not invoice or invoice.status not in {"matched", "accounted"}:
+        raise HTTPException(409, "Source invoice is not in a reconciled state")
+    row.status = "resolved"
+    row.resolution_note = payload.resolution_note.strip()
+    row.resolved_by = user.id
+    row.resolved_at = datetime.now(timezone.utc)
+    db.commit()
+    audit(db, user.id, membership.organization_id, "procurement.invoice.discrepancy.resolved",
+          "supplier_invoice_discrepancy", row.id, row.resolution_note)
+    return {"id": row.id, "status": row.status}
+
+
+@router.get("/accounting-reconciliation")
+def procurement_accounting_reconciliation(start_date: date | None = None, end_date: date | None = None,
+                                           membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    q = db.query(ProcurementSupplierInvoice).filter_by(organization_id=membership.organization_id)
+    if start_date:
+        q = q.filter(ProcurementSupplierInvoice.invoice_date >= datetime.combine(start_date, time.min, tzinfo=timezone.utc))
+    if end_date:
+        q = q.filter(ProcurementSupplierInvoice.invoice_date <= datetime.combine(end_date, time.max, tzinfo=timezone.utc))
+    source = q.order_by(ProcurementSupplierInvoice.id).all()
+    from app.core.models import AccountingProcurementLink, AccountingBankStatement
+    links = db.query(AccountingProcurementLink).filter_by(organization_id=membership.organization_id).all()
+    link_map = {x.procurement_invoice_id: x for x in links}
+    settlements = db.query(ProcurementSettlement).filter_by(
+        organization_id=membership.organization_id, status="settled"
+    ).all()
+    statement_lines = db.query(AccountingBankStatementLine).filter_by(
+        organization_id=membership.organization_id
+    ).all()
+    bank_matched_journal_ids = {x.matched_journal_line_id for x in statement_lines if x.matched_journal_line_id}
+    result = []
+    blockers = []
+    for item in source:
+        link = link_map.get(item.id)
+        ap = db.query(AccountingInvoice).filter_by(
+            id=link.accounting_invoice_id, organization_id=membership.organization_id
+        ).first() if link else None
+        row = {"procurement_invoice_id": item.id, "supplier_invoice_number": item.invoice_number,
+               "source_status": item.status, "accounting_invoice_id": ap.id if ap else None,
+               "ap_status": ap.status if ap else "not_integrated",
+               "source_total": str(Decimal(item.subtotal)+Decimal(item.tax_total)),
+               "ap_total": str(ap.total) if ap else None}
+        if not ap:
+            blockers.append({"invoice_id": item.id, "reason": "not_integrated_to_ap"})
+        elif Decimal(ap.total) != Decimal(item.subtotal)+Decimal(item.tax_total):
+            blockers.append({"invoice_id": item.id, "reason": "source_ap_total_mismatch"})
+        result.append(row)
+    return {
+        "supplier_invoices": result,
+        "settled_supplier_payments": len(settlements),
+        "bank_statement_lines": len(statement_lines),
+        "bank_matched_lines": len(bank_matched_journal_ids),
+        "unmatched_bank_lines": len(statement_lines)-len(bank_matched_journal_ids),
+        "blockers": blockers,
+        "ready": not blockers and len(statement_lines) == len(bank_matched_journal_ids),
+        "note": "Bank matching is evidenced by matched journal-line references; provider callbacks and live bank feeds require configured production credentials and provider UAT.",
+    }
