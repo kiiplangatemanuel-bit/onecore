@@ -1229,3 +1229,19 @@ class MpesaRefundIntent(Base):
     mpesa_receipt_number: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CRMCampaignDelivery(Base):
+    """Append-only provider attempt and unsubscribe evidence for a campaign recipient."""
+    __tablename__ = "crm_campaign_deliveries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("crm_campaign_recipients.id"), index=True)
+    attempt_number: Mapped[int] = mapped_column()
+    status: Mapped[str] = mapped_column(String(16))
+    provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True, unique=True)
+    unsubscribe_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
