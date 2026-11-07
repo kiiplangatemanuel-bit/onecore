@@ -63,7 +63,7 @@ def list_templates(membership=Depends(active_membership),db:Session=Depends(get_
     require_permission(membership,"read")
     q=db.query(CRMMessageTemplate).filter_by(organization_id=membership.organization_id,is_active=True)
     allowed=branch_scope_ids(membership)
-    if allowed is not None:q=q.filter(CRMMessageTemplate.branch_id.in_(allowed))
+    if allowed is not None:q=q.filter((CRMMessageTemplate.branch_id.is_(None)) | CRMMessageTemplate.branch_id.in_(allowed))
     return [{"id":x.id,"name":x.name,"channel":x.channel,"purpose":x.purpose,
         "subject":x.subject,"body":x.body,"version":x.version,"branch_id":x.branch_id}
         for x in q.order_by(CRMMessageTemplate.name).all()]
@@ -76,7 +76,7 @@ def revise_template(template_id:int,payload:CRMTemplateIn,membership=Depends(act
     if not can_access_branch(membership,old.branch_id):raise HTTPException(404,"Template not found")
     _branch(db,membership,payload.branch_id)
     version=(db.query(func.max(CRMMessageTemplate.version)).filter_by(
-        organization_id=membership.organization_id,name=old.name).scalar() or old.version)+1
+        organization_id=membership.organization_id,name=payload.name).scalar() or 0)+1
     old.is_active=False
     row=CRMMessageTemplate(organization_id=membership.organization_id,branch_id=payload.branch_id,
         name=payload.name.strip(),channel=payload.channel,purpose=payload.purpose,
@@ -109,7 +109,7 @@ def list_segments(membership=Depends(active_membership),db:Session=Depends(get_d
     require_permission(membership,"read")
     q=db.query(CRMAudienceSegment).filter_by(organization_id=membership.organization_id,is_active=True)
     allowed=branch_scope_ids(membership)
-    if allowed is not None:q=q.filter(CRMAudienceSegment.branch_id.in_(allowed))
+    if allowed is not None:q=q.filter((CRMAudienceSegment.branch_id.is_(None)) | CRMAudienceSegment.branch_id.in_(allowed))
     return [{"id":x.id,"name":x.name,"branch_id":x.branch_id,"filters":x.filters}
         for x in q.order_by(CRMAudienceSegment.name).all()]
 
@@ -146,6 +146,8 @@ def schedule_campaign(campaign_id:int,payload:CRMCampaignScheduleIn,
     if template and (template.channel!=campaign.channel or template.purpose!=campaign.purpose):
         raise HTTPException(422,"Template channel and purpose must match the campaign")
     if template and not can_access_branch(membership,template.branch_id):raise HTTPException(404,"Template not found")
+    if template and campaign.branch_id and template.branch_id and campaign.branch_id!=template.branch_id:
+        raise HTTPException(422,"Campaign and template branches do not match")
     segment=_segment(db,payload.segment_id,membership.organization_id,membership) if payload.segment_id else None
     if segment and campaign.branch_id and segment.branch_id and campaign.branch_id!=segment.branch_id:
         raise HTTPException(422,"Campaign and audience segment branches do not match")
