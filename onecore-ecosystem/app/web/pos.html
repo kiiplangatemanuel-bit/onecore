@@ -243,6 +243,7 @@ const total=cart.reduce((sum,item)=>sum+cartLineTotal(item),0);if(total<=0)retur
 const sale={client_transaction_id:crypto.randomUUID(),shift_id:shift.id,branch_id:branch,customer_ref:$('sale').elements.customer_ref.value.trim()||null,currency:'KES',offline_created_at:new Date().toISOString(),mpesa_phone:$('sale').elements.mpesa_phone.value,lines:cart.map(item=>({product_id:item.product.id,quantity:Number(item.quantity).toFixed(3),discount_percent:Number(item.discount_percent||0).toFixed(4)})),payments:[{method:$('sale').elements.method.value,amount:total.toFixed(2)}]};
 try{const encrypted=await encrypt(sale);await reqStore('queue','readwrite',s=>s.put({id:sale.client_transaction_id,...encrypted}));cart.forEach(item=>{item.product.available_quantity=(Number(item.product.available_quantity)-Number(item.quantity)).toFixed(3);});cart=[];await saveCache();renderCatalog();await updateQueue();status('Multi-product sale stored safely in the local queue.');if(navigator.onLine)await syncQueue();}catch(err){status('Could not save sale locally: '+err.message);}});
 async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=await queueRecords();for(const item of items){
+ if(item.nextAttemptAt && item.nextAttemptAt>Date.now()){status('Sync retry is backing off until '+new Date(item.nextAttemptAt).toLocaleTimeString()+'.');break;}
  let sale=null;const attempt=(item.attempt||0)+1;item.attempt=attempt;
  try{
   await reqStore('queue','readwrite',s=>s.put(item));sale=await decrypt(item);
@@ -257,10 +258,12 @@ async function syncQueue(){if(!token||!db||!navigator.onLine)return;const items=
  }catch(err){
   if(sale){
    if(err.status===409){
-    try{await api('/pos/advanced/conflicts',{method:'POST',body:JSON.stringify({branch_id:sale.branch_id,client_transaction_id:sale.client_transaction_id,conflict_type:/stock/i.test(err.message)?'stale_stock':/shift/i.test(err.message)?'shift_closed':'payload_mismatch',client_snapshot:sale,server_snapshot:{status:err.status,detail:err.message}})});}catch(_){}
+    try{const device=await getDeviceCredentials();const safeSnapshot={client_transaction_id:sale.client_transaction_id,branch_id:sale.branch_id,shift_id:sale.shift_id,customer_ref:sale.customer_ref||null,lines:sale.lines,payments:sale.payments.map(p=>({method:p.method,amount:p.amount}))};await api('/pos/advanced/conflicts',{method:'POST',body:JSON.stringify({branch_id:sale.branch_id,device_id:device?.device_id||null,client_transaction_id:sale.client_transaction_id,conflict_type:/stock/i.test(err.message)?'stale_stock':/shift/i.test(err.message)?'shift_closed':'payload_mismatch',client_snapshot:safeSnapshot,server_snapshot:{status:err.status,detail:err.message}})});}catch(_){}
     await recordSyncEvent(sale,'conflict',attempt,err);
    }else await recordSyncEvent(sale,attempt>=8?'dead_letter':'retrying',attempt,err);
   }
+  item.nextAttemptAt=Date.now()+Math.min(3600000,1000*Math.pow(2,Math.min(attempt,10)));
+  await reqStore('queue','readwrite',s=>s.put(item));
   status('Sync paused for '+item.id+' (attempt '+attempt+'): '+err.message);break;
  }
 }await updateQueue();try{await refreshOnline();}catch(e){status('Queue sync done; catalogue refresh failed: '+e.message);}}
