@@ -39,7 +39,7 @@ def test_inventory_completion_routes_are_registered():
         "/api/v1/inventory/warehouses", "/api/v1/inventory/transfers",
         "/api/v1/inventory/transfers/{transfer_id}/dispatch",
         "/api/v1/inventory/transfers/{transfer_id}/receive",
-        "/api/v1/inventory/reservations", "/api/v1/inventory/reservations/{reservation_id}/release",
+        "/api/v1/inventory/reservations", "/api/v1/inventory/reservations/{reservation_id}/release", "/api/v1/inventory/reservations/{reservation_id}/consume",
         "/api/v1/inventory/reservations/expire", "/api/v1/inventory/batches/receive",
         "/api/v1/inventory/batches/issue", "/api/v1/inventory/batches/{batch_id}/status", "/api/v1/inventory/stocktakes",
         "/api/v1/inventory/stocktakes/{stocktake_id}/approve", "/api/v1/inventory/replenishment",
