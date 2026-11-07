@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.core.models import (
-    AuditEvent, MpesaPaymentIntent, MpesaRefundIntent, POSPayment,
+    AuditEvent, Organization, MpesaPaymentIntent, MpesaRefundIntent, POSPayment,
     POSSale, POSRefund, POSReturn,
 )
 from app.core.security import current_user
@@ -58,6 +58,10 @@ def _enabled():
     )
     if not settings.integration_mpesa_enabled or not all(required):
         raise HTTPException(503, "M-Pesa integration is not enabled or its Daraja configuration is incomplete")
+    if not settings.mpesa_callback_url.startswith("https://"):
+        raise HTTPException(503, "M-Pesa callback base URL must use public HTTPS")
+    if settings.mpesa_transaction_type not in {"CustomerPayBillOnline", "CustomerBuyGoodsOnline"}:
+        raise HTTPException(503, "M-Pesa transaction type must be CustomerPayBillOnline or CustomerBuyGoodsOnline")
 
 
 def _token(client: httpx.Client) -> str:
@@ -132,6 +136,9 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
     ).first()
     if not sale or not can_access_branch(membership, sale.branch_id):
         raise HTTPException(404, "POS sale not found")
+    base_currency = db.query(Organization.currency).filter_by(id=membership.organization_id).scalar()
+    if sale.currency != "KES" or base_currency != "KES":
+        raise HTTPException(422, "M-Pesa STK Push requires both POS sale and organization base currency to be KES")
     payment = db.query(POSPayment).filter_by(
         id=payment_id, organization_id=membership.organization_id,
         sale_id=sale.id, method="mpesa",
@@ -169,7 +176,7 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         response = _post("mpesa/stkpush/v1/processrequest", {
         "BusinessShortCode": shortcode,
         "Password": stk_password(shortcode, settings.mpesa_passkey, timestamp),
-        "Timestamp": timestamp, "TransactionType": "CustomerPayBillOnline",
+        "Timestamp": timestamp, "TransactionType": settings.mpesa_transaction_type,
         "Amount": int(amount), "PartyA": phone, "PartyB": shortcode,
         "PhoneNumber": phone, "CallBackURL": _callback_url("stk", callback_token),
         "AccountReference": f"OC-{sale.id}"[:12],
@@ -286,11 +293,17 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
     if not all((settings.mpesa_initiator_name, settings.mpesa_security_credential,
                 settings.mpesa_b2c_result_url, settings.mpesa_b2c_timeout_url)):
         raise HTTPException(503, "M-Pesa B2C initiator, encrypted security credential and result/timeout URLs are required")
+    if not settings.mpesa_b2c_result_url.startswith("https://") or not settings.mpesa_b2c_timeout_url.startswith("https://"):
+        raise HTTPException(503, "M-Pesa B2C result and timeout callback URLs must use public HTTPS")
     result = db.query(POSReturn).filter_by(
         id=return_id, organization_id=membership.organization_id
     ).first()
     if not result or not can_access_branch(membership, result.branch_id):
         raise HTTPException(404, "POS return not found")
+    sale = db.query(POSSale).filter_by(id=result.sale_id, organization_id=membership.organization_id).first()
+    base_currency = db.query(Organization.currency).filter_by(id=membership.organization_id).scalar()
+    if not sale or sale.currency != "KES" or base_currency != "KES":
+        raise HTTPException(422, "M-Pesa B2C requires both original POS sale and organization base currency to be KES")
     refund = db.query(POSRefund).filter_by(
         id=refund_id, organization_id=membership.organization_id,
         return_id=result.id, method="mpesa",
