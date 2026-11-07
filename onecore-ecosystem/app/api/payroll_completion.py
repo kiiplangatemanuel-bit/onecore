@@ -86,7 +86,8 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
     tier1 = min(nssf_base, D(str(nssf_cfg["lower_earnings_limit"])))
     tier2 = max(ZERO, nssf_base - D(str(nssf_cfg["lower_earnings_limit"])))
     nssf = money((tier1 + tier2) * D(str(nssf_cfg["rate"])))
-    shif = max(D(str(cfg["shif"]["minimum"])), money(gross * D(str(cfg["shif"]["rate"])))) if gross > 0 else ZERO
+    shif_base = money(extra.get("shif_contribution_base", gross))
+    shif = max(D(str(cfg["shif"]["minimum"])), money(shif_base * D(str(cfg["shif"]["rate"])))) if shif_base > 0 else ZERO
     ahl = money(gross * D(str(cfg["housing_levy"]["employee_rate"])))
     employer_nssf = nssf
     employer_ahl = money(gross * D(str(cfg["housing_levy"]["employer_rate"])))
@@ -100,7 +101,14 @@ def calculate_kenya_payroll(gross, employee, rule, extra=None):
                             D(str(cfg["paye"]["insurance_relief_monthly_limit"])))
     deductible = money(ahl + shif + pension + mortgage + prmf + nssf)
     meal_exemption = min(money(extra.get("meal_benefit", 0)), D(str(cfg["paye"].get("meal_benefit_exemption_monthly", "5000"))))
-    disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if extra.get("valid_disability_exemption_certificate") else ZERO
+    certificate_expiry = extra.get("disability_exemption_valid_until")
+    certificate_valid = bool(extra.get("disability_exemption_certificate_number")) and bool(certificate_expiry)
+    if certificate_valid:
+        try:
+            certificate_valid = date.fromisoformat(certificate_expiry) >= date.today()
+        except ValueError:
+            certificate_valid = False
+    disability_exemption = D(str(cfg["paye"].get("disability_exemption_monthly", "150000"))) if certificate_valid else ZERO
     taxable = max(ZERO, money(gross - deductible - meal_exemption - disability_exemption))
     gross_tax = _progressive_tax(taxable, cfg["paye"]["bands"])
     personal_relief = D(str(cfg["paye"]["personal_relief_monthly"])) if employee.get("resident_for_tax", True) else ZERO
@@ -417,8 +425,8 @@ def mpesa_submit(batch_id: int, payload: dict=Body(...), membership=Depends(acti
         raise HTTPException(503, "Daraja B2C payroll credentials and callback URLs are not fully configured")
     employee_id = int(payload.get("employee_id", 0))
     row = next((x for x in batch.data["rows"] if x["employee_id"] == employee_id), None)
-    if not row or row["status"] not in ("pending", "failed"):
-        raise HTTPException(409, "A pending or failed employee payment instruction is required")
+    if not row or row["status"] not in ("pending", "failed") or row.get("conversation_id"):
+        raise HTTPException(409, "A pending employee instruction without an existing Daraja request is required")
     if not row.get("phone"):
         raise HTTPException(422, "Employee mobile number is missing")
     phone = "".join(ch for ch in row["phone"] if ch.isdigit())
@@ -526,8 +534,11 @@ def retry_failed_payment(batch_id: int, payload: dict=Body(default={}), membersh
     if not failed:
         raise HTTPException(409, "No failed payments to retry")
     for row in failed:
+        if int(row.get("retry_count", 0)) >= 3:
+            raise HTTPException(409, f"Payment {row['employee_id']} has reached the three-retry limit")
         row["status"] = "pending"
         row["retry_count"] = int(row.get("retry_count", 0)) + 1
+        row.pop("conversation_id", None); row.pop("originator_conversation_id", None)
         row["last_retry_at"] = datetime.now(timezone.utc).isoformat()
     d["status"] = "prepared"
     d["last_retry_by"] = user.id
@@ -725,6 +736,9 @@ def reverse_salary_payment(batch_id: int, employee_id: int, payload: dict=Body(.
     row["status"]="reversed"; row["reversal_reference"]=payload["reversal_reference"]
     d["status"]="partial"
     batch.data=d
+    paid_run=db.query(HRPayrollRun).filter_by(id=d["run_id"],organization_id=membership.organization_id).with_for_update().first()
+    if paid_run:
+        paid_run.status="partial_paid"
     _audit(db,membership.organization_id,user.id,"hr.payroll.payment.reversed","payment_batch",batch_id,
            f"employee:{employee_id};reference:{payload['reversal_reference']}")
     db.commit()
