@@ -272,7 +272,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
     if duplicate:
         if (duplicate.product_id != payload.product_id or duplicate.branch_id != payload.branch_id
                 or duplicate.quantity_delta != payload.quantity_delta
-                or duplicate.movement_type != payload.movement_type):
+                or duplicate.movement_type != payload.movement_type or duplicate.reference != payload.reference):
             raise HTTPException(409, "Idempotency key was already used for a different movement")
         return {"id": duplicate.id, "status": "already_applied",
                 "quantity_delta": str(duplicate.quantity_delta)}
@@ -302,7 +302,7 @@ def create_inventory_movement(payload: InventoryMovementIn, membership=Depends(a
         duplicate = db.query(InventoryStockMovement).filter_by(
             organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
         ).first()
-        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type:
+        if duplicate and duplicate.product_id == payload.product_id and duplicate.branch_id == payload.branch_id and duplicate.quantity_delta == payload.quantity_delta and duplicate.movement_type == payload.movement_type and duplicate.reference == payload.reference:
             return {"id": duplicate.id, "status": "already_applied",
                     "quantity_delta": str(duplicate.quantity_delta)}
         raise HTTPException(409, "Stock movement conflicts with an existing request")
