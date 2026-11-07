@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactConsent, CRMCampaignDelivery
+from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactConsent, CRMCampaignDelivery, CRMContact
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
