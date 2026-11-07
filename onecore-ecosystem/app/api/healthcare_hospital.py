@@ -772,7 +772,7 @@ def create_theatre(payload: dict, m=Depends(active_membership), u: User=Depends(
 
 @router.post("/patients/{patient_id}/procedures", status_code=201)
 def schedule_procedure(patient_id: int, payload: dict, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
-    patient, emergency, _=_patient_access(db,m,u,patient_id,"clinical.write",write=True)
+    patient, emergency, _=_patient_access(db,m,u,patient_id,"patient.read",write=False)
     _need(db,m,u,"theatre.manage",patient.branch_id)
     theatre=_resource(db,m,int(payload.get("theatre_id",0)),"theatre",lock=True)
     if theatre.branch_id!=patient.branch_id: raise HTTPException(409,"Theatre must be in the patient branch")
