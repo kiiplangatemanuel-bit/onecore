@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.models import (User, Membership, Branch, CRMLead, CRMForecastSetting,
+from app.core.models import (User, Membership, Organization, Branch, CRMLead, CRMForecastSetting,
     CRMSalesTarget, CRMForecastSnapshot, CRMContact, CRMCampaign, CRMCampaignAttribution,
     CRMSalesOrder, CRMWorkerHeartbeat, CRMCampaignSchedule, AuditEvent)
 from app.core.security import current_user
@@ -156,7 +156,8 @@ def advanced_forecast(period_type:str=Query("month",pattern="^(month|quarter|yea
     for lead in leads:
         grouped.setdefault((lead.assigned_to if lead.assigned_to is not None else -1,lead.currency),[]).append(lead)
         by_currency.setdefault(lead.currency,[]).append(lead)
-    for currency,items in by_currency.items():grouped[(-2,currency)]=items
+    if rep_id is None:
+        for currency,items in by_currency.items():grouped[(-2,currency)]=items
     target_rows=db.query(CRMSalesTarget).filter_by(organization_id=m.organization_id,
         period_type=period_type,period_start=datetime.combine(first,time.min,timezone.utc)).all()
     targets={}
@@ -165,6 +166,9 @@ def advanced_forecast(period_type:str=Query("month",pattern="^(month|quarter|yea
         key=(int(x.assigned_to) if x.assigned_to is not None else -2,x.currency)
         targets[key]=x.target_amount
     for key in targets:grouped.setdefault(key,[])
+    base_currency=db.query(Organization.currency).filter_by(id=m.organization_id).scalar() or "KES"
+    if rep_id is None:grouped.setdefault((-2,base_currency),[])
+    else:grouped.setdefault((rep_id,base_currency),[])
     output=[]
     for (owner,currency),items in sorted(grouped.items(),key=lambda pair:(pair[0][1],pair[0][0])):
         scenarios=calculate_scenarios(items,probs,mults)
@@ -199,6 +203,15 @@ def create_snapshot(payload:dict,m=Depends(active_membership),user:User=Depends(
         by_currency.setdefault(lead.currency,[]).append(lead)
     if rep is None:
         for currency,items in by_currency.items():grouped[(-2,currency)]=items
+    target_rows=db.query(CRMSalesTarget).filter_by(organization_id=m.organization_id,period_type=kind,
+        period_start=datetime.combine(first,time.min,timezone.utc)).all()
+    for target in target_rows:
+        if target.branch_id is None or can_access_branch(m,target.branch_id):
+            key=(int(target.assigned_to) if target.assigned_to is not None else -2,target.currency)
+            grouped.setdefault(key,[])
+    base_currency=db.query(Organization.currency).filter_by(id=m.organization_id).scalar() or "KES"
+    if rep is None:grouped.setdefault((-2,base_currency),[])
+    else:grouped.setdefault((rep,base_currency),[])
     now=datetime.now(timezone.utc);count=0
     for (owner,currency),items in grouped.items():
         db.add(CRMForecastSnapshot(organization_id=m.organization_id,period_type=kind,
