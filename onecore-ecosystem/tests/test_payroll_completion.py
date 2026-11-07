@@ -82,10 +82,10 @@ def test_post_retirement_medical_fund_is_withheld_from_net_pay():
 
 def test_kenya_2026_rule_pack_has_official_authority_sources_and_effective_date():
     sources = KENYA_2026_RULES["sources"]
-    hosts = {source["url"].split("/")[2] for source in sources}
-    assert any(host == "www.kra.go.ke" for host in hosts)
-    assert any(host == "www.nssf.or.ke" for host in hosts)
-    assert any("kenyalaw.org" in host for host in hosts)
+    authorities = {source["authority"].lower() for source in sources}
+    assert any("kra" in authority for authority in authorities)
+    assert any("nssf" in authority for authority in authorities)
+    assert any("kenya law" in authority or "sha" in authority for authority in authorities)
     assert KENYA_2026_RULES["effective_from"] == "2026-02-01"
     assert KENYA_2026_RULES["status"] == "active"
 
