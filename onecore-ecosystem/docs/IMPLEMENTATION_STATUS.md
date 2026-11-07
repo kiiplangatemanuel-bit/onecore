@@ -485,11 +485,14 @@ Implemented on main:
 Verification: GitHub Actions run 42364853288 passed migrations, downgrade/re-upgrade,
 compilation and pytest: 53 passed, 5 warnings.
 
-CRM remains incomplete: quote PDF generation, email/SMS delivery, customer signature,
-quote-to-order conversion, contracts, campaigns, consent/preference management,
-communication logs and provider delivery, segmentation, configurable stages and
-probabilities, conversion cohort analytics, forecasting models, contact merge,
-import/export, team assignment and UAT.
+CRM remains incomplete: quote PDF generation, customer signature and contract
+workflows, advanced audience segmentation, reusable message templates and scheduled
+campaign automation, configurable stages and probabilities, conversion cohort
+analytics, forecasting models, contact merge, import/export, team assignment and
+end-to-end production UAT. Campaign audience preview, consent-aware preparation,
+provider-backed email/SMS/WhatsApp dispatch, delivery callbacks, unsubscribe and
+delivery reporting are implemented; live provider UAT and production credentials
+remain deployment requirements.
 
 
 ## School attendance increment (7 November 2026)
@@ -690,9 +693,20 @@ Implemented on branch `feature/crm-consent-campaigns` (based on CRM sales order 
   idempotent ready state.
 - Migration `0021_crm_consent_campaigns`, APIs, tests and documentation.
 
-Boundaries: campaign preparation does not send messages. Provider delivery, callbacks,
-unsubscribe webhooks, suppression lists, scheduling and delivery analytics remain
-unimplemented. A dispatch worker must re-check current consent immediately before send.
+Campaign delivery increment (PR #42; hardened by PR #43):
+- Manager-triggered bounded batches deliver through configured SMTP email and
+  normalized SMS/WhatsApp HTTP adapters.
+- Every recipient's latest channel/purpose consent is rechecked immediately before
+  dispatch; revoked/expired recipients are suppressed.
+- Durable attempt history, stable provider idempotency keys, a five-attempt cap,
+  stale-dispatch lease recovery, authenticated delivery callbacks and delivery
+  analytics are implemented.
+- One-click unsubscribe stores only token digests, appends a revoked consent event,
+  and uses POST for state changes; GET renders a confirmation page without mutation.
+- Live provider credentials, mail-domain authentication, WhatsApp template approval,
+  production provider UAT and jurisdiction-specific privacy review remain deployment
+  requirements. Campaign scheduling, reusable templates and advanced segmentation
+  remain separate CRM gaps.
 
 
 ## Accounting completion increment (implementation branch)
