@@ -159,3 +159,49 @@ class InventoryStockMovement(Base):
         Index("ix_inventory_movement_org_idempotency", "organization_id", "idempotency_key", unique=True),
         Index("ix_inventory_movement_org_product_branch", "organization_id", "product_id", "branch_id"),
     )
+
+
+class AccountingAccount(Base):
+    """Tenant-owned chart-of-accounts entry."""
+    __tablename__ = "accounting_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(180))
+    account_type: Mapped[str] = mapped_column(String(20))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_account_org_code", "organization_id", "code", unique=True),)
+
+
+class AccountingJournal(Base):
+    """Journal header. Posted entries are immutable through the application API."""
+    __tablename__ = "accounting_journals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    journal_number: Mapped[str] = mapped_column(String(40))
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    memo: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    entry_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    posted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_accounting_journal_org_number", "organization_id", "journal_number", unique=True),)
+
+
+class AccountingJournalLine(Base):
+    """Debit/credit line belonging to one tenant journal."""
+    __tablename__ = "accounting_journal_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(String(240), default="")
+    debit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    credit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
