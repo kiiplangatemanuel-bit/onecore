@@ -923,6 +923,7 @@ class LaboratorySampleIn(BaseModel):
 class LaboratoryResultIn(BaseModel):
     result_value: str = Field(min_length=1, max_length=4000)
     result_notes: str = Field(default="", max_length=4000)
+    is_critical: bool = False
 
     @field_validator("result_value")
     @classmethod
