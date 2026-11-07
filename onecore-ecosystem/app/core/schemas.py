@@ -841,6 +841,14 @@ class PharmacyMedicineIn(BaseModel):
     sale_price: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("9999999999999999"))
     is_controlled: bool = False
 
+    @field_validator("generic_name", "dosage_form", "route", "sku")
+    @classmethod
+    def medicine_required_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Medicine field cannot be blank")
+        return value
+
 
 class PharmacyBatchIn(BaseModel):
     client_batch_id: str = Field(min_length=8, max_length=100)
@@ -851,9 +859,25 @@ class PharmacyBatchIn(BaseModel):
     unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     selling_price: Decimal = Field(ge=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
 
+    @field_validator("batch_number", "client_batch_id")
+    @classmethod
+    def batch_ids_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Batch identifiers cannot be blank")
+        return value
+
 
 class PharmacyBatchQuarantineIn(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def quarantine_reason_not_blank(cls, value):
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("A quarantine reason is required")
+        return value
 
 
 class LaboratoryTestIn(BaseModel):
@@ -863,6 +887,14 @@ class LaboratoryTestIn(BaseModel):
     unit: str = Field(default="", max_length=40)
     reference_range: str = Field(default="", max_length=180)
     turnaround_hours: int = Field(default=24, ge=1, le=720)
+
+    @field_validator("code", "name", "specimen_type")
+    @classmethod
+    def lab_test_required_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Laboratory test fields cannot be blank")
+        return value
 
 
 class LaboratoryOrderIn(BaseModel):
@@ -874,6 +906,10 @@ class LaboratoryOrderIn(BaseModel):
     def unique_tests(self):
         if len(self.test_ids) != len(set(self.test_ids)):
             raise ValueError("A laboratory test may appear only once per order")
+        if any(test_id <= 0 for test_id in self.test_ids):
+            raise ValueError("Laboratory test IDs must be positive")
+        if len(self.client_order_id.strip()) < 8:
+            raise ValueError("Laboratory order ID is required")
         return self
 
 
@@ -885,6 +921,14 @@ class LaboratorySampleIn(BaseModel):
 class LaboratoryResultIn(BaseModel):
     result_value: str = Field(min_length=1, max_length=4000)
     result_notes: str = Field(default="", max_length=4000)
+
+    @field_validator("result_value")
+    @classmethod
+    def result_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Laboratory result cannot be blank")
+        return value
 
 
 class LaboratoryValidateIn(BaseModel):
