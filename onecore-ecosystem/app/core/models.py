@@ -679,3 +679,30 @@ class SchoolAttendance(Base):
     recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_school_attendance_org_date_learner", "organization_id", "attendance_date", "learner_id", unique=True),)
+
+
+class ProcurementRequisition(Base):
+    __tablename__ = "procurement_requisitions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    requisition_number: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    justification: Mapped[str] = mapped_column(String(1000))
+    rejection_reason: Mapped[str] = mapped_column(String(500), default="")
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_procurement_req_org_number", "organization_id", "requisition_number", unique=True),)
+
+
+class ProcurementRequisitionLine(Base):
+    __tablename__ = "procurement_requisition_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    requisition_id: Mapped[int] = mapped_column(ForeignKey("procurement_requisitions.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("inventory_products.id"), index=True)
+    quantity_requested: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
