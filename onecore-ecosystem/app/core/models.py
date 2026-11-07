@@ -614,6 +614,116 @@ class SchoolGradeBand(Base):
     __table_args__ = (Index("ix_school_grade_org_scale_grade", "organization_id", "scale_name", "grade", unique=True),)
 
 
+class SchoolFeeStructure(Base):
+    __tablename__ = "school_fee_structures"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("school_classes.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    description: Mapped[str] = mapped_column(String(180))
+    academic_year: Mapped[int] = mapped_column()
+    term: Mapped[str] = mapped_column(String(24))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_fee_structure_org_class_year_term_code",
+        "organization_id", "class_id", "academic_year", "term", "code", unique=True),)
+
+
+class SchoolFeeCharge(Base):
+    __tablename__ = "school_fee_charges"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    learner_id: Mapped[int] = mapped_column(ForeignKey("school_learners.id"), index=True)
+    fee_structure_id: Mapped[int] = mapped_column(ForeignKey("school_fee_structures.id"), index=True)
+    academic_year: Mapped[int] = mapped_column()
+    term: Mapped[str] = mapped_column(String(24))
+    description: Mapped[str] = mapped_column(String(180))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="unpaid")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_fee_charge_org_learner_structure",
+        "organization_id", "learner_id", "fee_structure_id", unique=True),)
+
+
+class SchoolFeePayment(Base):
+    __tablename__ = "school_fee_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    learner_id: Mapped[int] = mapped_column(ForeignKey("school_learners.id"), index=True)
+    receipt_number: Mapped[str] = mapped_column(String(80))
+    method: Mapped[str] = mapped_column(String(16))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_fee_payment_org_receipt",
+        "organization_id", "receipt_number", unique=True),)
+
+
+class SchoolFeePaymentAllocation(Base):
+    __tablename__ = "school_fee_payment_allocations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("school_fee_payments.id"), index=True)
+    charge_id: Mapped[int] = mapped_column(ForeignKey("school_fee_charges.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_school_fee_allocation_org_payment_charge",
+        "organization_id", "payment_id", "charge_id", unique=True),)
+
+
+class HealthcarePatient(Base):
+    __tablename__ = "healthcare_patients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_number: Mapped[str] = mapped_column(String(50))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    emergency_contact_name: Mapped[str] = mapped_column(String(180), default="")
+    emergency_contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_patient_org_number",
+        "organization_id", "patient_number", unique=True),)
+
+
+class HealthcareAppointment(Base):
+    __tablename__ = "healthcare_appointments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    appointment_number: Mapped[str] = mapped_column(String(60))
+    provider_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("ix_healthcare_appointment_org_number",
+        "organization_id", "appointment_number", unique=True),
+        Index("ix_healthcare_appointment_provider_start",
+        "organization_id", "provider_user_id", "starts_at"))
+
+
 class AccountingInvoice(Base):
     """Tenant-owned AR/AP invoice; posted invoice lines are immutable."""
     __tablename__ = "accounting_invoices"

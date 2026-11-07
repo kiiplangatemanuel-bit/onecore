@@ -456,6 +456,90 @@ class SchoolAttendanceIn(BaseModel):
         return self
 
 
+class SchoolFeeStructureIn(BaseModel):
+    class_id: int = Field(gt=0)
+    code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._/-]+$")
+    description: str = Field(min_length=2, max_length=180)
+    academic_year: int = Field(ge=2000, le=2200)
+    term: str = Field(min_length=1, max_length=24)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    due_date: date
+
+    @field_validator("code", "description", "term")
+    @classmethod
+    def fee_fields_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Fee code, description and term cannot be blank")
+        return value
+
+
+class SchoolFeeAllocationIn(BaseModel):
+    charge_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+
+
+class SchoolFeePaymentIn(BaseModel):
+    receipt_number: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._/-]+$")
+    method: str = Field(pattern=r"^(cash|bank|card|mpesa)$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    amount: Decimal = Field(gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
+    payment_date: date
+    allocations: list[SchoolFeeAllocationIn] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def allocations_match_payment(self):
+        ids = [item.charge_id for item in self.allocations]
+        if len(ids) != len(set(ids)):
+            raise ValueError("A fee charge may appear only once per receipt")
+        if sum((item.amount for item in self.allocations), Decimal("0.00")) != self.amount:
+            raise ValueError("Payment allocations must equal the receipt amount")
+        return self
+
+
+class HealthcarePatientIn(BaseModel):
+    patient_number: str = Field(min_length=2, max_length=50, pattern=r"^[A-Za-z0-9._/-]+$")
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    branch_id: str | None = Field(default=None, max_length=36)
+    date_of_birth: date | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=32)
+    email: EmailStr | None = None
+    emergency_contact_name: str = Field(default="", max_length=180)
+    emergency_contact_phone: str = Field(default="", max_length=32)
+
+    @field_validator("first_name", "last_name", "patient_number")
+    @classmethod
+    def patient_identity_not_blank(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Patient number and names cannot be blank")
+        return value
+
+
+class HealthcareAppointmentIn(BaseModel):
+    patient_id: int = Field(gt=0)
+    appointment_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
+    branch_id: str | None = Field(default=None, max_length=36)
+    provider_user_id: int | None = Field(default=None, gt=0)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = Field(min_length=3, max_length=500)
+
+    @model_validator(mode="after")
+    def valid_appointment_window(self):
+        if self.starts_at.tzinfo is None or self.ends_at.tzinfo is None:
+            raise ValueError("Appointment timestamps must include a timezone")
+        if self.ends_at <= self.starts_at:
+            raise ValueError("Appointment end must be after start")
+        if (self.ends_at - self.starts_at).total_seconds() > 8 * 3600:
+            raise ValueError("Appointment duration cannot exceed eight hours")
+        if len(self.reason.strip()) < 3:
+            raise ValueError("Appointment reason is required")
+        return self
+
+
 class ProcurementRequisitionLineIn(BaseModel):
     product_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))

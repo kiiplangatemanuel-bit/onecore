@@ -761,3 +761,43 @@ payslip PDF/email, payroll journal or accounting posting. Payroll figures are
 operator-entered and are not a statutory calculation or payment instruction.
 CI and professional jurisdiction-specific validation are required before any
 operational payroll use.
+
+
+## School fee schedules, learner billing and receipts increment (7 November 2026)
+
+Implemented on branch `feature/school-fees-payments`:
+
+- Class/year/term fee schedules with tenant and branch scope, currency and due date.
+- Manager-controlled bulk billing of active learners in a class; unique learner/schedule
+  constraints make repeated billing safe and non-duplicating.
+- Learner fee account with charge, paid and outstanding balances plus receipt history.
+- Manual payment receipt capture with tenant-unique receipt numbers and charge
+  allocations; allocations must equal receipt total, match currency and not overpay.
+- Payment, allocations and charge balance updates commit atomically with audit events.
+- Four school fee models, migration `0024_school_fees`, APIs, starter UI, docs and
+  schema/model/OpenAPI tests.
+
+Boundaries: no guardian portal, bursary/discount workflows, payment plan, refund or
+reversal process, M-Pesa/bank/card provider verification, payment settlement,
+accounting journal integration or UAT. Tender methods are manually recorded only.
+
+
+## Healthcare patient directory and appointments increment (7 November 2026)
+
+Implemented on branch `feature/healthcare-patients-appointments`:
+
+- Tenant/branch-scoped patient registration with organization-unique patient numbers.
+- Minimal patient demographics and emergency contact fields; no clinical diagnosis,
+  medication or treatment records are introduced in this slice.
+- Tenant/branch-scoped appointment scheduling, optional provider assignment to an
+  active organization member, and provider overlap prevention.
+- Appointment lifecycle transitions from scheduled to cancelled or completed,
+  with manager permission and audit events.
+- Migration `0025_healthcare_patients_appointments`, APIs, starter workspace,
+  tests and module documentation.
+
+Boundaries: no clinical encounter notes, diagnoses, prescriptions, allergies, lab,
+imaging, pharmacy, admission/bed management, insurance, billing, consent workflows,
+patient portal, clinical audit certification, interoperability or UAT. Sensitive
+healthcare data requires a jurisdiction-specific privacy/security review before
+production use.

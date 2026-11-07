@@ -120,3 +120,66 @@ def test_hr_attendance_contracts_and_duration():
     assert "/api/v1/hr/attendance/clock-out" in paths
     assert "/api/v1/hr/my-attendance" in paths
     assert "/api/v1/hr/attendance" in paths
+
+
+def test_school_fee_contracts_and_routes():
+    from decimal import Decimal
+    from app.core.models import SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation
+    from app.core.schemas import SchoolFeeStructureIn, SchoolFeePaymentIn
+
+    schedule = SchoolFeeStructureIn(class_id=1, code="TUITION-T1",
+        description="Term one tuition", academic_year=2026, term="Term 1",
+        amount="12500.00", currency="KES", due_date="2026-11-30")
+    assert schedule.amount == Decimal("12500.00")
+    payment = SchoolFeePaymentIn(receipt_number="RCPT-001", method="cash",
+        amount="5000.00", payment_date="2026-11-07",
+        allocations=[{"charge_id": 1, "amount": "5000.00"}])
+    assert payment.allocations[0].amount == payment.amount
+    with pytest.raises(ValidationError):
+        SchoolFeePaymentIn(receipt_number="RCPT-002", method="cash",
+            amount="5000.00", payment_date="2026-11-07",
+            allocations=[{"charge_id": 1, "amount": "4000.00"}])
+    with pytest.raises(ValidationError):
+        SchoolFeePaymentIn(receipt_number="RCPT-003", method="cash",
+            amount="5000.00", payment_date="2026-11-07",
+            allocations=[{"charge_id": 1, "amount": "2500.00"},
+                         {"charge_id": 1, "amount": "2500.00"}])
+    assert SchoolFeeStructure.__tablename__ == "school_fee_structures"
+    assert SchoolFeeCharge.__tablename__ == "school_fee_charges"
+    assert SchoolFeePayment.__tablename__ == "school_fee_payments"
+    assert SchoolFeePaymentAllocation.__tablename__ == "school_fee_payment_allocations"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/school/fee-structures" in paths
+    assert "/api/v1/school/fee-structures/{structure_id}/bill" in paths
+    assert "/api/v1/school/learners/{learner_id}/fee-account" in paths
+    assert "/api/v1/school/learners/{learner_id}/fee-payments" in paths
+
+
+def test_healthcare_patient_and_appointment_contracts():
+    from datetime import datetime, timezone, timedelta
+    from app.core.models import HealthcarePatient, HealthcareAppointment
+    from app.core.schemas import HealthcarePatientIn, HealthcareAppointmentIn
+
+    patient = HealthcarePatientIn(patient_number="PAT-001",
+        first_name="Asha", last_name="Njeri", phone="+254700000000")
+    assert patient.patient_number == "PAT-001"
+    start = datetime(2026, 11, 9, 9, 0, tzinfo=timezone.utc)
+    appointment = HealthcareAppointmentIn(patient_id=1,
+        appointment_number="APT-001", starts_at=start,
+        ends_at=start + timedelta(minutes=30), reason="General consultation")
+    assert appointment.ends_at > appointment.starts_at
+    with pytest.raises(ValidationError):
+        HealthcareAppointmentIn(patient_id=1, appointment_number="APT-002",
+            starts_at="2026-11-09T09:00:00",
+            ends_at="2026-11-09T09:30:00", reason="Consult")
+    with pytest.raises(ValidationError):
+        HealthcareAppointmentIn(patient_id=1, appointment_number="APT-003",
+            starts_at=start, ends_at=start, reason="Consult")
+    assert HealthcarePatient.__tablename__ == "healthcare_patients"
+    assert HealthcareAppointment.__tablename__ == "healthcare_appointments"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/healthcare/patients" in paths
+    assert "/api/v1/healthcare/appointments" in paths
+    assert "/api/v1/healthcare/appointments/{appointment_id}/cancel" in paths
+    assert "/api/v1/healthcare/appointments/{appointment_id}/complete" in paths
+    assert "/healthcare" in paths

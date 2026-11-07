@@ -111,3 +111,29 @@ bulk promotion, promotion eligibility rules, transcript migration, fee carry-for
 or notifications. Effective dates are recorded as administrative history; the API
 does not backdate historical attendance or assessment membership. Review the school's
 approved promotion policy and safeguarding procedures before production use.
+
+
+## Fee schedules, billing and payment receipts
+
+- `POST/GET /api/v1/school/fee-structures` creates and lists class/year/term fee
+  schedules. A schedule's academic year must match its class.
+- `POST /api/v1/school/fee-structures/{id}/bill` creates one charge for each active
+  learner currently in the class. A unique learner/schedule key prevents duplicate
+  billing; rerunning the action reports existing charges instead of charging twice.
+- `GET /api/v1/school/learners/{id}/fee-account` returns learner charges, payments,
+  amounts charged, paid and outstanding. Fee account access is manager-only until
+  guardian identity linking and a guardian portal are implemented.
+- `POST /api/v1/school/learners/{id}/fee-payments` records a receipt and one or more
+  allocations. Allocations must equal the receipt amount, belong to the learner,
+  match the currency and not exceed the outstanding balance of any charge.
+- Receipt numbers are unique per organization; payment, allocations and charge
+  balance updates are committed atomically. The UI provides schedule creation,
+  class billing, account lookup and single-charge receipt entry.
+
+Payment method values cash, bank, card and mpesa are manual tender labels only.
+No M-Pesa STK push, bank callback, card acquiring verification, refunds, cash
+reconciliation or accounting journal integration is implemented. This is a school
+fee subledger slice, not a statutory accounting or provider settlement record.
+Bursaries, discounts, scholarships, credit notes, fee reversals, family accounts,
+payment plans, boarding/transport charges, automated reminders and guardian access
+remain outstanding.
