@@ -120,3 +120,36 @@ def test_hr_attendance_contracts_and_duration():
     assert "/api/v1/hr/attendance/clock-out" in paths
     assert "/api/v1/hr/my-attendance" in paths
     assert "/api/v1/hr/attendance" in paths
+
+
+def test_school_fee_contracts_and_routes():
+    from decimal import Decimal
+    from app.core.models import SchoolFeeStructure, SchoolFeeCharge, SchoolFeePayment, SchoolFeePaymentAllocation
+    from app.core.schemas import SchoolFeeStructureIn, SchoolFeePaymentIn
+
+    schedule = SchoolFeeStructureIn(class_id=1, code="TUITION-T1",
+        description="Term one tuition", academic_year=2026, term="Term 1",
+        amount="12500.00", currency="KES", due_date="2026-11-30")
+    assert schedule.amount == Decimal("12500.00")
+    payment = SchoolFeePaymentIn(receipt_number="RCPT-001", method="cash",
+        amount="5000.00", payment_date="2026-11-07",
+        allocations=[{"charge_id": 1, "amount": "5000.00"}])
+    assert payment.allocations[0].amount == payment.amount
+    with pytest.raises(ValidationError):
+        SchoolFeePaymentIn(receipt_number="RCPT-002", method="cash",
+            amount="5000.00", payment_date="2026-11-07",
+            allocations=[{"charge_id": 1, "amount": "4000.00"}])
+    with pytest.raises(ValidationError):
+        SchoolFeePaymentIn(receipt_number="RCPT-003", method="cash",
+            amount="5000.00", payment_date="2026-11-07",
+            allocations=[{"charge_id": 1, "amount": "2500.00"},
+                         {"charge_id": 1, "amount": "2500.00"}])
+    assert SchoolFeeStructure.__tablename__ == "school_fee_structures"
+    assert SchoolFeeCharge.__tablename__ == "school_fee_charges"
+    assert SchoolFeePayment.__tablename__ == "school_fee_payments"
+    assert SchoolFeePaymentAllocation.__tablename__ == "school_fee_payment_allocations"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/school/fee-structures" in paths
+    assert "/api/v1/school/fee-structures/{structure_id}/bill" in paths
+    assert "/api/v1/school/learners/{learner_id}/fee-account" in paths
+    assert "/api/v1/school/learners/{learner_id}/fee-payments" in paths
