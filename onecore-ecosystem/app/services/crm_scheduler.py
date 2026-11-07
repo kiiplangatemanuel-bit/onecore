@@ -103,10 +103,11 @@ def _execute_schedule(db,schedule_id,now):
         db.commit()
     # Dispatch through the same permission, consent, retry, callback and provider path
     # used by a manager-triggered batch. Each recipient has a stable idempotency key.
-    for _ in range(50):
-        result=dispatch_campaign(child.id,batch_size=500,membership=membership,user=user,db=db)
-        if result.get("remaining",0)<=0 or result.get("processed",0)<=0:
-            break
+    if child.status!="sent":
+        for _ in range(50):
+            result=dispatch_campaign(child.id,batch_size=500,membership=membership,user=user,db=db)
+            if result.get("remaining",0)<=0 or result.get("processed",0)<=0:
+                break
     db.refresh(child)
     schedule.last_run_at=now
     schedule.last_run_campaign_id=child.id
