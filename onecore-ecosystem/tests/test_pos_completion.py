@@ -56,3 +56,11 @@ def test_pos_service_worker_uses_safe_background_sync():
     assert 'response.status === 409' in worker
     assert "never auto-discard or replay it" in worker
     assert 'payment.method === "mpesa"' in worker
+
+def test_pos_database_guards_prevent_duplicate_open_device_and_customer_phone():
+    from app.core.models import POSShift
+    from app.core.pos_completion_models import POSCustomer
+    shift_indexes = {index.name for index in POSShift.__table__.indexes}
+    customer_indexes = {index.name for index in POSCustomer.__table__.indexes}
+    assert "uq_pos_shift_open_device" in shift_indexes
+    assert "uq_pos_customer_phone" in customer_indexes
