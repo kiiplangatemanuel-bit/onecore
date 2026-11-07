@@ -145,7 +145,7 @@ $('deviceRegistrationForm').addEventListener('submit',async e=>{
   const keyId=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
   const result=await api('/pos/advanced/devices/register',{method:'POST',body:JSON.stringify({branch_id:branch,device_key:keyId,name,platform:navigator.userAgent.slice(0,80)})});
   await saveDeviceCredentials({device_id:result.id,device_secret:result.device_secret});
-  $('deviceRegistrationStatus').textContent='Terminal #'+result.id+' registered as pending. A supervisor must approve it before this terminal can synchronize sales. Device secret was stored encrypted in this browser profile.';
+  $('deviceRegistrationStatus').textContent='Terminal #'+result.id+' registered as pending. A supervisor must approve it before this terminal can synchronize sales. Device secret (shown once; keep it private): '+result.device_secret+' · stored encrypted in this browser profile.';
   e.currentTarget.reset();await loadAdvanced();
  }catch(err){status('Terminal registration: '+err.message);}
 });
