@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -1576,9 +1576,28 @@ def review_pos_shift(shift_id:int,payload:POSShiftReviewIn,membership=Depends(ac
 
 @router.post("/pos/sync", status_code=201)
 def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
-                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+                  user: User = Depends(current_user), db: Session = Depends(get_db),
+                  pos_device_id: int | None = Header(default=None, alias="X-POS-Device-ID"),
+                  pos_device_secret: str | None = Header(default=None, alias="X-POS-Device-Secret")):
     require_permission(membership, "create")
     _crm_branch_check(db, membership, payload.branch_id)
+    # Once a branch enrolls POS devices, all subsequent offline sale syncs must
+    # prove possession of an approved device secret. Legacy deployments without
+    # enrolled devices retain the existing cashier-session flow during rollout.
+    from app.api.pos_advanced import POSDevice, token_hash
+    enrolled = db.query(POSDevice.id).filter_by(
+        organization_id=membership.organization_id, branch_id=payload.branch_id
+    ).first()
+    if enrolled:
+        if not pos_device_id or not pos_device_secret:
+            raise HTTPException(403, "This branch requires a trusted POS device credential")
+        device = db.query(POSDevice).filter_by(
+            id=pos_device_id, organization_id=membership.organization_id,
+            branch_id=payload.branch_id, status="trusted"
+        ).with_for_update().first()
+        if not device or not hashlib.sha256(pos_device_secret.encode("utf-8")).hexdigest() == device.token_digest:
+            raise HTTPException(403, "POS device is not trusted or its credential is invalid")
+        device.last_seen_at = datetime.now(timezone.utc)
     request_hash = canonical_request_hash(payload)
     existing = db.query(POSSale).filter_by(
         organization_id=membership.organization_id,
