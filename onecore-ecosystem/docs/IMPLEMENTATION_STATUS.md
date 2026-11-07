@@ -279,3 +279,38 @@ security/accessibility and UAT.
 - Additional UI/detail commits: `2721c7c` (authorized PO detail), `9fce237`
   (procurement UI), `fa0aff4` (UI route), `8704248` (route test),
   `e7e7633` (tracker).
+
+
+## POS checkout and offline synchronization foundation (7 November 2026)
+
+Implemented on `main`:
+
+- Product catalogue sale price field and tenant product price returned by inventory API.
+- Cashier shift open/current/close APIs with opening float, counted close cash and
+  cash variance report.
+- Branch-scoped POS catalogue with current stock snapshot.
+- POS checkout sync validates cashier-owned open shift, branch access, product
+  ownership, server-side catalogue price, stock availability and payment allocation.
+- Sale header/lines/payment tenders and stock issue ledger entries commit atomically.
+- Tenant-unique client transaction ID and canonical request hash ensure exact replay
+  idempotency and reject conflicting reuse.
+- Browser POS shell/service worker, AES-GCM encrypted IndexedDB queue/catalogue and
+  online/manual retry; queue is synced through `POST /api/v1/pos/sync`.
+- Migration `0006_pos`; service `app/services/pos.py`; tests in
+  `tests/test_pos.py`; docs in `docs/POS.md`; UI at `/pos`.
+- Key commits: `9e0f9ba` (models), `4208c34` (sale price), `2a5f705`
+  (contracts), `34f24aa` (migration), `47d0dc5` (sync rules), `ac75d7e`
+  (API), `9a7c1a7` (bounded idempotency), `9f56751` (current shift),
+  `fdee128` and `a5850bf` (tests), `350a8c5` (POS UI), `cce35ed`
+  (service worker), `0635170` (serve PWA), `953250a` (inventory sale-price UI).
+
+POS remains incomplete: no offline sign-in after page reload, no 24-hour device
+entitlement, single-line cashier UI, no refunds/discounts/tax/receipt printer/cash
+drawer, no payment gateway verification, no stale stock reservation or supervisor
+conflict review, no background sync telemetry/device management and no end-to-end
+browser/device security/UAT. Credit is recorded as unsettled; card/bank tender records
+are not provider verification.
+
+Verified earlier completed runs before POS changes: CRM run `42362416897` passed
+35 tests; procurement run `42362626229` passed 39 tests. POS migration, code and
+new tests require a fresh CI run before they can be marked verified.
