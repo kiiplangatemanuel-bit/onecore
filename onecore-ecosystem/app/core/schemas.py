@@ -1101,7 +1101,7 @@ class SaccoLoanGuarantorDecisionIn(BaseModel):
 
 
 class SaccoLoanCollateralDecisionIn(BaseModel):
-    decision: str = Field(pattern=r"^(accepted|rejected|released)$")
+    decision: str = Field(pattern=r"^(approved|rejected|released)$")
     note: str = Field(min_length=3, max_length=500)
     assessed_value: Decimal | None = Field(default=None, gt=0, le=Decimal("9999999999999999"), multiple_of=Decimal("0.01"))
     valuation_reference: str = Field(default="", max_length=120)
