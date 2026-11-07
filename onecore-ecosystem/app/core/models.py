@@ -511,6 +511,59 @@ class AccountingInvoicePayment(Base):
     )
 
 
+class AccountingInvoiceApproval(Base):
+    __tablename__ = "accounting_invoice_approvals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    approver_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    decision_note: Mapped[str] = mapped_column(String(500), default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("ix_accounting_invoice_approval_org_invoice", "organization_id", "invoice_id", unique=True),)
+
+
+class AccountingCreditNote(Base):
+    __tablename__ = "accounting_credit_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoices.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    credit_note_number: Mapped[str] = mapped_column(String(60))
+    issue_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(500))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    posted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_accounting_credit_note_org_number", "organization_id", "credit_note_number", unique=True),
+        Index("ix_accounting_credit_note_org_key", "organization_id", "idempotency_key", unique=True),
+    )
+
+
+class AccountingCreditNoteLine(Base):
+    __tablename__ = "accounting_credit_note_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    credit_note_id: Mapped[int] = mapped_column(ForeignKey("accounting_credit_notes.id"), index=True)
+    invoice_line_id: Mapped[int] = mapped_column(ForeignKey("accounting_invoice_lines.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class AccountingFiscalPeriod(Base):
     __tablename__ = "accounting_fiscal_periods"
     id: Mapped[int] = mapped_column(primary_key=True)

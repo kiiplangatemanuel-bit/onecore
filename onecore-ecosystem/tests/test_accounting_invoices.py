@@ -101,3 +101,35 @@ def test_bank_statement_reconciliation_contract_and_routes():
     assert "/api/v1/accounting/bank-statements/{statement_id}" in paths
     assert "/api/v1/accounting/bank-statements/{statement_id}/match" in paths
     assert "/api/v1/accounting/bank-statements/{statement_id}/reconcile" in paths
+
+
+def test_invoice_approval_and_credit_note_contracts_and_routes():
+    from app.core.models import AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine
+    from app.core.schemas import (
+        AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn,
+    )
+    assert AccountingInvoiceApproval.__tablename__ == "accounting_invoice_approvals"
+    assert AccountingCreditNote.__tablename__ == "accounting_credit_notes"
+    assert AccountingCreditNoteLine.__tablename__ == "accounting_credit_note_lines"
+    assert AccountingInvoiceApprovalDecisionIn(decision="approved", note="Checked").decision == "approved"
+    payload = AccountingCreditNoteIn(
+        credit_note_number="CN-001", issue_date="2026-11-08",
+        reason="Returned defective goods", idempotency_key="credit-note-0001",
+        lines=[{"invoice_line_id": 1, "quantity": "1.000"}],
+    )
+    assert payload.lines[0].quantity == Decimal("1.000")
+    with pytest.raises(ValidationError):
+        AccountingInvoiceApprovalDecisionIn(decision="pending")
+    with pytest.raises(ValidationError):
+        AccountingCreditNoteIn(
+            credit_note_number="CN-002", issue_date="2026-11-08",
+            reason="Duplicate lines", idempotency_key="credit-note-0002",
+            lines=[{"invoice_line_id": 1, "quantity": "1"},
+                   {"invoice_line_id": 1, "quantity": "2"}],
+        )
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/accounting/invoices/{invoice_id}/submit-for-approval" in paths
+    assert "/api/v1/accounting/invoices/{invoice_id}/approval" in paths
+    assert "/api/v1/accounting/invoices/{invoice_id}/approval-decision" in paths
+    assert "/api/v1/accounting/invoices/{invoice_id}/credit-notes" in paths
+    assert "/api/v1/accounting/credit-notes" in paths

@@ -582,3 +582,20 @@ import/export, team assignment and UAT.
 - Branch: feature/accounting-counterparty-statements.
 - Verification is pending GitHub Actions. This increment does not yet provide
   statement PDF/export/email delivery or an accounting workspace UI.
+
+
+## Accounting approvals and credit notes increment (CI passed)
+
+- Added invoice approval submission, decision history and submitter self-approval
+  prevention. Posting is blocked for invoices with pending or rejected approvals.
+- Added tenant/branch-scoped receivable and payable credit notes with line quantity
+  limits, proportional tax reversal, balanced ledger journal, unique tenant
+  idempotency keys and fiscal-period checks.
+- Invoice balances are reduced when credit notes post; customer/supplier statements
+  now show original invoice gross value and separate negative credit-note movements.
+- Added migration 0017, request validation, API contract tests and Accounting docs.
+- Explicitly not included: customer refunds, supplier credit balances, multi-level
+  Accounting approvals, credit note PDF/email delivery and approval dashboard UI.
+- Branch: feature/accounting-credit-notes-approvals.
+- GitHub Actions run `42373824056` passed migration upgrade, downgrade/re-upgrade,
+  Python compilation and pytest at commit `3f3083b25fc7a9d8d16e60a967921e493060d474`.
