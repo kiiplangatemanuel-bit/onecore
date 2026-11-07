@@ -204,11 +204,16 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
         "TransactionDesc": f"OneCore POS sale {sale.id}"[:13],
         })
     except HTTPException as exc:
-        intent.status = "unknown" if exc.status_code == 503 else "failed"
-        intent.result_description = str(exc.detail)[:500]
+        if intent.status not in {"success", "failed", "exception"}:
+            intent.status = "unknown" if exc.status_code == 503 else "failed"
+            intent.result_description = str(exc.detail)[:500]
         db.commit()
         raise
     if response.get("ResponseCode") != "0" or not response.get("CheckoutRequestID"):
+        if intent.status == "success" and intent.checkout_request_id:
+            return {"intent_id": intent.id, "status": "success",
+                    "checkout_request_id": intent.checkout_request_id,
+                    "message": "Payment was confirmed by the provider callback"}
         intent.status = "failed"
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja did not accept STK request")[:500]
         db.commit()
@@ -431,11 +436,16 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
         "Occasion": f"POS-{result.id}"[:20],
         })
     except HTTPException as exc:
-        intent.status = "unknown" if exc.status_code == 503 else "failed"
-        intent.result_description = str(exc.detail)[:500]
+        if intent.status not in {"success", "failed", "exception"}:
+            intent.status = "unknown" if exc.status_code == 503 else "failed"
+            intent.result_description = str(exc.detail)[:500]
         db.commit()
         raise
     if response.get("ResponseCode") != "0":
+        if intent.status == "success" and intent.conversation_id:
+            return {"intent_id": intent.id, "status": "success",
+                    "conversation_id": intent.conversation_id,
+                    "message": "Refund was confirmed by the provider callback"}
         intent.status = "failed"
         intent.result_description = str(response.get("ResponseDescription") or response.get("errorMessage") or "Daraja rejected B2C request")[:500]
         db.commit()
