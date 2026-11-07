@@ -125,6 +125,10 @@ class DeviceRegisterIn(BaseModel):
     platform: str = Field(default="browser", max_length=80)
 
 
+class DeviceSessionIn(BaseModel):
+    device_secret: str = Field(min_length=32, max_length=128)
+
+
 class DeviceDecisionIn(BaseModel):
     decision: str = Field(pattern="^(approve|reject)$")
 
@@ -245,12 +249,12 @@ def revoke_device(device_id: int, membership=Depends(active_membership),
 
 
 @router.post("/devices/{device_id}/session")
-def validate_device_session(device_id: int, device_secret: str,
+def validate_device_session(device_id: int, payload: DeviceSessionIn,
     membership=Depends(active_membership), user: User=Depends(current_user), db: Session=Depends(get_db)):
     row = db.query(POSDevice).filter_by(id=device_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership, row.branch_id) or row.status != "trusted":
         raise HTTPException(403, "Trusted device approval is required")
-    if not secrets.compare_digest(row.token_digest, token_hash(device_secret)):
+    if not secrets.compare_digest(row.token_digest, token_hash(payload.device_secret)):
         raise HTTPException(401, "Invalid device credential")
     row.last_seen_at=utcnow(); db.commit()
     return {"device_id":row.id,"cashier_user_id":user.id,"branch_id":row.branch_id,
