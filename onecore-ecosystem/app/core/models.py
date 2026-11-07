@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric
+from sqlalchemy import String, Boolean, DateTime, Date, ForeignKey, JSON, Text, Index, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -205,6 +205,47 @@ class AccountingJournalLine(Base):
     description: Mapped[str] = mapped_column(String(240), default="")
     debit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     credit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class HREmployee(Base):
+    __tablename__ = "hr_employees"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    employee_number: Mapped[str] = mapped_column(String(40))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    department: Mapped[str] = mapped_column(String(120), default="")
+    job_title: Mapped[str] = mapped_column(String(120), default="")
+    employment_type: Mapped[str] = mapped_column(String(20), default="full_time")
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_hr_employee_org_number", "organization_id", "employee_number", unique=True),)
+
+
+class HRLeaveRequest(Base):
+    __tablename__ = "hr_leave_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    leave_type: Mapped[str] = mapped_column(String(24))
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    working_days: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    reason: Mapped[str] = mapped_column(String(1000))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_note: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
