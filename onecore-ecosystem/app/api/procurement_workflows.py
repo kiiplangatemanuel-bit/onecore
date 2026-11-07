@@ -581,6 +581,10 @@ def create_approval_delegation(payload: DelegationIn, membership=Depends(active_
     ).all()
     if {x.user_id for x in members} != {payload.principal_user_id, payload.delegate_user_id}:
         raise HTTPException(422, "Principal and delegate must be active organization members")
+    role_rank = {"staff": 0, "accountant": 1, "manager": 2, "branch_admin": 3, "org_admin": 4}
+    member_by_id = {x.user_id: x for x in members}
+    if role_rank.get(member_by_id[payload.delegate_user_id].role, -1) < role_rank.get(member_by_id[payload.principal_user_id].role, -1):
+        raise HTTPException(422, "Delegate must have the same or higher approval authority than the principal")
     if payload.branch_id and any(
         member.branch_scope != "*" and payload.branch_id not in {v.strip() for v in member.branch_scope.split(",")}
         for member in members
@@ -877,7 +881,7 @@ def supplier_portal_purchase_order_detail(order_id: int,
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=order_id, organization_id=access.organization_id, supplier_id=supplier.id
     ).first()
-    if not order:
+    if not order or order.status not in {"approved", "partially_received", "received", "closed"}:
         raise HTTPException(404, "Purchase order not found")
     lines = db.query(ProcurementPurchaseOrderLine).filter_by(
         organization_id=access.organization_id, purchase_order_id=order.id
@@ -954,8 +958,10 @@ def _portal_supplier(token, db):
 def supplier_portal_purchase_orders(token: str = Header(default="", alias="X-Supplier-Portal-Token"),
                                     db: Session = Depends(get_db)):
     access, supplier = _portal_supplier(token, db)
-    rows = db.query(ProcurementPurchaseOrder).filter_by(
-        organization_id=access.organization_id, supplier_id=supplier.id
+    rows = db.query(ProcurementPurchaseOrder).filter(
+        ProcurementPurchaseOrder.organization_id == access.organization_id,
+        ProcurementPurchaseOrder.supplier_id == supplier.id,
+        ProcurementPurchaseOrder.status.in_({"approved", "partially_received", "received", "closed"}),
     ).order_by(ProcurementPurchaseOrder.id.desc()).limit(200).all()
     return [{"id": x.id, "order_number": x.order_number, "status": x.status,
              "currency": x.currency, "created_at": x.created_at.isoformat()} for x in rows]
@@ -987,7 +993,7 @@ def supplier_portal_delivery_update(payload: dict,
     order = db.query(ProcurementPurchaseOrder).filter_by(
         id=order_id, organization_id=access.organization_id, supplier_id=supplier.id
     ).first()
-    if not order:
+    if not order or order.status not in {"approved", "partially_received", "received"}:
         raise HTTPException(404, "Purchase order not found")
     event = Record(organization_id=access.organization_id, module_key="procurement",
         record_type="supplier_delivery_update",
