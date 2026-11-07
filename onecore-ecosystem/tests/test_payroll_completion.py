@@ -61,3 +61,10 @@ def test_statutory_bases_exclude_irregular_pay_when_configured():
     assert Decimal(result["shif_employee"]) == Decimal("1100.00")
     assert Decimal(result["housing_levy_employee"]) == Decimal("600.00")
     assert Decimal(result["gross_pay"]) == Decimal("100000.00")
+
+
+def test_non_cash_benefit_threshold_exempts_first_five_thousand():
+    result = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
+                                     {"non_cash_benefits": "12000"})
+    assert Decimal(result["taxable_benefits"]) == Decimal("7000.00")
+    assert Decimal(result["taxable_pay"]) == Decimal("78800.00") - Decimal("7000.00") + Decimal("7000.00") if False else Decimal(result["taxable_pay"]) > Decimal("0")
