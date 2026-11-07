@@ -511,6 +511,135 @@ class LaboratorySample(Base):
     )
 
 
+class PharmacyPrescription(Base):
+    __tablename__ = "pharmacy_prescriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    encounter_id: Mapped[int] = mapped_column(ForeignKey("healthcare_encounters.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    prescriber_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    prescription_number: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    valid_until: Mapped[date] = mapped_column(Date, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_pharmacy_rx_org_number", "organization_id", "prescription_number", unique=True),)
+
+
+class PharmacyPrescriptionLine(Base):
+    __tablename__ = "pharmacy_prescription_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    prescription_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_prescriptions.id"), index=True)
+    medicine_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_medicines.id"), index=True)
+    dose: Mapped[str] = mapped_column(String(120))
+    frequency: Mapped[str] = mapped_column(String(120))
+    duration_days: Mapped[int] = mapped_column(Integer)
+    quantity_prescribed: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    quantity_dispensed: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
+    refills_allowed: Mapped[int] = mapped_column(Integer, default=0)
+    refills_used: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+
+
+class PharmacyDispense(Base):
+    __tablename__ = "pharmacy_dispenses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    prescription_line_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_prescription_lines.id"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_batches.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="dispensed")
+    pharmacist_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    verified_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    dispensed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_pharmacy_dispense_org_key", "organization_id", "idempotency_key", unique=True),)
+
+
+class PharmacyAllergy(Base):
+    __tablename__ = "pharmacy_allergies"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    allergen: Mapped[str] = mapped_column(String(180))
+    reaction: Mapped[str] = mapped_column(String(500), default="")
+    severity: Mapped[str] = mapped_column(String(20), default="unknown")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PharmacyDrugSafetyRule(Base):
+    __tablename__ = "pharmacy_drug_safety_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    medicine_a_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_medicines.id"), index=True)
+    medicine_b_id: Mapped[int | None] = mapped_column(ForeignKey("pharmacy_medicines.id"), nullable=True)
+    rule_type: Mapped[str] = mapped_column(String(20))
+    severity: Mapped[str] = mapped_column(String(20), default="warning")
+    description: Mapped[str] = mapped_column(String(500))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PharmacyControlledEvent(Base):
+    __tablename__ = "pharmacy_controlled_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    medicine_id: Mapped[int] = mapped_column(ForeignKey("pharmacy_medicines.id"), index=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("pharmacy_batches.id"), nullable=True)
+    prescription_id: Mapped[int | None] = mapped_column(ForeignKey("pharmacy_prescriptions.id"), nullable=True)
+    dispense_id: Mapped[int | None] = mapped_column(ForeignKey("pharmacy_dispenses.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(40))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    witness_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PharmacyLabWorkflowRecord(Base):
+    __tablename__ = "pharmacy_lab_workflow_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    record_type: Mapped[str] = mapped_column(String(40), index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("ix_pharm_lab_record_org_key", "organization_id", "record_type", "idempotency_key", unique=True),)
+
+
+class LaboratoryTestPanel(Base):
+    __tablename__ = "laboratory_test_panels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str] = mapped_column(String(500), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_lab_panel_org_code", "organization_id", "code", unique=True),)
+
+
+class LaboratoryTestPanelLine(Base):
+    __tablename__ = "laboratory_test_panel_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    panel_id: Mapped[int] = mapped_column(ForeignKey("laboratory_test_panels.id"), index=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("laboratory_tests.id"), index=True)
+    __table_args__ = (Index("ix_lab_panel_line_unique", "organization_id", "panel_id", "test_id", unique=True),)
+
+
 class SaccoMember(Base):
     __tablename__ = "sacco_members"
     id: Mapped[int] = mapped_column(primary_key=True)
