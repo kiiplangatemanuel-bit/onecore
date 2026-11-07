@@ -38,7 +38,7 @@ def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_
         id=record_id, organization_id=m.organization_id,
         module_key=MODULE, record_type=kind
     ).first()
-    branch_id = (row.data or {}).get(branch_field) if row else None
+    branch_id = ((row.data or {}).get(branch_field) or row.branch_id) if row else None
     if not row or (branch_id is not None and not can_access_branch(m, branch_id)):
         raise HTTPException(404, f"{kind.replace('_', ' ').title()} not found")
     return row
@@ -47,8 +47,22 @@ def _get(db: Session, m, kind: str, record_id: int, branch_field: str = "branch_
 def _create(db, m, user, kind, data):
     payload = dict(data)
     branch_id = payload.get("branch_id")
+    if branch_id is None and payload.get("learner_id"):
+        learner = db.query(SchoolLearner).filter_by(
+            id=int(payload["learner_id"]), organization_id=m.organization_id
+        ).first()
+        if learner:
+            branch_id = learner.branch_id
+    if branch_id is None and payload.get("class_id"):
+        cls = db.query(SchoolClass).filter_by(
+            id=int(payload["class_id"]), organization_id=m.organization_id
+        ).first()
+        if cls:
+            branch_id = cls.branch_id
     if branch_id is not None and not can_access_branch(m, branch_id):
         raise HTTPException(403, "Branch is outside your access scope")
+    if branch_id is not None:
+        payload["branch_id"] = str(branch_id)
     row = Record(organization_id=m.organization_id, module_key=MODULE,
                  record_type=kind, data=payload, branch_id=str(branch_id) if branch_id else None,
                  created_by=user.id)
@@ -359,7 +373,11 @@ def save_seating_plan(timetable_id:int,session_index:int,payload:list[dict[str,A
     learners=[int(x.get("learner_id",0)) for x in payload]
     if not payload or any(not x for x in seats) or len(seats)!=len(set(seats)) or len(learners)!=len(set(learners)) or 0 in learners:
         raise HTTPException(422,"Seating plan requires unique learner IDs and seat labels")
-    for learner_id in learners: _learner(db,m,learner_id)
+    timetable_class_id=int(timetable.data.get("class_id",0))
+    for learner_id in learners:
+        learner=_learner(db,m,learner_id)
+        if learner.status!="active" or learner.class_id!=timetable_class_id:
+            raise HTTPException(422,"Every seated learner must be active in the timetable class")
     sessions[session_index]={**sessions[session_index],"seating_plan":payload}
     timetable.data={**timetable.data,"sessions":sessions}
     _audit(db,m,u,"school.exam.seating_saved","exam_timetable",timetable.id)
