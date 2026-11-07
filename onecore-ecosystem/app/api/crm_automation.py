@@ -32,6 +32,12 @@ def _branch(db,m,branch_id):
 def _asset_branch_ok(m,branch_id):
     return branch_id is None or can_access_branch(m,branch_id)
 
+def _asset_manage_scope(m,branch_id):
+    if branch_id is None and branch_scope_ids(m) is not None:
+        raise HTTPException(403,"Branch-scoped users must assign reusable assets to an accessible branch")
+    if branch_id is not None and not can_access_branch(m,branch_id):
+        raise HTTPException(403,"Asset branch is outside your scope")
+
 
 def _template(db,template_id,org,m):
     row=db.query(CRMCommunicationTemplate).filter_by(id=template_id,organization_id=org).first()
@@ -143,6 +149,7 @@ def create_template(payload:dict,m=Depends(active_membership),u:User=Depends(cur
     if not name or len(name)>180 or channel not in CHANNELS or purpose not in {"marketing","transactional"} or not isinstance(body,str) or not body.strip() or len(body)>100000:
         raise HTTPException(422,"Valid name, channel, purpose and body are required")
     _branch(db,m,branch_id)
+    _asset_manage_scope(m,branch_id)
     variables=_validate_template(subject,body,payload.get("variables",[]))
     version=(db.query(func.max(CRMCommunicationTemplate.version)).filter_by(
         organization_id=m.organization_id,name=name).scalar() or 0)+1
@@ -170,6 +177,7 @@ def update_template(template_id:int,payload:dict,m=Depends(active_membership),
     old=db.query(CRMCommunicationTemplate).filter_by(
         id=template_id,organization_id=m.organization_id,is_active=True).first()
     if not old or not _asset_branch_ok(m,old.branch_id):raise HTTPException(404,"Active template not found")
+    _asset_manage_scope(m,old.branch_id)
     if payload.get("is_active") is False:
         old.is_active=False;db.commit()
         return {"id":old.id,"status":"deactivated"}
@@ -182,6 +190,7 @@ def update_template(template_id:int,payload:dict,m=Depends(active_membership),
     if not name or len(name)>180 or channel not in CHANNELS or purpose not in {"marketing","transactional"} or not isinstance(body,str) or not body.strip() or len(body)>100000:
         raise HTTPException(422,"Invalid template revision")
     _branch(db,m,branch_id)
+    _asset_manage_scope(m,branch_id)
     variables=_validate_template(subject,body,payload.get("variables",old.variables or []))
     version=(db.query(func.max(CRMCommunicationTemplate.version)).filter_by(
         organization_id=m.organization_id,name=name).scalar() or 0)+1
@@ -214,6 +223,7 @@ def create_segment(payload:dict,m=Depends(active_membership),u:User=Depends(curr
     branch_id=payload.get("branch_id") or None
     if not name or len(name)>180:raise HTTPException(422,"Segment name required")
     _branch(db,m,branch_id)
+    _asset_manage_scope(m,branch_id)
     compile_rules(rules)
     row=CRMAudienceSegment(organization_id=m.organization_id,branch_id=branch_id,
         name=name,description=str(payload.get("description",""))[:500],
@@ -233,6 +243,7 @@ def update_segment(segment_id:int,payload:dict,m=Depends(active_membership),
     u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
     row=_segment(db,segment_id,m)
+    _asset_manage_scope(m,row.branch_id)
     rules=payload.get("rules",row.rules)
     compile_rules(rules)
     name=str(payload.get("name",row.name)).strip()
@@ -252,7 +263,7 @@ def update_segment(segment_id:int,payload:dict,m=Depends(active_membership),
 @router.post("/segments/{segment_id}/deactivate")
 def deactivate_segment(segment_id:int,m=Depends(active_membership),u:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(m,"manage")
-    row=_segment(db,segment_id,m);row.is_active=False
+    row=_segment(db,segment_id,m);_asset_manage_scope(m,row.branch_id);row.is_active=False
     db.add(AuditEvent(actor_user_id=u.id,organization_id=m.organization_id,
         action="crm.segment.deactivated",resource_type="crm_audience_segment",resource_id=str(row.id)))
     db.commit()
