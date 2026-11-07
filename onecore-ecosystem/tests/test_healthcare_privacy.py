@@ -28,6 +28,7 @@ def test_healthcare_privacy_models_and_routes_are_registered():
     assert "/api/v1/healthcare/access/roles/{role_id}/revoke" in paths
     assert "/api/v1/healthcare/patients" in paths
     assert "/api/v1/healthcare/patients/{patient_id}/access-grants" in paths
+    assert "/api/v1/healthcare/patients/{patient_id}/access-grants/{grant_id}/revoke" in paths
     assert "/api/v1/healthcare/patients/{patient_id}/consents" in paths
     assert "/api/v1/healthcare/patients/{patient_id}/break-glass" in paths
     assert "/api/v1/healthcare/patients/{patient_id}/encounters" in paths
