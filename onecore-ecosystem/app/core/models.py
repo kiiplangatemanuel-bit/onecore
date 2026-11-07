@@ -97,3 +97,18 @@ class NoticeDismissal(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     dismissed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_notice_dismissal_user_notice", "user_id", "notice_id", unique=True),)
+
+
+class OrganizationInvitation(Base):
+    __tablename__ = "organization_invitations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(50))
+    branch_scope: Mapped[str] = mapped_column(String(500), default="*")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
