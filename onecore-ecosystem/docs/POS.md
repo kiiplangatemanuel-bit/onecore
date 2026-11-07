@@ -166,6 +166,18 @@ transaction receipt. Timeouts and failed results do not claim that money was sen
 B2C requires an approved Daraja shortcode, initiator name, pre-encrypted security
 credential, and registered result and timeout callback URLs.
 
+Callback processing binds each result to the provider conversation and verifies the
+exact paid/refunded amount, payer phone (STK), and provider receipt before changing
+the tender/refund to recorded. Receipt references are unique per organization and
+M-Pesa payment/refund type. Callback tokens are stored only as SHA-256 hashes. The
+callback handler can recover a provider callback that arrives before the initiation
+response is persisted, using the one-time callback URL token as the correlation secret.
+
+A B2C request with an unknown, timed-out, exception, or still-initiating outcome cannot
+be submitted again automatically. Reconcile the provider transaction first; only a
+definitively rejected request may be retried. This prevents duplicate customer payouts
+when a network timeout occurs after Safaricom accepted a request.
+
 ### Required environment configuration
 
 - `INTEGRATION_MPESA_ENABLED=true`
