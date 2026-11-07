@@ -1,0 +1,31 @@
+name: OneCore API checks
+
+on:
+  push:
+    paths:
+      - "onecore-ecosystem/**"
+      - ".github/workflows/onecore-ci.yml"
+  pull_request:
+    paths:
+      - "onecore-ecosystem/**"
+      - ".github/workflows/onecore-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: onecore-ecosystem
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: onecore-ecosystem/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile Python modules
+        run: python -m compileall -q app tests
+      - name: Run tests
+        run: pytest -q
