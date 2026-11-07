@@ -659,8 +659,11 @@ def reconcile_payments(batch_id: int, membership=Depends(active_membership), use
 def statutory_report(period_start: date, period_end: date, membership=Depends(active_membership),
                      user=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "read")
+    approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
+                    .filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
     snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
-             if period_start.isoformat() <= r.data.get("period_end", "") <= period_end.isoformat()]
+             if r.data.get("run_id") in approved_ids
+             and period_start.isoformat() <= r.data.get("period_end", "") <= period_end.isoformat()]
     totals = {}
     for s in snaps:
         for key in ("paye", "nssf_employee", "nssf_employer", "shif_employee", "housing_levy_employee", "housing_levy_employer"):
@@ -673,9 +676,11 @@ def statutory_report(period_start: date, period_end: date, membership=Depends(ac
 def payroll_analytics(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "read")
     runs = db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).all()
-    return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid")},
-            "gross_total": str(money(sum((D(r.gross_total or 0) for r in runs), ZERO))),
-            "net_total": str(money(sum((D(r.net_total or 0) for r in runs), ZERO)))}
+    finalized = [r for r in runs if r.status in ("approved","paid","partial_paid")]
+    return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid","partial_paid")},
+            "finalized_runs": len(finalized),
+            "gross_total": str(money(sum((D(r.gross_total or 0) for r in finalized), ZERO))),
+            "net_total": str(money(sum((D(r.net_total or 0) for r in finalized), ZERO)))}
 
 
 @router.get("/hr/payroll/year-end/{year}")
@@ -683,8 +688,10 @@ def year_end_reconciliation(year: int, membership=Depends(active_membership), us
     require_permission(membership, "read")
     if year < 2000 or year > 2200:
         raise HTTPException(422, "Invalid year")
+    approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
+                    .filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
     snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
-             if r.data.get("period_end", "").startswith(str(year))]
+             if r.data.get("run_id") in approved_ids and r.data.get("period_end", "").startswith(str(year))]
     totals = {}
     for s in snaps:
         for key in ("gross_pay","paye","nssf_employee","shif_employee","housing_levy_employee","net_pay"):
@@ -700,7 +707,7 @@ def my_payroll_history(membership=Depends(active_membership), user=Depends(curre
     employee = db.query(HREmployee).filter_by(organization_id=membership.organization_id, user_id=user.id, status="active").first()
     if not employee or not can_access_branch(membership, employee.branch_id):
         return []
-    approved_run_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).filter(HRPayrollRun.status.in_(["approved","paid"])).all()}
+    approved_run_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
     rows = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
             if r.data.get("employee_id") == employee.id and r.data.get("run_id") in approved_run_ids]
     return sorted(rows, key=lambda x: x["period_end"], reverse=True)
