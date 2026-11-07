@@ -33,5 +33,5 @@ def test_crm_forecast_and_attribution_routes_are_registered():
       "/api/v1/crm/forecast/snapshots","/api/v1/crm/forecast/accuracy",
       "/api/v1/crm/targets","/api/v1/crm/campaigns/{campaign_id}/attributions",
       "/api/v1/crm/campaigns/roi","/api/v1/crm/scheduler/health",
-      "/api/v1/crm/leads/{lead_id}/forecast-details"]:
+      "/api/v1/crm/leads/{lead_id}/forecast-details","/api/v1/crm/providers/health"]:
         assert path in paths
