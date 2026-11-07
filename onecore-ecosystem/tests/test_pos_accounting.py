@@ -30,7 +30,6 @@ def test_pos_accounting_mapping_requires_all_control_accounts():
             cash_account_id=1, card_clearing_account_id=2,
             bank_clearing_account_id=3, credit_receivable_account_id=4,
             sales_revenue_account_id=5, sales_discount_account_id=6,
-            sales_returns_account_id=8,
         )
 
 
