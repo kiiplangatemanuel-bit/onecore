@@ -584,8 +584,10 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
         remaining-=take
         if remaining==0:break
     if remaining>0:raise HTTPException(409,"Insufficient unexpired stock in eligible batches")
-    line["quantity_dispensed"]=str(Decimal(line["quantity_dispensed"])+qty)
-    line["refills_used"]=max(0,int(Decimal(line["quantity_dispensed"])//Decimal(line["quantity_prescribed"]))-1)
+    previous_dispensed=Decimal(line["quantity_dispensed"])
+    refill_number=max(0,int(previous_dispensed//Decimal(line["quantity_prescribed"])))
+    line["quantity_dispensed"]=str(previous_dispensed+qty)
+    line["refills_used"]=min(int(line["refills_allowed"]),max(0,int(Decimal(line["quantity_dispensed"])//Decimal(line["quantity_prescribed"]))-1))
     line["status"]="dispensed" if Decimal(line["quantity_dispensed"])>=total_authorized else "partially_dispensed"
     data["lines"][line_index]=line
     data["status"]="dispensed" if all(x["status"]=="dispensed" for x in data["lines"]) else "partially_dispensed"
@@ -593,7 +595,8 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     amount=sum((Decimal(a["quantity"])*Decimal(a["unit_price"]) for a in allocations),Decimal("0")).quantize(Decimal("0.01"))
     disp=_create(db,m,u,"pharmacy_dispense",{"prescription_id":rx.id,"line_index":line_index,
         "patient_id":rx.patient_id,"quantity":str(qty),"allocations":allocations,
-        "requested_batch_id":requested_batch,"pharmacist_id":u.id,"verifier_id":verifier_id,"dispensed_at":NOW().isoformat()},
+        "requested_batch_id":requested_batch,"refill_number":refill_number,
+        "pharmacist_id":u.id,"verifier_id":verifier_id,"dispensed_at":NOW().isoformat()},
         rx.branch_id,rx.patient_id,parent_id=rx.id,status="dispensed",
         idempotency_key=key,amount=amount,currency="KES")
     for allocation in allocations:
@@ -614,6 +617,48 @@ def dispense_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(ac
     return {"id":disp.id,"status":"dispensed","quantity":str(qty),
         "allocations":allocations,"amount":str(amount),"invoice_id":invoice.id,
         "prescription_status":rx.status}
+
+
+@router.post("/pharmacy/prescriptions/{prescription_id}/refill",status_code=201)
+def refill_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    rx=_get(db,m,prescription_id,"pharmacy_prescription",lock=True)
+    _need(db,m,u,"pharmacy.manage",rx.branch_id)
+    data=_payload(rx);idx=int(payload.get("line_index",-1))
+    if idx<0 or idx>=len(data["lines"]):raise HTTPException(404,"Prescription line not found")
+    line=data["lines"][idx]
+    if rx.status not in {"active","partially_dispensed"} or _date(data["valid_until"],"valid_until")<date.today():
+        raise HTTPException(409,"Prescription is not eligible for refill")
+    prescribed=Decimal(line["quantity_prescribed"]);dispensed=Decimal(line["quantity_dispensed"])
+    used=int(line.get("refills_used",0));allowed=int(line.get("refills_allowed",0))
+    if used>=allowed or dispensed < prescribed*(used+1):
+        raise HTTPException(409,"The previous authorized quantity must be fully dispensed before the next refill")
+    quantity=_decimal(payload.get("quantity"),"quantity",True)
+    if quantity>prescribed:
+        raise HTTPException(422,"A refill cannot exceed the originally prescribed quantity")
+    refill_payload={**payload,"line_index":idx,"quantity":str(quantity),"is_refill":True}
+    return dispense_pharmacy_prescription(prescription_id,refill_payload,m,u,db)
+
+
+@router.post("/pharmacy/prescriptions/{prescription_id}/cancel")
+def cancel_pharmacy_prescription(prescription_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    rx=_get(db,m,prescription_id,"pharmacy_prescription",lock=True)
+    roles=_need(db,m,u,"pharmacy.manage",rx.branch_id)
+    data=_payload(rx)
+    if rx.status not in {"active","partially_dispensed"}:
+        raise HTTPException(409,"Prescription cannot be cancelled from its current state")
+    if u.id!=data.get("prescriber_id") and "healthcare_admin" not in roles:
+        raise HTTPException(403,"Only the prescriber or healthcare administrator may cancel this prescription")
+    reason=_required_text(payload,"reason",500)
+    data["status"]="cancelled";data["cancelled_by"]=u.id
+    data["cancelled_at"]=NOW().isoformat();data["cancellation_reason"]=reason
+    _update(rx,data,u,status="cancelled")
+    patient=_patient(db,rx.patient_id,m)
+    _patient_event(db,m,u,patient,"pharmacy.prescription.cancelled",
+        {"prescription_id":rx.id,"reason":reason},rx.id)
+    db.commit()
+    return {"prescription_id":rx.id,"status":rx.status}
 
 
 @router.post("/pharmacy/dispenses/{dispense_id}/return",status_code=201)
@@ -648,6 +693,48 @@ def return_pharmacy_dispense(dispense_id:int,payload:dict,m=Depends(active_membe
     db.commit()
     return {"return_id":row.id,"status":"quarantine_pending",
         "note":"Returned product is not restored to saleable inventory."}
+
+
+@router.post("/pharmacy/returns/{return_id}/disposition")
+def decide_pharmacy_return(return_id:int,payload:dict,m=Depends(active_membership),
+    u:User=Depends(current_user),db:Session=Depends(get_db)):
+    row=_get(db,m,return_id,"pharmacy_return",lock=True)
+    _need(db,m,u,"pharmacy.manage",row.branch_id)
+    if row.status!="quarantine_pending":
+        raise HTTPException(409,"Return has already received a disposition")
+    data=_payload(row);decision=str(payload.get("decision",""))
+    if decision not in {"quarantine","discard","restock"}:
+        raise HTTPException(422,"Disposition must be quarantine, discard or restock")
+    reason=_required_text(payload,"reason",500)
+    verifier_id=int(payload.get("verifier_id",0))
+    if decision=="restock":
+        if verifier_id==u.id:
+            raise HTTPException(403,"A second pharmacist must verify returned stock")
+        _verifier(db,m,verifier_id,row.branch_id)
+        if payload.get("sealed") is not True:
+            raise HTTPException(422,"Only sealed, saleable returned medicine may be restocked")
+        for allocation in data["allocations"]:
+            batch,bd=_batch(db,m,int(allocation["batch_id"]),lock=True)
+            if batch.status!="active" or _date(bd["expiry_date"],"expiry_date")<date.today():
+                raise HTTPException(409,"Returned stock cannot be restored to an expired or recalled batch")
+            qty=Decimal(allocation["quantity"])
+            bd["remaining_quantity"]=str(Decimal(bd["remaining_quantity"])+qty)
+            _update(batch,bd,u)
+            medrow,med=_medicine(db,m,int(bd["medicine_id"]))
+            _movement(db,m,u,med["inventory_product_id"],row.branch_id,qty,"receipt",
+                f"pharmacy-return:{row.id}",f"pharm-return:{row.id}:{batch.id}")
+            if med.get("is_controlled"):
+                _controlled_event(db,m,u,medrow.id,batch.id,row.patient_id,"returned_to_stock",
+                    qty,reason,verifier_id,row.id,row.branch_id)
+    data["stock_disposition"]=decision;data["disposition_reason"]=reason
+    data["disposition_by"]=u.id;data["disposition_at"]=NOW().isoformat()
+    data["verifier_id"]=verifier_id if decision=="restock" else None
+    _update(row,data,u,status=decision)
+    patient=_patient(db,row.patient_id,m)
+    _patient_event(db,m,u,patient,"pharmacy.return.disposition",
+        {"return_id":row.id,"decision":decision,"reason":reason},row.id)
+    db.commit()
+    return {"return_id":row.id,"status":row.status,"restocked":decision=="restock"}
 
 
 @router.post("/pharmacy/dispenses/{dispense_id}/reverse")
