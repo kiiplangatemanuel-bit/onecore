@@ -88,7 +88,7 @@ async function syncOfflineQueue() {
       }
       if (response.status === 409 || response.status === 404 || response.status === 422) {
         await notifyClients({type: "pos-sync-conflict", transaction_id: item.id, status: response.status});
-        continue; // Keep the encrypted item for supervisor review; never auto-discard or replay it.
+        break; // Preserve FIFO order until a supervisor resolves this transaction.
       }
       if (!response.ok) throw new Error("POS background sync failed: " + response.status);
       const result = await response.json();
