@@ -46,3 +46,38 @@ new; won is terminal. A stage change creates an audit event.
 - Automated email/SMS/WhatsApp delivery and consent audit.
 - Full branch-isolation integration tests, PostgreSQL concurrency, security review,
   accessibility audit and UAT.
+
+
+## Quotes and pipeline forecast increment
+
+- Tenant-owned quotes link to a CRM contact and optionally a lead in the same branch.
+- Itemized quote lines include quantity, unit price and operator-entered tax rate.
+- Quote totals are calculated server-side using decimal arithmetic.
+- Quote lifecycle: draft -> issued -> accepted or rejected; expired quotes cannot be
+  accepted. Status changes are audited.
+- Quote currency must match the organization's configured base currency.
+- A quote detail API returns its complete line breakdown.
+- The pipeline forecast groups opportunity value by currency and stage, applying
+  explicit fixed probability assumptions (new 10%, qualified 25%, proposal 50%,
+  negotiation 75%, won 100%, lost 0%).
+
+### Additional API
+
+- POST /api/v1/crm/quotes
+- GET /api/v1/crm/quotes
+- GET /api/v1/crm/quotes/{id}
+- POST /api/v1/crm/quotes/{id}/issue
+- POST /api/v1/crm/quotes/{id}/accept
+- POST /api/v1/crm/quotes/{id}/reject
+- GET /api/v1/crm/forecast
+
+The /crm workspace includes a basic quote form and lifecycle actions.
+
+### Explicit limitations
+
+Issuing a quote changes its workflow status only; it does not email, SMS or otherwise
+deliver the quote to a customer. No customer signature, PDF generation, quote-to-order
+conversion, contract, deposit or invoice automation is included. Forecast probabilities
+are fixed illustrative assumptions, not learned from historical conversion data.
+Campaigns, customer communication, consent management, advanced analytics, team
+forecasting, configurable pipeline probabilities and UAT remain outstanding.
