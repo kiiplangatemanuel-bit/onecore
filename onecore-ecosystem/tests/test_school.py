@@ -64,3 +64,13 @@ def test_school_attendance_model_and_api_routes_are_registered():
     assert "/api/v1/school/attendance" in app.openapi()["paths"]
     operation = app.openapi()["paths"]["/api/v1/school/attendance"]
     assert "post" in operation and "get" in operation
+
+
+def test_school_workspace_exposes_daily_attendance_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "school.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="attendanceLoad"' in html
+    assert 'id="attendanceSave"' in html
+    assert "/school/attendance" in html
+    assert all(status in html for status in ("present", "absent", "late", "excused"))
