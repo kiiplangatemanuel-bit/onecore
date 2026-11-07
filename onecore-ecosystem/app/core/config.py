@@ -80,10 +80,8 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_region: str = ""
 
-settings = Settings()
 
-
-    @model_validator(mode="after")
+@model_validator(mode="after")
     def validate_production_security(self):
         production = self.app_env.strip().lower() in {"production", "prod"}
         if production:
@@ -106,3 +104,5 @@ settings = Settings()
         if self.bootstrap_admin_password and len(self.bootstrap_admin_password) < 14:
             raise ValueError("BOOTSTRAP_ADMIN_PASSWORD must contain at least 14 characters")
         return self
+
+settings = Settings()
