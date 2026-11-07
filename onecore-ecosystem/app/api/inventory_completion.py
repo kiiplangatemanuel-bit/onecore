@@ -37,12 +37,18 @@ def get_warehouse(db, org, warehouse_id, membership=None):
     return row
 
 
-def stock_balance(db, org, product_id, branch_id):
-    value = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
+def stock_balance(db, org, product_id, warehouse):
+    warehouse_count = db.query(InventoryWarehouse).filter_by(
+        organization_id=org, branch_id=warehouse.branch_id, is_active=True).count()
+    q = db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta), 0)).filter(
         InventoryStockMovement.organization_id == org,
         InventoryStockMovement.product_id == product_id,
-        InventoryStockMovement.branch_id == branch_id).scalar()
-    return dec(value or 0)
+        InventoryStockMovement.branch_id == warehouse.branch_id)
+    if warehouse_count == 1:
+        q = q.filter((InventoryStockMovement.warehouse_id == warehouse.id) | (InventoryStockMovement.warehouse_id.is_(None)))
+    else:
+        q = q.filter(InventoryStockMovement.warehouse_id == warehouse.id)
+    return dec(q.scalar() or 0)
 
 
 def active_reserved(db, org, warehouse_id, product_id):
@@ -60,7 +66,7 @@ def active_reserved(db, org, warehouse_id, product_id):
 
 
 def warehouse_qty(db, org, warehouse, product_id):
-    return stock_balance(db, org, product_id, warehouse.branch_id)
+    return stock_balance(db, org, product_id, warehouse)
 
 
 class WarehouseIn(BaseModel):
@@ -197,7 +203,7 @@ def dispatch_transfer(transfer_id:int,payload:DispatchIn,membership=Depends(acti
         available=warehouse_qty(db,membership.organization_id,src,line.product_id)-active_reserved(db,membership.organization_id,src.id,line.product_id)
         if available < dec(line.quantity): raise HTTPException(409,f"Insufficient available stock for product {line.product_id}")
     for line in lines:
-        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=src.branch_id,
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=src.branch_id,warehouse_id=src.id,
             quantity_delta=-dec(line.quantity),movement_type="transfer_out",reference=row.transfer_number,
             idempotency_key=f"transfer-{row.id}-{line.product_id}-out",created_by=user.id))
     row.status="in_transit";row.tracking_reference=payload.tracking_reference;row.dispatched_at=datetime.now(timezone.utc)
@@ -214,7 +220,7 @@ def receive_transfer(transfer_id:int,membership=Depends(active_membership),user:
     dst=get_warehouse(db,membership.organization_id,row.destination_warehouse_id,membership)
     lines=db.query(InventoryTransferLine).filter_by(transfer_id=row.id,organization_id=membership.organization_id).all()
     for line in lines:
-        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=dst.branch_id,
+        db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=dst.branch_id,warehouse_id=dst.id,
             quantity_delta=dec(line.quantity),movement_type="transfer_in",reference=row.transfer_number,
             idempotency_key=f"transfer-{row.id}-{line.product_id}-in",created_by=user.id))
     row.status="received";row.received_at=datetime.now(timezone.utc)
@@ -297,7 +303,7 @@ def receive_batch(payload:BatchReceiptIn,membership=Depends(active_membership),u
         serial_number=payload.serial_number,expiry_date=datetime.combine(payload.expiry_date,datetime.min.time(),tzinfo=timezone.utc) if payload.expiry_date else None,
         quantity_on_hand=payload.quantity.quantize(Q3),unit_cost=payload.unit_cost,status="available")
     db.add(row);db.flush()
-    db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=product.id,branch_id=wh.branch_id,
+    db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=product.id,branch_id=wh.branch_id,warehouse_id=wh.id,
         quantity_delta=payload.quantity.quantize(Q3),movement_type="batch_receipt",reference=f"batch:{row.id}",
         idempotency_key=payload.idempotency_key,created_by=user.id))
     audit(db,user,membership.organization_id,"inventory.batch.received","inventory_batch",row.id);db.commit()
@@ -324,7 +330,7 @@ def issue_batches(payload:BatchIssueIn,membership=Depends(active_membership),use
         if take>0: batch.quantity_on_hand=(dec(batch.quantity_on_hand)-take).quantize(Q3);remaining-=take
         if remaining<=0: break
     if remaining>0: raise HTTPException(409,"Insufficient eligible batch stock")
-    db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=payload.product_id,branch_id=wh.branch_id,
+    db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=payload.product_id,branch_id=wh.branch_id,warehouse_id=wh.id,
         quantity_delta=-payload.quantity.quantize(Q3),movement_type="batch_issue",reference=f"{payload.method} issue",
         idempotency_key=payload.idempotency_key,created_by=user.id))
     audit(db,user,membership.organization_id,"inventory.batch.issued","inventory_product",payload.product_id,f"method:{payload.method};quantity:{payload.quantity}")
@@ -383,7 +389,7 @@ def approve_stocktake(stocktake_id:int,membership=Depends(active_membership),use
     for line in lines:
         delta=dec(line.counted_quantity)-dec(line.expected_quantity)
         if delta:
-            db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=wh.branch_id,
+            db.add(InventoryStockMovement(organization_id=membership.organization_id,product_id=line.product_id,branch_id=wh.branch_id,warehouse_id=wh.id,
                 quantity_delta=delta,movement_type="stocktake_adjustment",reference=f"stocktake:{row.id}",
                 idempotency_key=f"stocktake-{row.id}-{line.product_id}",created_by=user.id))
     row.status="approved";row.approved_by=user.id;row.approved_at=datetime.now(timezone.utc)
@@ -511,7 +517,12 @@ def inventory_dashboard(membership=Depends(active_membership),db:Session=Depends
     allowed=branch_scope_ids(membership)
     warehouses=[w for w in warehouses if can_access_branch(membership,w.branch_id)]
     products=db.query(InventoryProduct).filter_by(organization_id=membership.organization_id,is_active=True).count()
-    low=len(replenishment.__wrapped__(membership,db)) if hasattr(replenishment,"__wrapped__") else 0
+    low=0
+    rules=db.query(InventoryReorderRule).filter_by(organization_id=membership.organization_id,is_active=True).all()
+    for rule in rules:
+        wh=get_warehouse(db,membership.organization_id,rule.warehouse_id,membership)
+        if warehouse_qty(db,membership.organization_id,wh,rule.product_id)-active_reserved(db,membership.organization_id,wh.id,rule.product_id) <= dec(rule.minimum_quantity):
+            low += 1
     expired=db.query(InventoryBatch).filter(InventoryBatch.organization_id==membership.organization_id,
         InventoryBatch.status=="available",InventoryBatch.expiry_date<datetime.now(timezone.utc)).count()
     quarantined=db.query(InventoryBatch).filter_by(organization_id=membership.organization_id,status="quarantined").count()
