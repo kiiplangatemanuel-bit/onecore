@@ -39,3 +39,20 @@ def test_pos_device_credentials_are_not_stored_as_plaintext():
     token="test-device-secret-token"
     assert _hash(token) != token
     assert len(_hash(token)) == 64
+
+def test_pos_device_headers_are_allowed_by_cors():
+    from app.main import app
+    cors = next(m for m in app.user_middleware if m.cls.__name__ == "CORSMiddleware")
+    allowed = {header.lower() for header in cors.options["allow_headers"]}
+    assert "x-organization-id" in allowed
+    assert "x-pos-device-token" in allowed
+
+
+def test_pos_service_worker_uses_safe_background_sync():
+    from pathlib import Path
+    worker = (Path(__file__).parents[1] / "app" / "web" / "pos-sw.js").read_text(encoding="utf-8")
+    assert 'event.tag === "onecore-pos-sync"' in worker
+    assert '"/api/v1/pos/sync"' in worker
+    assert 'response.status === 409' in worker
+    assert "never auto-discard or replay it" in worker
+    assert 'payment.method === "mpesa"' in worker
