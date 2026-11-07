@@ -328,3 +328,33 @@ new tests require a fresh CI run before they can be marked verified.
   environment only. It is not evidence of PostgreSQL production rehearsal, race/load
   testing, external provider certification, production deployment, penetration test
   or user acceptance approval.
+
+
+## School Management academic foundation (8 November 2026)
+
+Implemented on `main`:
+
+- Tenant-owned classes/streams by academic year and optional branch.
+- Applicant admissions with unique tenant admission numbers, guardian contacts and
+  controlled applicant-to-active admission transition.
+- Tenant-owned subject catalogue to support CBC learning areas/subjects.
+- Class/subject assessments with academic year, term, maximum score and weight.
+- Batch mark entry/update, active class membership validation and score ceilings.
+- Configurable grade bands with overlap prevention.
+- Manage-permission publication locks marks; published assessment results provide
+  grades and competition ranking with ties sharing rank.
+- Weighted term report-card summary from published assessments.
+- APIs under `/api/v1/school`; starter workspace at `/school`; migration
+  `0007_school`; models/schemas/routes/UI/tests and `docs/SCHOOL.md`.
+- Commits: `a36e135` (models), `a266c90` (schemas), `ef7c77e` (migration),
+  `132be73` (APIs), `32af97b` (UI), `581f9e5` (UI route),
+  `98e5b25` (assessment listing/report cards), `18547be` (tests),
+  plus follow-up test and documentation commits.
+
+School remains incomplete: no complete application review, guardian/teacher/staff
+portals, attendance, timetable, full CBC strands/outcomes, moderation, year/term
+promotion, advanced ranking configurations, approved report-card PDF/transcript,
+fees/bursaries, boarding, transport, library, discipline, school health, e-learning,
+communication, M-Pesa, statutory integrations, bilingual full UI, security/safeguarding
+review, performance testing or UAT. The current grading and ranking functions are a
+limited initial implementation, not a complete national CBC rules engine.
