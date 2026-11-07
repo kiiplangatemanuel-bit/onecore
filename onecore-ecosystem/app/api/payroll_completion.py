@@ -221,6 +221,12 @@ def _save_record(db, org_id, user_id, kind, data, branch_id=None):
     return row
 
 
+def _visible_snapshots(db, membership):
+    allowed = branch_scope_ids(membership)
+    rows = _record(db, membership.organization_id, "calculation_snapshot").all()
+    return [r for r in rows if allowed is None or r.branch_id in allowed]
+
+
 # Verified published parameters. Changes are new effective-dated records, never edits
 # to a rule set already used by a payroll snapshot.
 KENYA_2026_RULES = {
@@ -421,9 +427,6 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
             raise HTTPException(409, "Calculation snapshot already exists; create a new payroll run to recalculate")
         _save_record(db, membership.organization_id, user.id, "calculation_snapshot",
                      {"key": f"{run.id}:{line.employee_id}", **snapshot}, line.branch_id)
-        line.gross_pay = money(result["gross_pay"])
-        line.deductions_total = money(D(result["gross_pay"]) - D(result["net_pay"]))
-        line.net_pay = money(result["net_pay"])
         snapshots.append(snapshot)
     gross_total = sum((D(x["calculation"]["gross_pay"]) for x in snapshots), ZERO)
     deductions_total = sum((D(x["calculation"]["gross_pay"]) - D(x["calculation"]["net_pay"]) for x in snapshots), ZERO)
@@ -517,6 +520,8 @@ def export_bank_file(batch_id: int, membership=Depends(active_membership), user=
     writer = csv.writer(output)
     writer.writerow(["employee_number", "employee_name", "account_reference", "currency", "amount", "payment_reference"])
     for row in batch.data["rows"]:
+        if row["status"] not in ("pending", "failed"):
+            continue
         emp = db.query(HREmployee).filter_by(id=row["employee_id"], organization_id=membership.organization_id).first()
         writer.writerow([row["employee_number"], row["employee_name"], "", row["currency"], row["amount"], f"PAY-{batch.id}-{row['employee_id']}"])
     return Response(content=output.getvalue(), media_type="text/csv",
@@ -718,7 +723,7 @@ def statutory_report(period_start: date, period_end: date, membership=Depends(ac
         raise HTTPException(422, "Report end date cannot precede start date")
     approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
                     .filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
-    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+    snaps = [r.data for r in _visible_snapshots(db, membership)
              if r.data.get("run_id") in approved_ids
              and period_start.isoformat() <= r.data.get("period_end", "") <= period_end.isoformat()]
     totals = {}
@@ -733,6 +738,12 @@ def statutory_report(period_start: date, period_end: date, membership=Depends(ac
 def payroll_analytics(membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
     _require_manage(membership)
     runs = db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).all()
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        visible_run_ids = {line.run_id for line in db.query(HRPayrollLine).filter(
+            HRPayrollLine.organization_id == membership.organization_id,
+            HRPayrollLine.branch_id.in_(allowed)).all()}
+        runs = [r for r in runs if r.id in visible_run_ids]
     finalized = [r for r in runs if r.status in ("approved","paid","partial_paid")]
     return {"runs": len(runs), "by_status": {s: sum(r.status == s for r in runs) for s in ("draft","calculated","approved","paid","partial_paid")},
             "finalized_runs": len(finalized),
@@ -747,7 +758,7 @@ def year_end_reconciliation(year: int, membership=Depends(active_membership), us
         raise HTTPException(422, "Invalid year")
     approved_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id)
                     .filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
-    snaps = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+    snaps = [r.data for r in _visible_snapshots(db, membership)
              if r.data.get("run_id") in approved_ids and r.data.get("period_end", "").startswith(str(year))]
     totals = {}
     for s in snaps:
@@ -767,7 +778,7 @@ def my_payroll_history(membership=Depends(active_membership), user=Depends(curre
     if not employee or not can_access_branch(membership, employee.branch_id):
         return []
     approved_run_ids = {r.id for r in db.query(HRPayrollRun).filter_by(organization_id=membership.organization_id).filter(HRPayrollRun.status.in_(["approved","paid","partial_paid"])).all()}
-    rows = [r.data for r in _record(db, membership.organization_id, "calculation_snapshot").all()
+    rows = [r.data for r in _visible_snapshots(db, membership)
             if r.data.get("employee_id") == employee.id and r.data.get("run_id") in approved_run_ids]
     return sorted(rows, key=lambda x: x["period_end"], reverse=True)
 
