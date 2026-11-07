@@ -550,7 +550,8 @@ def list_crm_leads(stage: str | None = None, membership=Depends(active_membershi
     return [{"id": x.id, "title": x.title, "contact_id": x.contact_id, "stage": x.stage,
              "source": x.source, "estimated_value": str(x.estimated_value),
              "currency": x.currency, "assigned_to": x.assigned_to, "next_step": x.next_step,
-             "branch_id": x.branch_id} for x in rows]
+             "branch_id": x.branch_id, "expected_close_date": x.expected_close_date.isoformat() if x.expected_close_date else None,
+             "probability_override": str(x.probability_override) if x.probability_override is not None else None} for x in rows]
 
 
 @router.post("/crm/leads", status_code=201)
@@ -597,6 +598,7 @@ def update_crm_lead_stage(lead_id: int, payload: CRMLeadStageIn,
     validate_stage_transition(previous, payload.stage)
     row.stage = payload.stage
     row.next_step = payload.next_step
+    row.actual_closed_at = datetime.now(timezone.utc) if payload.stage == "won" else None
     db.commit()
     audit(db, user.id, membership.organization_id, "crm.lead.stage_changed",
           "crm_lead", row.id, f"{previous}->{row.stage}")
