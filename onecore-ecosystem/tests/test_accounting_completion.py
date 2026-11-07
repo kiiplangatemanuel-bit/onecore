@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.models import AccountingRefund, AccountingProcurementLink
-from app.api.accounting_completion import AccountingRefundIn, ProcurementAPIntegrationIn
+from app.api.accounting_completion import (AccountingRefundIn, ProcurementAPIntegrationIn, AccountingYearEndCloseIn)
 from app.main import app
 
 
@@ -51,3 +51,12 @@ def test_accounting_completion_routes_are_registered():
     assert "/api/v1/accounting/procurement-invoices/{supplier_invoice_id}/integrate" in paths
     assert "/api/v1/accounting/credit-notes/{credit_note_id}/refund" in paths
     assert "/api/v1/accounting/refunds" in paths
+    assert "/api/v1/accounting/fiscal-periods/{period_id}/year-end-close-preview" in paths
+    assert "/api/v1/accounting/fiscal-periods/{period_id}/year-end-close" in paths
+
+
+def test_year_end_close_requires_explicit_confirmation_code():
+    payload = AccountingYearEndCloseIn(retained_earnings_account_id=4, confirmation_code="FY2026")
+    assert payload.confirmation_code == "FY2026"
+    with pytest.raises(ValidationError):
+        AccountingYearEndCloseIn(retained_earnings_account_id=4, confirmation_code="")
