@@ -32,7 +32,9 @@ def _device(db, membership, device_id, token, branch_id=None):
     row=q.first()
     if not row or row.status!="active" or not secrets.compare_digest(row.credential_hash,_hash(token or "")):
         raise HTTPException(401,"Trusted POS device authentication failed")
-    if row.offline_until and row.offline_until < datetime.now(timezone.utc):
+    expires=row.offline_until
+    if expires and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+    if expires and expires < datetime.now(timezone.utc):
         raise HTTPException(401,"Device offline authorization expired; reconnect and re-authorize")
     _branch(membership,row.branch_id)
     row.last_seen_at=datetime.now(timezone.utc)
