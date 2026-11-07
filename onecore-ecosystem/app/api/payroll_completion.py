@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from urllib.parse import urlparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
@@ -326,7 +326,7 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
     rule_end = date.fromisoformat(rule.data["effective_to"]) if rule.data.get("effective_to") else date.max
     if rule_start > run.period_start or rule_end < run.period_end:
         raise HTTPException(409, "Payroll period crosses a statutory rule effective-date boundary; split the period before calculation")
-    if run.period_start.day != 1 or (run.period_end + __import__("datetime").timedelta(days=1)).day != 1 or run.period_start.month != run.period_end.month or run.period_start.year != run.period_end.year:
+    if run.period_start.day != 1 or (run.period_end + timedelta(days=1)).day != 1 or run.period_start.month != run.period_end.month or run.period_start.year != run.period_end.year:
         raise HTTPException(422, "Kenya monthly statutory bands and minimums require a complete calendar-month payroll period")
     lines = db.query(HRPayrollLine).filter_by(organization_id=membership.organization_id, run_id=run.id).all()
     if not lines:
@@ -358,10 +358,10 @@ def calculate_run(run_id: int, payload: dict=Body(default={}), membership=Depend
         overtime_pay = money(hourly_rate * overtime_hours * overtime_multiplier)
         shift_allowance = money(extras.get("shift_allowance", 0))
         cash_allowances = money(extras.get("cash_allowances", 0))
+        regular_allowances = money(extras.get("regular_cash_allowances", 0))
         taxable_benefits = money(extras.get("taxable_benefits", 0))
         meal_benefit = money(extras.get("meal_benefit", 0))
-        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + meal_benefit)
-        regular_allowances = money(extras.get("regular_cash_allowances", 0))
+        gross = money(prorated_base + earnings + overtime_pay + shift_allowance + cash_allowances + regular_allowances + meal_benefit)
         statutory_base = money(prorated_base + regular_allowances)
         extras = {**extras,
             "nssf_pensionable_base": extras.get("nssf_pensionable_base", statutory_base),
