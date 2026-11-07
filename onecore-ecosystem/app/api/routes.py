@@ -1975,6 +1975,25 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
             status="pending" if item.method == "mpesa" else "recorded"))
+    from app.core.pos_completion_models import POSCustomerSale, POSCustomer, POSLoyaltyEntry
+    customer_sale=db.query(POSCustomerSale).filter_by(organization_id=membership.organization_id,sale_id=sale.id).first()
+    if customer_sale:
+        earned=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="earn").scalar() or 0
+        already_reversed=-(db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="reversal").scalar() or 0)
+        cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
+            organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
+        target_reversal=min(int(earned),int(Decimal(str(cumulative_refunds))//Decimal("100")))
+        points_to_reverse=max(0,target_reversal-int(already_reversed))
+        if points_to_reverse:
+            loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
+            if loyalty_customer:
+                loyalty_customer.points_balance-=points_to_reverse
+                db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
+                    sale_id=sale.id,entry_type="reversal",points_delta=-points_to_reverse,
+                    idempotency_key=f"return:{result.id}:loyalty-reversal",
+                    note="Loyalty points reversed against cumulative POS refunds",created_by=user.id))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
