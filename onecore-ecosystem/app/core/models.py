@@ -625,3 +625,41 @@ class AccountingBankStatementLine(Base):
         Index("ix_accounting_bank_statement_line_number", "statement_id", "line_number", unique=True),
         Index("ix_accounting_bank_match_org_journal", "organization_id", "matched_journal_line_id", unique=True),
     )
+
+
+class CRMQuote(Base):
+    __tablename__ = "crm_quotes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"), index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True, index=True)
+    quote_number: Mapped[str] = mapped_column(String(60))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    issue_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_crm_quote_org_number", "organization_id", "quote_number", unique=True),)
+
+
+class CRMQuoteLine(Base):
+    __tablename__ = "crm_quote_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("crm_quotes.id"), index=True)
+    description: Mapped[str] = mapped_column(String(240))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
