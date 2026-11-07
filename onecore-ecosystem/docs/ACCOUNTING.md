@@ -321,3 +321,5 @@ API:
 - POST `/api/v1/accounting/pos-integrations/backfill`
 
 This integration does not execute external refunds or settle payment-provider clearing accounts; those remain separate payment-provider and reconciliation workflows. Account types, base-currency consistency and tax treatment require finance configuration and review.
+
+The Accounting workspace now includes a POS ledger-mapping form, integration status table, pending-post action and legacy-source backfill action. Mapping controls are manager-authorized; integration status is available to users with accounting read access.
