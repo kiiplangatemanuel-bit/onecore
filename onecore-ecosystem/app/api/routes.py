@@ -763,7 +763,8 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
 @router.post("/procurement/orders/{order_id}/approve")
 def approve_purchase_order(order_id: int, membership=Depends(active_membership),
                            user: User = Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "manage")
+    if (membership.role or "").lower() not in {"org_admin","manager"}:
+        raise HTTPException(403,"Only procurement managers or organization administrators can approve purchase orders")
     q=db.query(ProcurementPurchaseOrder).filter_by(id=order_id,organization_id=membership.organization_id)
     allowed=branch_scope_ids(membership)
     if allowed is not None:q=q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id==-1)
@@ -782,6 +783,11 @@ def approve_purchase_order(order_id: int, membership=Depends(active_membership),
                 entity_type="purchase_order",entity_id=order.id,approval_level=rule.approval_level).first()
             if not prior:next_rule=rule;break
         if next_rule is None:raise HTTPException(409,"All configured approval levels have already acted")
+        if (membership.role or "").lower()!=next_rule.approver_role:
+            raise HTTPException(403,"This approval level requires role: "+next_rule.approver_role)
+        if db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
+            entity_type="purchase_order",entity_id=order.id,approver_user_id=user.id).first():
+            raise HTTPException(409,"A user may approve only one level of the same purchase order")
         action=ProcurementApprovalAction(organization_id=membership.organization_id,entity_type="purchase_order",
             entity_id=order.id,approval_level=next_rule.approval_level,approver_user_id=user.id,
             action="approved",note="")
@@ -1286,7 +1292,12 @@ def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_
             ProcurementSupplierInvoice,ProcurementSupplierInvoice.id==ProcurementSupplierInvoiceLine.invoice_id).filter(
             ProcurementSupplierInvoice.purchase_order_id==order.id,ProcurementSupplierInvoiceLine.purchase_order_line_id==po.id,
             ProcurementSupplierInvoice.status.in_(["pending_match","matched"])).scalar() or Decimal("0")
-        if line.quantity>inspected-prior:raise HTTPException(409,"Invoice quantity exceeds accepted, uninvoiced GRN quantity")
+        returned=db.query(func.coalesce(func.sum(ProcurementSupplierReturnLine.quantity),0)).join(
+            ProcurementSupplierReturn,ProcurementSupplierReturn.id==ProcurementSupplierReturnLine.return_id).join(
+            ProcurementGoodsReceiptLine,ProcurementGoodsReceiptLine.id==ProcurementSupplierReturnLine.receipt_line_id).filter(
+            ProcurementSupplierReturn.organization_id==membership.organization_id,
+            ProcurementGoodsReceiptLine.purchase_order_line_id==po.id).scalar() or Decimal("0")
+        if line.quantity>inspected-prior-returned:raise HTTPException(409,"Invoice quantity exceeds accepted, non-returned, uninvoiced GRN quantity")
         subtotal+=line.quantity*line.unit_cost
     invoice=ProcurementSupplierInvoice(organization_id=membership.organization_id,supplier_id=supplier.id,
         purchase_order_id=order.id,invoice_number=payload.invoice_number,invoice_date=datetime.combine(payload.invoice_date,time.min),
@@ -1317,6 +1328,11 @@ def return_goods_to_supplier(receipt_id:int,payload:SupplierReturnIn,membership=
             ProcurementSupplierReturn,ProcurementSupplierReturn.id==ProcurementSupplierReturnLine.return_id).filter(
             ProcurementSupplierReturnLine.receipt_line_id==row.id,ProcurementSupplierReturn.organization_id==membership.organization_id).scalar() or Decimal("0")
         if item.quantity>row.quantity_accepted-already:raise HTTPException(409,"Return quantity exceeds accepted quantity not previously returned")
+        stock=db.query(func.coalesce(func.sum(InventoryStockMovement.quantity_delta),0)).filter(
+            InventoryStockMovement.organization_id==membership.organization_id,
+            InventoryStockMovement.product_id==row.product_id,
+            InventoryStockMovement.branch_id==receipt.branch_id).scalar() or Decimal("0")
+        resulting_balance(Decimal(stock),-item.quantity)
         returned.append((row,item.quantity))
     po=db.query(ProcurementPurchaseOrder).filter_by(id=receipt.purchase_order_id,organization_id=membership.organization_id).first()
     ret=ProcurementSupplierReturn(organization_id=membership.organization_id,goods_receipt_id=receipt.id,
