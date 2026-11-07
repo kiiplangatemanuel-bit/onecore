@@ -1982,6 +1982,8 @@ def create_crm_quote(payload:CRMQuoteIn,membership=Depends(active_membership),
         id=payload.contact_id,organization_id=membership.organization_id).first()
     if not contact or not can_access_branch(membership,contact.branch_id):
         raise HTTPException(404,"Customer contact not found")
+    if payload.branch_id!=contact.branch_id:
+        raise HTTPException(422,"Quote and customer contact must belong to the same branch")
     lead=None
     if payload.lead_id:
         lead=db.query(CRMLead).filter_by(
