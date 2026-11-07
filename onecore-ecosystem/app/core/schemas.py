@@ -441,6 +441,21 @@ class SchoolLearnerPlacementIn(BaseModel):
         return value
 
 
+class SchoolBulkPromotionIn(BaseModel):
+    target_class_id: int = Field(gt=0)
+    learner_ids: list[int] = Field(min_length=1, max_length=1000)
+    effective_date: date
+    reason: str = Field(min_length=5, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_selection(self):
+        if len(self.learner_ids) != len(set(self.learner_ids)):
+            raise ValueError("Each learner may appear only once in a bulk promotion")
+        if len(self.reason.strip()) < 5:
+            raise ValueError("Promotion reason must contain at least five non-space characters")
+        return self
+
+
 class SchoolAttendanceItemIn(BaseModel):
     learner_id: int = Field(gt=0)
     status: str = Field(pattern=r"^(present|absent|late|excused)$")

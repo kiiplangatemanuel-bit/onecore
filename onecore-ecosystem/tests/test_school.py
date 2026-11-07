@@ -107,3 +107,30 @@ def test_school_learner_placement_schema_and_routes():
     assert "/api/v1/school/learners/{learner_id}/placements" in paths
     assert "post" in paths["/api/v1/school/learners/{learner_id}/placements"]
     assert "get" in paths["/api/v1/school/learners/{learner_id}/placements"]
+
+
+def test_school_bulk_promotion_schema_and_route_contract():
+    from app.core.schemas import SchoolBulkPromotionIn
+    payload = SchoolBulkPromotionIn(
+        target_class_id=22, learner_ids=[1, 2, 3],
+        effective_date="2027-01-01", reason="Completed the academic year")
+    assert payload.learner_ids == [1, 2, 3]
+    with pytest.raises(ValidationError):
+        SchoolBulkPromotionIn(target_class_id=22, learner_ids=[1, 1],
+            effective_date="2027-01-01", reason="Duplicate learner")
+    with pytest.raises(ValidationError):
+        SchoolBulkPromotionIn(target_class_id=22, learner_ids=[1],
+            effective_date="2027-01-01", reason="   ")
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/school/classes/{source_class_id}/bulk-promote"
+    assert endpoint in paths and "post" in paths[endpoint]
+
+
+def test_school_workspace_exposes_bulk_promotion_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "school.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="bulkPromotionForm"' in html
+    assert 'id="bulkSourceClass"' in html
+    assert 'id="bulkLearnerSelection"' in html
+    assert "/bulk-promote" in html

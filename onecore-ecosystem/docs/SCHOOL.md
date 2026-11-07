@@ -133,3 +133,20 @@ approved promotion policy and safeguarding procedures before production use.
 Not included: PDF export, parent/guardian self-service or email delivery, head-teacher
 approval, class position, fee-clearance gating, narrative competencies, CBC strand
 mastery, certified transcript issuance or formal academic-policy validation.
+
+
+## Bulk learner promotion
+
+- `POST /api/v1/school/classes/{source_class_id}/bulk-promote` promotes a selected
+  cohort into an active target class in a later academic year.
+- Requires organization manage permission and access to both class branches and
+  every selected learner's current branch.
+- The request rejects duplicate learner IDs, inactive learners, learners no longer
+  enrolled in the source class, same-year/backward promotion and invalid effective
+  dates. The selected learners must all pass validation.
+- Learner updates, append-only placement history and audit events are committed in
+  one transaction. If any validation or database write fails, the cohort is not
+  partially promoted.
+- This endpoint performs administrative placement only. It does not determine
+  promotion eligibility, check class capacity, carry forward fees, migrate marks,
+  notify guardians or replace the school's approved promotion policy.
