@@ -3427,6 +3427,8 @@ def prepare_crm_campaign(campaign_id: int,membership=Depends(active_membership),
             raise HTTPException(409,"The campaign audience segment is no longer available")
         if segment.branch_id and campaign.branch_id and segment.branch_id!=campaign.branch_id:
             raise HTTPException(409,"Campaign and audience segment branches do not match")
+        if segment.branch_id:
+            q=q.filter(CRMContact.branch_id==segment.branch_id)
         q=apply_segment(q,segment.definition)
     contacts=q.order_by(CRMContact.id).limit(5000).all()
     prepared=0
