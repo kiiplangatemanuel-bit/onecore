@@ -73,3 +73,20 @@ def test_accounting_workspace_exposes_subledger_reconciliation():
     assert 'id="subledgerReconciliation"' in html
     assert 'id="subledgerResult"' in html
     assert "/accounting/subledger-reconciliation" in html
+
+
+def test_accounting_financial_statements_route_contract():
+    paths = app.openapi()["paths"]
+    endpoint = "/api/v1/accounting/financial-statements"
+    assert endpoint in paths
+    params = {item["name"] for item in paths[endpoint]["get"]["parameters"]}
+    assert {"statement_type", "start_date", "end_date"} <= params
+
+
+def test_accounting_financial_statements_workspace_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'id="financialStatementForm"' in html
+    assert 'id="financialStatementResult"' in html
+    assert "/accounting/financial-statements" in html

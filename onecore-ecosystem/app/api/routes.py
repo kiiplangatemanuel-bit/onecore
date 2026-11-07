@@ -2507,6 +2507,97 @@ def accounting_subledger_reconciliation(
     }
 
 
+@router.get("/accounting/financial-statements")
+def accounting_financial_statements(
+    statement_type: str = Query(pattern=r"^(income_statement|balance_sheet)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
+    membership=Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    """Produce a posted-ledger income statement or balance sheet for the requested cutoff."""
+    require_permission(membership, "read")
+    end_date = end_date or datetime.now(timezone.utc).date()
+    if statement_type == "income_statement" and start_date is None:
+        raise HTTPException(422, "start_date is required for an income statement")
+    if start_date and start_date > end_date:
+        raise HTTPException(422, "start_date cannot be after end_date")
+
+    allowed = branch_scope_ids(membership)
+    ledger_query = db.query(
+        AccountingJournalLine.account_id.label("account_id"),
+        func.coalesce(func.sum(AccountingJournalLine.debit), 0).label("debits"),
+        func.coalesce(func.sum(AccountingJournalLine.credit), 0).label("credits"),
+    ).join(AccountingJournal, AccountingJournal.id == AccountingJournalLine.journal_id).filter(
+        AccountingJournalLine.organization_id == membership.organization_id,
+        AccountingJournal.organization_id == membership.organization_id,
+        AccountingJournal.status == "posted",
+        AccountingJournal.entry_date <= datetime.combine(end_date, time.max, tzinfo=timezone.utc),
+    )
+    if statement_type == "income_statement":
+        ledger_query = ledger_query.filter(
+            AccountingJournal.entry_date >= datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        )
+    if allowed is not None:
+        if not allowed:
+            ledger_query = ledger_query.filter(False)
+        else:
+            ledger_query = ledger_query.filter(or_(
+                AccountingJournalLine.branch_id.in_(allowed),
+                and_(AccountingJournalLine.branch_id.is_(None), AccountingJournal.branch_id.in_(allowed))
+            ))
+    ledger = ledger_query.group_by(AccountingJournalLine.account_id).subquery()
+    account_types = ("revenue", "expense") if statement_type == "income_statement" else ("asset", "liability", "equity")
+    rows = db.query(
+        AccountingAccount.id, AccountingAccount.code, AccountingAccount.name,
+        AccountingAccount.account_type,
+        func.coalesce(ledger.c.debits, 0).label("debits"),
+        func.coalesce(ledger.c.credits, 0).label("credits"),
+    ).outerjoin(ledger, ledger.c.account_id == AccountingAccount.id).filter(
+        AccountingAccount.organization_id == membership.organization_id,
+        AccountingAccount.account_type.in_(account_types),
+    ).order_by(AccountingAccount.code).all()
+
+    totals = {key: Decimal("0.00") for key in (
+        "revenue", "expenses", "net_income", "assets", "liabilities",
+        "equity", "equity_plus_current_earnings", "balance_check_difference"
+    )}
+    accounts = []
+    for row in rows:
+        debit, credit = Decimal(row.debits), Decimal(row.credits)
+        balance = debit - credit if row.account_type in ("asset", "expense") else credit - debit
+        if row.account_type == "revenue":
+            totals["revenue"] += balance
+        elif row.account_type == "expense":
+            totals["expenses"] += balance
+        elif row.account_type == "asset":
+            totals["assets"] += balance
+        elif row.account_type == "liability":
+            totals["liabilities"] += balance
+        elif row.account_type == "equity":
+            totals["equity"] += balance
+        accounts.append({
+            "account_id": row.id, "code": row.code, "name": row.name,
+            "account_type": row.account_type,
+            "debit_total": str(debit.quantize(Decimal("0.01"))),
+            "credit_total": str(credit.quantize(Decimal("0.01"))),
+            "balance": str(balance.quantize(Decimal("0.01"))),
+        })
+    totals["net_income"] = totals["revenue"] - totals["expenses"]
+    totals["equity_plus_current_earnings"] = totals["equity"] + totals["net_income"]
+    totals["balance_check_difference"] = totals["assets"] - totals["liabilities"] - totals["equity_plus_current_earnings"]
+    return {
+        "statement_type": statement_type,
+        "start_date": start_date.isoformat() if start_date else None,
+        "end_date": end_date.isoformat(),
+        "basis": "posted_general_ledger",
+        "currency": "organization_base_currency",
+        "totals": {key: str(value.quantize(Decimal("0.01"))) for key, value in totals.items()},
+        "balanced": abs(totals["balance_check_difference"]) < Decimal("0.01"),
+        "accounts": accounts,
+    }
+
+
 @router.get("/accounting/fiscal-periods")
 def list_accounting_periods(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
