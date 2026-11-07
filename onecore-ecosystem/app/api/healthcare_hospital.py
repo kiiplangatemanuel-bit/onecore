@@ -105,6 +105,13 @@ def _view(row, include_payload=True):
     return result
 
 
+def _stable(value):
+    volatile={"created_at","updated_at","admitted_at","ordered_at","submitted_at","queued_at","arrived_at","paid_at","issued_at","uploaded_at","observed_at","reviewed_at","decided_at","settled_at","completed_at","last_transfer_at"}
+    if isinstance(value,dict): return {k:_stable(v) for k,v in value.items() if k not in volatile}
+    if isinstance(value,list): return [_stable(x) for x in value]
+    return value
+
+
 def _create(db, m, u, kind: str, data: dict, branch_id=None, patient_id=None,
             parent_id=None, status="active", external_key=None, idempotency_key=None,
             amount=None, currency="KES"):
@@ -112,17 +119,17 @@ def _create(db, m, u, kind: str, data: dict, branch_id=None, patient_id=None,
         raise HTTPException(422, "Unsupported hospital resource type")
     if branch_id is not None and not can_access_branch(m, branch_id):
         raise HTTPException(403, "Hospital branch is outside your scope")
-    if external_key and db.query(HealthcareResource.id).filter_by(
-        organization_id=m.organization_id, resource_type=kind, external_key=external_key).first():
-        raise HTTPException(409, "Resource reference already exists")
     if idempotency_key:
         existing = db.query(HealthcareResource).filter_by(
             organization_id=m.organization_id, resource_type=kind,
             idempotency_key=idempotency_key).first()
         if existing:
-            if existing.patient_id != patient_id or _payload(existing) != data:
+            if existing.patient_id != patient_id or _stable(_payload(existing)) != _stable(data):
                 raise HTTPException(409, "Idempotency key was already used with different data")
             return existing
+    if external_key and db.query(HealthcareResource.id).filter_by(
+        organization_id=m.organization_id, resource_type=kind, external_key=external_key).first():
+        raise HTTPException(409, "Resource reference already exists")
     row = HealthcareResource(organization_id=m.organization_id, branch_id=branch_id,
         patient_id=patient_id, parent_id=parent_id, resource_type=kind,
         external_key=external_key, idempotency_key=idempotency_key, status=status,
@@ -212,6 +219,38 @@ def create_bed(room_id: int, payload: dict, m=Depends(active_membership), u: Use
     return _view(row)
 
 
+
+@router.get("/wards")
+def list_wards(branch_id: str, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    _need(db,m,u,"hospital.manage",branch_id)
+    rows=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,branch_id=branch_id,resource_type="ward").order_by(HealthcareResource.id).all()
+    return [_view(x) for x in rows]
+
+
+@router.get("/wards/{ward_id}/rooms")
+def list_rooms(ward_id: int, m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    ward=_resource(db,m,ward_id,"ward");_need(db,m,u,"hospital.manage",ward.branch_id)
+    rows=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,resource_type="room",parent_id=ward.id).all()
+    return [_view(x) for x in rows]
+
+
+@router.get("/admissions")
+def list_admissions(branch_id: str, status: str="admitted", limit: int=Query(100,ge=1,le=500),
+                    m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
+    _need(db,m,u,"admissions.manage",branch_id)
+    query=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,branch_id=branch_id,resource_type="admission")
+    if status!="all": query=query.filter_by(status=status)
+    rows=query.order_by(HealthcareResource.id.desc()).limit(limit).all()
+    result=[]
+    for row in rows:
+        patient=_patient(db,row.patient_id,m)
+        _require(db,m,u,"patient.read",patient.branch_id,patient.id,True)
+        _audit(db,m,u,patient,"admission.listed")
+        result.append(_view(row))
+    if result: db.commit()
+    return result
+
+
 @router.get("/beds")
 def list_beds(branch_id: str, ward_id: int | None=None, status: str | None=None,
               m=Depends(active_membership), u: User=Depends(current_user), db: Session=Depends(get_db)):
@@ -253,7 +292,9 @@ def admit_patient(payload: dict, m=Depends(active_membership), u: User=Depends(c
         retry = db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
             resource_type="admission", idempotency_key=payload["idempotency_key"]).first()
         if retry:
-            if retry.patient_id != patient.id: raise HTTPException(409, "Idempotency key belongs to another patient")
+            prior = _payload(retry)
+            if retry.patient_id != patient.id or int(prior.get("bed_id",0)) != int(payload.get("bed_id",0)) or prior.get("admission_reason") != payload.get("admission_reason"):
+                raise HTTPException(409, "Idempotency key belongs to a different admission request")
             return _view(retry)
     active = db.query(HealthcareResource.id).filter_by(organization_id=m.organization_id,
         patient_id=patient.id, resource_type="admission", status="admitted").first()
@@ -485,6 +526,14 @@ def record_invoice_payment(invoice_id: int, payload: dict, m=Depends(active_memb
     invoice = _resource(db,m,invoice_id,"invoice",lock=True)
     patient, emergency, _ = _patient_access(db,m,u,invoice.patient_id,"patient.read",write=False)
     _need(db,m,u,"billing.manage",patient.branch_id)
+    if payload.get("idempotency_key"):
+        retry=db.query(HealthcareResource).filter_by(organization_id=m.organization_id,
+            resource_type="invoice_payment",idempotency_key=payload["idempotency_key"]).first()
+        if retry:
+            prior=_payload(retry)
+            if retry.patient_id!=invoice.patient_id or retry.parent_id!=invoice.id or retry.amount!=_money(payload.get("amount")) or prior.get("reference")!=payload.get("reference"):
+                raise HTTPException(409,"Payment idempotency key was used for a different payment")
+            return {"invoice":_view(invoice),"payment":_view(retry)}
     if invoice.status not in {"issued","partially_paid"}:
         raise HTTPException(409,"Invoice is not open for payment")
     amount = _money(payload.get("amount"))
@@ -499,7 +548,7 @@ def record_invoice_payment(invoice_id: int, payload: dict, m=Depends(active_memb
         raise HTTPException(422,"Unsupported payment method")
     payment = _create(db,m,u,"invoice_payment",{"invoice_id":invoice.id,"reference":reference,
         "method":method,"paid_at":NOW().isoformat(),"recorded_by":u.id},patient.branch_id,patient.id,
-        status="posted",external_key=reference,amount=amount,currency=invoice.currency,
+        parent_id=invoice.id,status="posted",external_key=reference,amount=amount,currency=invoice.currency,
         idempotency_key=payload.get("idempotency_key"))
     paid += amount; balance -= amount
     data.update({"paid_amount":str(paid),"balance":str(balance)})
