@@ -262,3 +262,82 @@ def test_procurement_workspace_exposes_settlement_approval_portal_and_reconcilia
     assert "/post-credit-note" in source
     assert "/escalate-approval" in source
     assert "/auto-resolve" in source
+
+
+def _procurement_settlement_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.core.database import Base
+    from app.core.models import AccountingAccount, AccountingInvoice, AccountingInvoicePayment, AuditEvent
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        AccountingAccount.__table__, AccountingInvoice.__table__,
+        AccountingInvoicePayment.__table__, AuditEvent.__table__,
+        ProcurementSettlement.__table__, ProcurementSettlementAllocation.__table__,
+    ])
+    return sessionmaker(bind=engine)()
+
+
+def test_manual_supplier_settlement_posts_balanced_ap_allocation_once(monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+    import app.api.procurement_workflows as workflows
+    from app.core.models import AccountingAccount, AccountingInvoice, AccountingInvoicePayment
+    from app.api.procurement_workflows import SettlementVerifyIn
+    db = _procurement_settlement_session()
+    payable = AccountingAccount(
+        id=11, organization_id=1, code="2100", name="Accounts payable",
+        account_type="liability", created_by=1,
+    )
+    bank = AccountingAccount(
+        id=12, organization_id=1, code="1000", name="Bank",
+        account_type="asset", created_by=1,
+    )
+    invoice = AccountingInvoice(
+        id=21, organization_id=1, invoice_type="payable", supplier_id=31,
+        invoice_number="SUP-INV-21", issue_date=datetime(2026, 11, 1),
+        due_date=datetime(2026, 11, 30), currency="KES", control_account_id=11,
+        subtotal=Decimal("100.00"), tax_total=Decimal("0.00"),
+        total=Decimal("100.00"), amount_paid=Decimal("0.00"),
+        status="posted", created_by=1,
+    )
+    settlement = ProcurementSettlement(
+        id=41, organization_id=1, supplier_id=31, payment_account_id=12,
+        amount=Decimal("100.00"), currency="KES", provider="manual",
+        reference="BANK-REF-41", status="pending_verification",
+        payment_date=datetime(2026, 11, 8), idempotency_key="settlement-0041", created_by=1,
+    )
+    allocation = ProcurementSettlementAllocation(
+        id=51, organization_id=1, settlement_id=41, invoice_id=21,
+        amount=Decimal("100.00"),
+    )
+    db.add_all([payable, bank, invoice, settlement, allocation])
+    db.commit()
+    monkeypatch.setattr(workflows, "_accounting_assert_period_open", lambda *args, **kwargs: None)
+    monkeypatch.setattr(workflows, "_accounting_make_journal",
+                        lambda *args, **kwargs: SimpleNamespace(id=71))
+    membership = SimpleNamespace(organization_id=1, role="org_admin", branch_scope="*")
+    user = SimpleNamespace(id=1)
+    result = workflows.verify_supplier_settlement(
+        41, SettlementVerifyIn(provider_reference="BANK-REF-VERIFIED-41"),
+        membership, user, db,
+    )
+    db.refresh(invoice)
+    db.refresh(settlement)
+    db.refresh(allocation)
+    payments = db.query(AccountingInvoicePayment).filter_by(organization_id=1, invoice_id=21).all()
+    assert result["status"] == "settled"
+    assert settlement.status == "settled"
+    assert settlement.journal_id == 71
+    assert invoice.amount_paid == Decimal("100.00")
+    assert invoice.status == "paid"
+    assert allocation.accounting_payment_id == payments[0].id
+    assert len(payments) == 1
+    # An idempotent retry must not create a second AP payment.
+    retry = workflows.verify_supplier_settlement(
+        41, SettlementVerifyIn(provider_reference="BANK-REF-VERIFIED-41"),
+        membership, user, db,
+    )
+    assert retry["status"] == "already_settled"
+    assert db.query(AccountingInvoicePayment).filter_by(organization_id=1, invoice_id=21).count() == 1
+    db.close()
