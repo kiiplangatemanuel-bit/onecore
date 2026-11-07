@@ -1635,12 +1635,21 @@ def procurement_accounting_reconciliation(start_date: date | None = None, end_da
             organization_id=membership.organization_id, settlement_id=settlement.id
         ).all()
         allocation_total = sum((Decimal(x.amount) for x in allocations), Decimal("0.00"))
-        payments = [db.query(AccountingInvoicePayment).filter_by(
-            id=x.accounting_payment_id, organization_id=membership.organization_id,
-            journal_id=settlement.journal_id,
-        ).first() for x in allocations]
-        payments = [x for x in payments if x]
+        payment_pairs = []
+        for allocation in allocations:
+            payment = db.query(AccountingInvoicePayment).filter_by(
+                id=allocation.accounting_payment_id, organization_id=membership.organization_id,
+                journal_id=settlement.journal_id,
+            ).first() if allocation.accounting_payment_id else None
+            payment_pairs.append((allocation, payment))
+        payments = [payment for _, payment in payment_pairs if payment]
         payment_total = sum((Decimal(x.amount) for x in payments), Decimal("0.00"))
+        allocation_payment_consistent = all(
+            payment is not None and payment.invoice_id == allocation.invoice_id
+            and Decimal(payment.amount) == Decimal(allocation.amount)
+            and payment.payment_account_id == settlement.payment_account_id
+            for allocation, payment in payment_pairs
+        )
         journal = db.query(AccountingJournal).filter_by(
             id=settlement.journal_id, organization_id=membership.organization_id, status="posted"
         ).first() if settlement.journal_id else None
@@ -1649,11 +1658,24 @@ def procurement_accounting_reconciliation(start_date: date | None = None, end_da
             account_id=settlement.payment_account_id,
         ).all() if settlement.journal_id else []
         cash_credit = sum((Decimal(x.credit) - Decimal(x.debit) for x in cash_lines), Decimal("0.00"))
+        payable_account_ids = set(db.query(AccountingInvoice.control_account_id).filter(
+            AccountingInvoice.organization_id == membership.organization_id,
+            AccountingInvoice.id.in_([x.invoice_id for x in allocations]),
+        ).all())
+        payable_account_ids = {x[0] for x in payable_account_ids}
+        ap_journal_lines = db.query(AccountingJournalLine).filter(
+            AccountingJournalLine.organization_id == membership.organization_id,
+            AccountingJournalLine.journal_id == settlement.journal_id,
+            AccountingJournalLine.account_id.in_(payable_account_ids or {-1}),
+        ).all() if settlement.journal_id else []
+        ap_debit = sum((Decimal(x.debit) - Decimal(x.credit) for x in ap_journal_lines), Decimal("0.00"))
         bank_matched = any(x.id in bank_matched_journal_ids for x in cash_lines)
         settled_ok = (allocation_total == Decimal(settlement.amount)
                       and payment_total == Decimal(settlement.amount)
                       and len(payments) == len(allocations)
-                      and journal is not None and cash_credit == Decimal(settlement.amount))
+                      and allocation_payment_consistent
+                      and journal is not None and cash_credit == Decimal(settlement.amount)
+                      and ap_debit == Decimal(settlement.amount))
         if not settled_ok:
             blockers.append({"settlement_id": settlement.id, "reason": "supplier_settlement_ap_cash_journal_mismatch"})
         if not bank_matched:
@@ -1663,7 +1685,8 @@ def procurement_accounting_reconciliation(start_date: date | None = None, end_da
             "amount": str(settlement.amount), "provider_reference": settlement.provider_reference,
             "journal_id": settlement.journal_id, "allocation_total": str(allocation_total),
             "ap_payment_total": str(payment_total), "cash_journal_credit": str(cash_credit),
-            "bank_matched": bank_matched, "reconciled": settled_ok and bank_matched,
+            "ap_control_debit": str(ap_debit), "bank_matched": bank_matched,
+            "reconciled": settled_ok and bank_matched,
         })
     unmatched_bank_lines = [x.id for x in statement_lines if not x.matched_journal_line_id]
     if unmatched_bank_lines:
