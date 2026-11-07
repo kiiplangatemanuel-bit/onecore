@@ -555,3 +555,16 @@ import/export, team assignment and UAT.
   triggered a separate workflow run.
 - Remaining gaps: supplier returns/credit notes, supplier invoices/three-way match,
   multi-level approval thresholds, RFQs, supplier performance and UAT.
+
+
+## Procurement completion increment (7 November 2026)
+
+- Approved requisitions can be converted into draft purchase orders with the original branch, product lines and quantities preserved; supplier and unit prices are selected at conversion, and duplicate conversion is blocked.
+- RFQ creation supports supplier invitations, complete line-level quotations, tax-inclusive price comparison and quote award into a draft PO.
+- Configurable sequential PO approval tiers support amount ranges, role-specific approvers, distinct approvers and creator self-approval prevention. Approval history is queryable; PO release occurs only after all applicable levels approve.
+- Supplier invoice records perform three-way checks against PO supplier/currency/prices and inspected, accepted, non-returned GRN quantities. Duplicate invoice references are prevented by a unique database constraint.
+- Supplier returns are restricted to accepted GRN quantities, cannot exceed available stock, write negative inventory ledger movements and retain credit-note references.
+- Supplier performance endpoint reports PO/GRN counts, delivered/accepted quantity and acceptance percentage.
+- Added migration 0016_procurement_completion, frontend forms, API schemas/routes, docs/PROCUREMENT.md and automated validation/OpenAPI/UI tests.
+- GitHub Actions run 42372479131 passed: dependency installation, migration upgrade, migration downgrade/re-upgrade, Python compilation and 67 passed pytest checks (5 warnings).
+- Explicit remaining integration work: matched supplier invoices are recorded but not posted to AP journals or paid; credit-note references are captured but not posted to AP; no external supplier portal/email delivery, approval delegation/escalation, supplier statement reconciliation, or end-to-end production UAT yet.
