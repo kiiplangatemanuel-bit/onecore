@@ -337,6 +337,64 @@ class HRPayrollItem(Base):
     __table_args__ = (Index("ix_hr_payroll_item_org_client_id", "organization_id", "client_item_id", unique=True),)
 
 
+class HealthcarePatient(Base):
+    __tablename__ = "healthcare_patients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    patient_number: Mapped[str] = mapped_column(String(40))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    emergency_contact_name: Mapped[str] = mapped_column(String(180), default="")
+    emergency_contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_patient_org_number", "organization_id", "patient_number", unique=True),)
+
+
+class HealthcareAppointment(Base):
+    __tablename__ = "healthcare_appointments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    provider_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_healthcare_appointment_org_provider_start", "organization_id", "provider_user_id", "starts_at"),
+        Index("ix_healthcare_appointment_org_patient_start", "organization_id", "patient_id", "starts_at"),
+    )
+
+
+class HealthcareEncounter(Base):
+    __tablename__ = "healthcare_encounters"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    appointment_id: Mapped[int] = mapped_column(ForeignKey("healthcare_appointments.id"), index=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("healthcare_patients.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    provider_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    chief_complaint: Mapped[str] = mapped_column(String(500))
+    clinical_notes: Mapped[str] = mapped_column(Text, default="")
+    assessment: Mapped[str] = mapped_column(Text, default="")
+    plan: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    signed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_healthcare_encounter_org_appointment", "organization_id", "appointment_id", unique=True),)
+
+
 class CRMContact(Base):
     """Organization-owned customer/prospect contact."""
     __tablename__ = "crm_contacts"
