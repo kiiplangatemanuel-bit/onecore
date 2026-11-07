@@ -67,4 +67,24 @@ def test_non_cash_benefit_threshold_exempts_first_five_thousand():
     result = calculate_kenya_payroll(Decimal("80000"), {}, KENYA_2026_RULES,
                                      {"non_cash_benefits": "12000"})
     assert Decimal(result["taxable_benefits"]) == Decimal("7000.00")
-    assert Decimal(result["taxable_pay"]) == Decimal("78800.00") - Decimal("7000.00") + Decimal("7000.00") if False else Decimal(result["taxable_pay"]) > Decimal("0")
+    assert Decimal(result["taxable_pay"]) == Decimal("78800.00")
+
+
+
+def test_post_retirement_medical_fund_is_withheld_from_net_pay():
+    without = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES)
+    with_prmf = calculate_kenya_payroll(Decimal("100000"), {}, KENYA_2026_RULES,
+                                        {"post_retirement_medical_fund": "10000"})
+    assert Decimal(with_prmf["post_retirement_medical_fund"]) == Decimal("10000.00")
+    assert Decimal(with_prmf["net_pay"]) < Decimal(without["net_pay"])
+    assert Decimal(with_prmf["taxable_pay"]) < Decimal(without["taxable_pay"])
+
+
+def test_kenya_2026_rule_pack_has_official_authority_sources_and_effective_date():
+    sources = KENYA_2026_RULES["sources"]
+    hosts = {source["url"].split("/")[2] for source in sources}
+    assert any(host == "www.kra.go.ke" for host in hosts)
+    assert any(host == "www.nssf.or.ke" for host in hosts)
+    assert any("kenyalaw.org" in host for host in hosts)
+    assert KENYA_2026_RULES["effective_from"] == "2026-02-01"
+    assert KENYA_2026_RULES["status"] == "active"
