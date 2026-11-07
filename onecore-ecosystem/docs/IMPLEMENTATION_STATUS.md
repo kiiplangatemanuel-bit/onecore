@@ -365,3 +365,37 @@ limited initial implementation, not a complete national CBC rules engine.
 - GitHub Actions run `42363505011` for commit `4659fdcd35cb449ab02ae620017ed8dd7be536f3` completed successfully.
 - Alembic migration upgrade, downgrade and re-upgrade passed; Python compilation passed; pytest reported **46 passed, 5 warnings**.
 - Earlier school code run `42363477316` also passed with 46 tests. This is SQLite CI evidence only; no production PostgreSQL rehearsal, security/safeguarding review, browser accessibility audit or school pilot UAT has been completed.
+
+## Accounting receivables/payables increment (8 November 2026)
+
+Implemented on main:
+- Customer AR invoices linked to tenant CRM contacts and supplier AP bills linked to
+  tenant procurement suppliers.
+- Draft invoices with itemized lines, quantities, two-decimal unit prices, tenant
+  configured tax rates and tax ledger accounts.
+- Invoice posting creates balanced double-entry journals and locks the invoice state.
+- AR receipts and AP payments create settlement journals, enforce outstanding balance
+  limits, and use tenant-unique idempotency keys.
+- Invoice listing and ageing buckets (current, 1-30, 31-60, 61-90, over 90 days).
+- Base-currency validation against organization configuration; foreign currency is
+  intentionally not supported by this increment.
+- Tenant/branch ownership validation and audit events.
+- Accounting UI now includes invoice creation, posting, payments and ageing.
+- Migration 0008_accounting_invoices; models, schemas, API, tests and updated
+  docs/ACCOUNTING.md.
+
+Remaining accounting work:
+- Bank/cash statement import and reconciliation, bank feed integrations.
+- Customer/supplier statements, credit/debit notes, refunds, invoice approval and
+  recurring invoices.
+- Three-way match between purchase orders, goods receipts and supplier invoices.
+- Budgets, cost centres, fixed assets/depreciation, fiscal periods and close/lock.
+- Reversals, balance sheet, P&L, cash-flow, GL drill-down and export/reporting.
+- Foreign currency, exchange revaluation and consolidation.
+- Statutory tax determination, eTIMS filing, provider/payment integrations.
+- PostgreSQL production rehearsal, race testing, full security/accessibility review
+  and UAT.
+
+The increment has been committed, but do not mark it verified until GitHub Actions
+completes migration upgrade/downgrade/re-upgrade, compilation and the complete pytest
+suite. The SQLite CI environment is not a production database rehearsal.
