@@ -131,3 +131,41 @@ def test_accounting_financial_statements_workspace_controls():
     assert 'id="financialStatementForm"' in html
     assert 'id="financialStatementResult"' in html
     assert "/accounting/financial-statements" in html
+
+
+def test_accounting_extended_reporting_and_refund_routes_are_registered():
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/accounting/statutory-tax-summary" in paths
+    assert "/api/v1/accounting/cash-flow" in paths
+    assert "/api/v1/accounting/refunds" in paths
+    assert "/api/v1/accounting/invoices/{invoice_id}/refunds" in paths
+    assert "/api/v1/procurement/supplier-invoices/{supplier_invoice_id}/post-to-accounting" in paths
+
+
+def test_accounting_cash_flow_classification_is_validated():
+    valid = AccountingAccountIn(code="1010", name="Main bank", account_type="asset",
+        cash_flow_category="cash_equivalent")
+    assert valid.cash_flow_category == "cash_equivalent"
+    with pytest.raises(ValidationError):
+        AccountingAccountIn(code="1011", name="Bad category", account_type="asset",
+            cash_flow_category="miscellaneous")
+
+
+def test_accounting_refund_requires_idempotency_and_positive_amount():
+    from app.core.schemas import AccountingRefundIn
+    payload = AccountingRefundIn(amount="25.00", payment_account_id=1,
+        refund_date="2026-11-07", idempotency_key="refund-key-001")
+    assert payload.amount == Decimal("25.00")
+    with pytest.raises(ValidationError):
+        AccountingRefundIn(amount="0", payment_account_id=1,
+            refund_date="2026-11-07", idempotency_key="refund-key-001")
+
+
+def test_accounting_workspace_exposes_tax_cashflow_and_refund_controls():
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "accounting.html"
+    source = page.read_text(encoding="utf-8")
+    assert 'id="taxSummaryForm"' in source
+    assert 'id="cashFlowForm"' in source
+    assert 'id="refundForm"' in source
+    assert 'id="procurementApForm"' in source
