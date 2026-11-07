@@ -341,3 +341,42 @@ def test_manual_supplier_settlement_posts_balanced_ap_allocation_once(monkeypatc
     assert retry["status"] == "already_settled"
     assert db.query(AccountingInvoicePayment).filter_by(organization_id=1, invoice_id=21).count() == 1
     db.close()
+
+
+def test_supplier_statement_reconciliation_requires_all_lines_and_balanced_closing(monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+    import app.api.procurement_workflows as workflows
+    from app.core.models import AuditEvent
+    from app.core.database import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[
+        ProcurementSupplierStatement.__table__, ProcurementSupplierStatementLine.__table__,
+        AuditEvent.__table__,
+    ])
+    db = sessionmaker(bind=engine)()
+    statement = ProcurementSupplierStatement(
+        id=81, organization_id=1, supplier_id=31, statement_reference="STAT-81",
+        start_date=datetime(2026, 11, 1), end_date=datetime(2026, 11, 30),
+        opening_balance=Decimal("100.00"), closing_balance=Decimal("150.00"),
+        status="open", created_by=1,
+    )
+    line = ProcurementSupplierStatementLine(
+        id=82, organization_id=1, statement_id=81, line_number=1,
+        transaction_date=datetime(2026, 11, 8), description="Supplier invoice",
+        reference="INV-81", amount=Decimal("50.00"), matched_invoice_id=91, matched_by=1,
+    )
+    db.add_all([statement, line])
+    db.commit()
+    membership = SimpleNamespace(organization_id=1, role="org_admin", branch_scope="*")
+    user = SimpleNamespace(id=1)
+    result = workflows.reconcile_supplier_statement(81, membership, user, db)
+    db.refresh(statement)
+    assert result["status"] == "reconciled"
+    assert statement.status == "reconciled"
+    assert result["closing_balance"] == "150.00"
+    retry = workflows.reconcile_supplier_statement(81, membership, user, db)
+    assert retry["status"] == "already_reconciled"
+    db.close()
