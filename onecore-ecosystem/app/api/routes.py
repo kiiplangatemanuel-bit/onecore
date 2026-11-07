@@ -19,6 +19,7 @@ from app.services.crm import validate_stage_transition
 from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
 from app.services.hr import business_days, worked_minutes, payroll_money, payroll_item_hash, payroll_totals
 from app.services.healthcare import validate_appointment_transition
+from app.services.pharmacy_lab import pharmacy_batch_hash, laboratory_order_hash
 from app.services.pos import money, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
 from datetime import date, datetime, time, timezone
 
@@ -4201,6 +4202,494 @@ def sign_healthcare_encounter(encounter_id: int, payload: HealthcareEncounterSig
     audit(db, user.id, membership.organization_id, "healthcare.encounter.signed",
           "healthcare_encounter", row.id, "signed")
     return {"id": row.id, "status": row.status, "signed_at": row.signed_at.isoformat()}
+
+
+
+
+# Pharmacy catalogue and batch stock; laboratory order/sample/result validation.
+def _pharmacy_medicine_out(row):
+    return {
+        "id": row.id, "inventory_product_id": row.inventory_product_id,
+        "sku": row.sku, "generic_name": row.generic_name, "brand_name": row.brand_name,
+        "strength": row.strength, "dosage_form": row.dosage_form,
+        "route": row.route, "unit": row.unit, "is_controlled": row.is_controlled,
+        "is_active": row.is_active,
+    }
+
+
+def _pharmacy_batch_out(batch, medicine):
+    state = batch.status
+    if state == "active" and batch.expiry_date < date.today():
+        state = "expired"
+    return {
+        "id": batch.id, "medicine_id": medicine.id, "sku": medicine.sku,
+        "medicine_name": medicine.generic_name, "branch_id": batch.branch_id,
+        "batch_number": batch.batch_number, "expiry_date": batch.expiry_date.isoformat(),
+        "received_quantity": str(batch.received_quantity),
+        "remaining_quantity": str(batch.remaining_quantity),
+        "unit_cost": str(batch.unit_cost), "selling_price": str(batch.selling_price),
+        "status": state, "received_at": batch.received_at.isoformat(),
+    }
+
+
+@router.post("/pharmacy/medicines", status_code=201)
+def create_pharmacy_medicine(payload: PharmacyMedicineIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    sku = payload.sku.strip().upper()
+    if db.query(PharmacyMedicine).filter_by(
+        organization_id=membership.organization_id, sku=sku
+    ).first():
+        raise HTTPException(409, "Medicine SKU already exists in this organization")
+    if db.query(InventoryProduct).filter_by(
+        organization_id=membership.organization_id, sku=sku
+    ).first():
+        raise HTTPException(409, "SKU is already used by another inventory product")
+    product = InventoryProduct(
+        organization_id=membership.organization_id, sku=sku,
+        name=f"{payload.generic_name.strip()} {payload.strength.strip()}".strip(),
+        description=f"{payload.brand_name.strip()} | {payload.dosage_form.strip()} | {payload.route.strip()}",
+        unit=payload.unit.strip(), sale_price=payload.sale_price,
+        is_active=True, created_by=user.id,
+    )
+    db.add(product)
+    db.flush()
+    row = PharmacyMedicine(
+        organization_id=membership.organization_id, inventory_product_id=product.id,
+        sku=sku, generic_name=payload.generic_name.strip(),
+        brand_name=payload.brand_name.strip(), strength=payload.strength.strip(),
+        dosage_form=payload.dosage_form.strip(), route=payload.route.strip().lower(),
+        unit=payload.unit.strip(), is_controlled=payload.is_controlled,
+        is_active=True, created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Medicine SKU conflicts with an existing inventory item")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.medicine.created",
+          "pharmacy_medicine", row.id, f"sku:{sku};controlled:{payload.is_controlled}")
+    return _pharmacy_medicine_out(row)
+
+
+@router.get("/pharmacy/medicines")
+def list_pharmacy_medicines(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    rows = db.query(PharmacyMedicine).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(PharmacyMedicine.generic_name, PharmacyMedicine.strength).limit(limit).all()
+    return [_pharmacy_medicine_out(row) for row in rows]
+
+
+@router.post("/pharmacy/medicines/{medicine_id}/batches", status_code=201)
+def receive_pharmacy_batch(medicine_id: int, payload: PharmacyBatchIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    _crm_branch_check(db, membership, payload.branch_id)
+    medicine = db.query(PharmacyMedicine).filter_by(
+        id=medicine_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not medicine:
+        raise HTTPException(404, "Active medicine not found")
+    if payload.expiry_date <= date.today():
+        raise HTTPException(422, "Expired or same-day-expiry stock cannot be received")
+    request_hash = pharmacy_batch_hash(payload, medicine.id)
+    existing = db.query(PharmacyBatch).filter_by(
+        organization_id=membership.organization_id, client_batch_id=payload.client_batch_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash or existing.medicine_id != medicine.id:
+            raise HTTPException(409, "Batch client ID was reused with different data")
+        return {"id": existing.id, "status": "already_recorded",
+                "remaining_quantity": str(existing.remaining_quantity)}
+    batch_number = payload.batch_number.strip().upper()
+    if db.query(PharmacyBatch).filter_by(
+        organization_id=membership.organization_id, medicine_id=medicine.id,
+        branch_id=payload.branch_id, batch_number=batch_number
+    ).first():
+        raise HTTPException(409, "Batch number already exists for this medicine and branch")
+    key = "pharmacy-batch:" + hashlib.sha256(payload.client_batch_id.encode()).hexdigest()[:40]
+    row = PharmacyBatch(
+        organization_id=membership.organization_id, medicine_id=medicine.id,
+        branch_id=payload.branch_id, batch_number=batch_number,
+        client_batch_id=payload.client_batch_id, request_hash=request_hash,
+        expiry_date=payload.expiry_date, received_quantity=payload.received_quantity,
+        remaining_quantity=payload.received_quantity, unit_cost=payload.unit_cost,
+        selling_price=payload.selling_price, status="active", received_by=user.id,
+    )
+    db.add(row)
+    db.add(InventoryStockMovement(
+        organization_id=membership.organization_id,
+        product_id=medicine.inventory_product_id, branch_id=payload.branch_id,
+        quantity_delta=payload.received_quantity, movement_type="receipt",
+        reference=f"pharmacy-batch:{batch_number}", idempotency_key=key, created_by=user.id,
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(PharmacyBatch).filter_by(
+            organization_id=membership.organization_id, client_batch_id=payload.client_batch_id
+        ).first()
+        if existing and existing.request_hash == request_hash and existing.medicine_id == medicine.id:
+            return {"id": existing.id, "status": "already_recorded",
+                    "remaining_quantity": str(existing.remaining_quantity)}
+        raise HTTPException(409, "Batch receipt conflicts with an existing batch or stock movement")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.received",
+          "pharmacy_batch", row.id, f"medicine:{medicine.id};qty:{payload.received_quantity};branch:{payload.branch_id}")
+    return {"id": row.id, "status": "received", "remaining_quantity": str(row.remaining_quantity),
+            "inventory_product_id": medicine.inventory_product_id}
+
+
+@router.get("/pharmacy/batches")
+def list_pharmacy_batches(medicine_id: int | None = None, branch_id: str | None = None,
+    status: str | None = None, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    query = db.query(PharmacyBatch, PharmacyMedicine).join(
+        PharmacyMedicine, PharmacyMedicine.id == PharmacyBatch.medicine_id
+    ).filter(PharmacyBatch.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(PharmacyBatch.branch_id.in_(allowed))
+    if branch_id:
+        if not can_access_branch(membership, branch_id):
+            raise HTTPException(404, "Branch not found")
+        query = query.filter(PharmacyBatch.branch_id == branch_id)
+    if medicine_id:
+        query = query.filter(PharmacyBatch.medicine_id == medicine_id)
+    if status == "expired":
+        query = query.filter(PharmacyBatch.status == "active",
+                             PharmacyBatch.expiry_date < date.today())
+    elif status in {"active", "quarantined"}:
+        query = query.filter(PharmacyBatch.status == status)
+        if status == "active":
+            query = query.filter(PharmacyBatch.expiry_date >= date.today())
+    elif status:
+        raise HTTPException(422, "Invalid batch status")
+    rows = query.order_by(PharmacyBatch.expiry_date, PharmacyBatch.id).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.listed",
+          "pharmacy_batch", "batch-list", f"count:{len(rows)}")
+    return [_pharmacy_batch_out(batch, medicine) for batch, medicine in rows]
+
+
+@router.post("/pharmacy/batches/{batch_id}/quarantine")
+def quarantine_pharmacy_batch(batch_id: int, payload: PharmacyBatchQuarantineIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(PharmacyBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Batch not found")
+    if row.status != "active":
+        raise HTTPException(409, "Only active batches can be quarantined")
+    row.status = "quarantined"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "pharmacy.batch.quarantined",
+          "pharmacy_batch", row.id, payload.reason.strip())
+    return {"id": row.id, "status": row.status}
+
+
+def _lab_order_out(order, patient):
+    return {
+        "id": order.id, "client_order_id": order.client_order_id,
+        "encounter_id": order.encounter_id, "patient_id": order.patient_id,
+        "patient_name": f"{patient.first_name} {patient.last_name}" if patient else None,
+        "branch_id": order.branch_id, "ordering_provider_id": order.ordering_provider_id,
+        "status": order.status, "created_at": order.created_at.isoformat(),
+    }
+
+
+@router.post("/lab/tests", status_code=201)
+def create_laboratory_test(payload: LaboratoryTestIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    code = payload.code.strip().upper()
+    if db.query(LaboratoryTest).filter_by(
+        organization_id=membership.organization_id, code=code
+    ).first():
+        raise HTTPException(409, "Laboratory test code already exists")
+    row = LaboratoryTest(
+        organization_id=membership.organization_id, code=code,
+        name=payload.name.strip(), specimen_type=payload.specimen_type.strip().lower(),
+        unit=payload.unit.strip(), reference_range=payload.reference_range.strip(),
+        turnaround_hours=payload.turnaround_hours, is_active=True, created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Laboratory test code conflicts with an existing test")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "lab.test.created",
+          "laboratory_test", row.id, f"code:{row.code}")
+    return {"id": row.id, "code": row.code, "name": row.name,
+            "specimen_type": row.specimen_type, "unit": row.unit,
+            "reference_range": row.reference_range,
+            "turnaround_hours": row.turnaround_hours}
+
+
+@router.get("/lab/tests")
+def list_laboratory_tests(membership=Depends(active_membership), db: Session=Depends(get_db),
+    limit: int=Query(default=200, ge=1, le=1000)):
+    require_permission(membership, "read")
+    rows = db.query(LaboratoryTest).filter_by(
+        organization_id=membership.organization_id, is_active=True
+    ).order_by(LaboratoryTest.name).limit(limit).all()
+    return [{"id": row.id, "code": row.code, "name": row.name,
+             "specimen_type": row.specimen_type, "unit": row.unit,
+             "reference_range": row.reference_range,
+             "turnaround_hours": row.turnaround_hours} for row in rows]
+
+
+@router.post("/lab/orders", status_code=201)
+def create_laboratory_order(payload: LaboratoryOrderIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    encounter = db.query(HealthcareEncounter).filter_by(
+        id=payload.encounter_id, organization_id=membership.organization_id, status="signed"
+    ).first()
+    if not encounter or not can_access_branch(membership, encounter.branch_id):
+        raise HTTPException(404, "Signed encounter not found")
+    if encounter.provider_user_id != user.id:
+        raise HTTPException(403, "Only the assigned provider may order laboratory tests")
+    request_hash = laboratory_order_hash(payload)
+    existing = db.query(LaboratoryOrder).filter_by(
+        organization_id=membership.organization_id, client_order_id=payload.client_order_id
+    ).first()
+    if existing:
+        if existing.request_hash != request_hash:
+            raise HTTPException(409, "Laboratory order ID was reused with different data")
+        patient = db.query(HealthcarePatient).filter_by(
+            id=existing.patient_id, organization_id=membership.organization_id
+        ).first()
+        return {**_lab_order_out(existing, patient), "status": "already_recorded"}
+    tests = db.query(LaboratoryTest).filter(
+        LaboratoryTest.organization_id == membership.organization_id,
+        LaboratoryTest.is_active == True,
+        LaboratoryTest.id.in_(payload.test_ids),
+    ).all()
+    if {test.id for test in tests} != set(payload.test_ids):
+        raise HTTPException(404, "One or more active laboratory tests were not found")
+    if len({test.specimen_type for test in tests}) != 1:
+        raise HTTPException(422, "Tests requiring different specimen types must be placed in separate orders")
+    row = LaboratoryOrder(
+        organization_id=membership.organization_id, encounter_id=encounter.id,
+        patient_id=encounter.patient_id, branch_id=encounter.branch_id,
+        ordering_provider_id=user.id, client_order_id=payload.client_order_id,
+        request_hash=request_hash, status="ordered", created_by=user.id,
+    )
+    db.add(row)
+    db.flush()
+    for test in tests:
+        db.add(LaboratoryOrderLine(
+            organization_id=membership.organization_id, order_id=row.id,
+            test_id=test.id, test_code=test.code, test_name=test.name,
+            specimen_type=test.specimen_type, result_unit=test.unit,
+            reference_range_snapshot=test.reference_range, status="pending",
+        ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(LaboratoryOrder).filter_by(
+            organization_id=membership.organization_id, client_order_id=payload.client_order_id
+        ).first()
+        if existing and existing.request_hash == request_hash:
+            patient = db.query(HealthcarePatient).filter_by(
+                id=existing.patient_id, organization_id=membership.organization_id
+            ).first()
+            return {**_lab_order_out(existing, patient), "status": "already_recorded"}
+        raise HTTPException(409, "Laboratory order conflicts with an existing order")
+    db.refresh(row)
+    patient = db.query(HealthcarePatient).filter_by(
+        id=row.patient_id, organization_id=membership.organization_id
+    ).first()
+    audit(db, user.id, membership.organization_id, "lab.order.created",
+          "laboratory_order", row.id, f"encounter:{encounter.id};tests:{len(tests)}")
+    return {**_lab_order_out(row, patient), "status": "ordered"}
+
+
+@router.get("/lab/orders")
+def list_laboratory_orders(status: str | None = None,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db), limit: int=Query(default=100, ge=1, le=500)):
+    require_permission(membership, "manage")
+    query = db.query(LaboratoryOrder, HealthcarePatient).join(
+        HealthcarePatient, HealthcarePatient.id == LaboratoryOrder.patient_id
+    ).filter(LaboratoryOrder.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            return []
+        query = query.filter(LaboratoryOrder.branch_id.in_(allowed))
+    if status:
+        if status not in {"ordered", "sample_collected", "processing", "results_entered", "validated"}:
+            raise HTTPException(422, "Invalid laboratory order status")
+        query = query.filter(LaboratoryOrder.status == status)
+    rows = query.order_by(LaboratoryOrder.created_at.desc()).limit(limit).all()
+    audit(db, user.id, membership.organization_id, "lab.order.listed",
+          "laboratory_order", "order-list", f"count:{len(rows)}")
+    return [_lab_order_out(order, patient) for order, patient in rows]
+
+
+@router.get("/lab/orders/{order_id}")
+def get_laboratory_order(order_id: int, membership=Depends(active_membership),
+    user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    patient = db.query(HealthcarePatient).filter_by(
+        id=order.patient_id, organization_id=membership.organization_id
+    ).first()
+    sample = db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).first()
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).order_by(LaboratoryOrderLine.id).all()
+    audit(db, user.id, membership.organization_id, "lab.order.viewed",
+          "laboratory_order", order.id)
+    return {
+        **_lab_order_out(order, patient),
+        "sample": ({"accession_number": sample.accession_number,
+                    "specimen_type": sample.specimen_type, "status": sample.status,
+                    "collected_at": sample.collected_at.isoformat()} if sample else None),
+        "lines": [{
+            "id": line.id, "test_id": line.test_id, "test_code": line.test_code,
+            "test_name": line.test_name, "specimen_type": line.specimen_type,
+            "result_unit": line.result_unit,
+            "reference_range": line.reference_range_snapshot,
+            "result_value": line.result_value, "result_notes": line.result_notes,
+            "status": line.status, "entered_by": line.entered_by,
+            "validated_by": line.validated_by,
+            "validated_at": line.validated_at.isoformat() if line.validated_at else None,
+        } for line in lines],
+    }
+
+
+@router.post("/lab/orders/{order_id}/sample", status_code=201)
+def collect_laboratory_sample(order_id: int, payload: LaboratorySampleIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    if order.status != "ordered":
+        raise HTTPException(409, "Only newly ordered tests can have a sample collected")
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).all()
+    if not lines or any(line.specimen_type != payload.specimen_type.strip().lower() for line in lines):
+        raise HTTPException(422, "Sample specimen type does not match every ordered test")
+    existing = db.query(LaboratorySample).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).first()
+    if existing:
+        raise HTTPException(409, "A sample is already registered for this order")
+    row = LaboratorySample(
+        organization_id=membership.organization_id, order_id=order.id,
+        accession_number=payload.accession_number.strip().upper(),
+        specimen_type=payload.specimen_type.strip().lower(),
+        status="collected", collected_at=datetime.now(timezone.utc), collected_by=user.id,
+    )
+    db.add(row)
+    order.status = "sample_collected"
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Accession number or sample already exists")
+    db.refresh(row)
+    audit(db, user.id, membership.organization_id, "lab.sample.collected",
+          "laboratory_sample", row.id, f"order:{order.id}")
+    return {"id": row.id, "order_id": order.id, "accession_number": row.accession_number,
+            "specimen_type": row.specimen_type, "status": row.status}
+
+
+@router.post("/lab/orders/{order_id}/lines/{line_id}/result")
+def enter_laboratory_result(order_id: int, line_id: int, payload: LaboratoryResultIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    if order.status not in {"sample_collected", "processing"}:
+        raise HTTPException(409, "Results can only be entered after sample collection and before validation")
+    line = db.query(LaboratoryOrderLine).filter_by(
+        id=line_id, organization_id=membership.organization_id, order_id=order.id
+    ).with_for_update().first()
+    if not line:
+        raise HTTPException(404, "Laboratory order line not found")
+    if line.status != "pending":
+        raise HTTPException(409, "A result has already been entered for this test")
+    line.result_value = payload.result_value.strip()
+    line.result_notes = payload.result_notes.strip()
+    line.entered_by = user.id
+    line.status = "entered"
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).all()
+    order.status = "results_entered" if all(x.status == "entered" for x in lines) else "processing"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "lab.result.entered",
+          "laboratory_order_line", line.id, f"order:{order.id}")
+    return {"id": line.id, "status": line.status, "order_status": order.status}
+
+
+@router.post("/lab/orders/{order_id}/validate")
+def validate_laboratory_order(order_id: int, payload: LaboratoryValidateIn,
+    membership=Depends(active_membership), user: User=Depends(current_user),
+    db: Session=Depends(get_db)):
+    require_permission(membership, "manage")
+    order = db.query(LaboratoryOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Laboratory order not found")
+    if order.status != "results_entered":
+        raise HTTPException(409, "Every test result must be entered before validation")
+    lines = db.query(LaboratoryOrderLine).filter_by(
+        organization_id=membership.organization_id, order_id=order.id
+    ).with_for_update().all()
+    if not lines or any(line.status != "entered" or not line.result_value.strip() for line in lines):
+        raise HTTPException(409, "Laboratory order has missing results")
+    if any(line.entered_by == user.id for line in lines):
+        raise HTTPException(403, "A result author cannot validate their own laboratory order")
+    now_utc = datetime.now(timezone.utc)
+    for line in lines:
+        line.status = "validated"
+        line.validated_by = user.id
+        line.validated_at = now_utc
+    order.status = "validated"
+    db.commit()
+    audit(db, user.id, membership.organization_id, "lab.order.validated",
+          "laboratory_order", order.id, "independent validation completed")
+    return {"id": order.id, "status": order.status,
+            "validated_lines": len(lines), "note_recorded": bool(payload.note.strip())}
 
 
 @router.get("/crm/forecast")
