@@ -57,6 +57,7 @@ def upgrade():
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id"), nullable=True),
+        sa.Column("scope_key", sa.String(36), nullable=False, server_default="*"),
         sa.Column("role", sa.String(32), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("assigned_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
@@ -65,7 +66,7 @@ def upgrade():
     op.create_index("ix_healthcare_role_assignments_organization_id", "healthcare_role_assignments", ["organization_id"])
     op.create_index("ix_healthcare_role_assignments_user_id", "healthcare_role_assignments", ["user_id"])
     op.create_index("ix_healthcare_role_assignments_branch_id", "healthcare_role_assignments", ["branch_id"])
-    op.create_index("ix_healthcare_role_org_user_branch", "healthcare_role_assignments", ["organization_id", "user_id", "branch_id", "role"], unique=True)
+    op.create_index("ix_healthcare_role_org_user_scope", "healthcare_role_assignments", ["organization_id", "user_id", "scope_key", "role"], unique=True)
 
     op.create_table(
         "healthcare_break_glass_sessions",
@@ -107,7 +108,7 @@ def downgrade():
     op.drop_index("ix_healthcare_break_glass_sessions_patient_id", table_name="healthcare_break_glass_sessions")
     op.drop_index("ix_healthcare_break_glass_sessions_organization_id", table_name="healthcare_break_glass_sessions")
     op.drop_table("healthcare_break_glass_sessions")
-    op.drop_index("ix_healthcare_role_org_user_branch", table_name="healthcare_role_assignments")
+    op.drop_index("ix_healthcare_role_org_user_scope", table_name="healthcare_role_assignments")
     op.drop_index("ix_healthcare_role_assignments_branch_id", table_name="healthcare_role_assignments")
     op.drop_index("ix_healthcare_role_assignments_user_id", table_name="healthcare_role_assignments")
     op.drop_index("ix_healthcare_role_assignments_organization_id", table_name="healthcare_role_assignments")
