@@ -26,3 +26,20 @@ Email verification and delivery, password recovery, MFA/TOTP and recovery codes,
 SSO/OIDC, session/device inventory and revocation, rate limiting, login
 throttling, and production account provisioning are not implemented by these
 invitation endpoints. They remain release blockers for production identity.
+
+## Branch administration
+
+- `POST /api/v1/branches` creates a branch with a tenant-unique code.
+- `GET /api/v1/branches` lists only active branches visible to the membership's
+  branch scope.
+- `PUT /api/v1/branches/{id}` updates branch metadata.
+- `DELETE /api/v1/branches/{id}` deactivates a branch without deleting its
+  historical records.
+
+Record creation and updates reject branch IDs that do not belong to the active
+organization or refer to an inactive branch. Tenant and branch filters are
+applied server-side. Branch IDs are UUID strings.
+
+The branch APIs are backend foundations. A dedicated admin frontend, branch
+transfer/reassignment workflow, and migration plan for historical branch data
+remain outstanding.
