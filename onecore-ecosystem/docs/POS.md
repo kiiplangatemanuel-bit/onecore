@@ -297,3 +297,15 @@ The local AES-GCM key is non-extractable and persisted in the same browser profi
 Database uniqueness guards prevent two open shifts from binding to the same trusted device and prevent duplicate non-empty customer phone numbers within an organization, including concurrent requests.
 
 Background synchronization does not automatically initiate M-Pesa STK prompts or replay cash/card refunds. A successfully synchronized M-Pesa sale remains subject to customer approval and the authoritative Daraja callback. A supervisor decision on an offline conflict is an audited resolution record, not permission to blindly replay a possibly paid sale.
+
+
+## Configurable loyalty redemption at checkout
+
+Migration 0047 adds a tenant-scoped reward policy and immutable sale/line snapshots for redeemed points and their currency value. Managers configure points earned per 100 currency units, points required per currency unit, the maximum percentage of pre-tax discounted line value that can be redeemed, and whether redemption is enabled.
+
+- Existing organizations without a policy retain the previous earning behavior (one point per 100 currency units); redemption remains disabled until a manager configures and activates the policy.
+- Cashiers can load a customer membership balance and request a whole number of points at checkout. The API locks the customer row, verifies the live balance, applies the configured conversion, enforces the sale cap, allocates the pre-tax discount proportionally across sale lines, and recalculates each line's tax before validating payment allocation.
+- Points redemption, loyalty ledger entries, sale lines, inventory movements, tenders, and POS accounting bridge creation commit in the same database transaction.
+- Loyalty points are earned from the final discounted sale amount. A checkout redemption is part of the canonical offline request hash; zero-point sales preserve the legacy hash so old offline queue items remain replay-compatible.
+- Point redemption is online-only because the authoritative customer balance must be checked at checkout; the API also rejects redemption requests with a missing or stale checkout timestamp. Normal zero-redemption sales continue to work offline. The legacy standalone points-deduction endpoint is disabled because it had no sale price, tender or accounting evidence.
+- Receipts retain redeemed points and discount allocations. Returns restore redeemed points and reverse earned points proportionally to cumulative returned value, with idempotent loyalty ledger entries.
