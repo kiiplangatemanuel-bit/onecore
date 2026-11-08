@@ -117,3 +117,13 @@ def apply_loyalty_redemption(prepared, points: int, points_per_currency_unit: in
         money(sum((item[5] for item in adjusted), Decimal("0.00"))),
         money(sum((item[6] for item in adjusted), Decimal("0.00"))),
     )
+
+
+def calculate_loyalty_return_adjustments(points_redeemed: int, points_earned: int,
+                                         cumulative_refunds: Decimal, sale_total: Decimal,
+                                         already_restored: int = 0, already_reversed: int = 0):
+    """Return idempotent point restoration/reversal deltas for cumulative sale returns."""
+    ratio = min(Decimal("1"), Decimal(cumulative_refunds) / Decimal(sale_total)) if Decimal(sale_total) > 0 else Decimal("1")
+    target_restore = min(int(points_redeemed), int((Decimal(int(points_redeemed)) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    target_reverse = min(int(points_earned), int((Decimal(int(points_earned)) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    return max(0, target_restore - int(already_restored)), max(0, target_reverse - int(already_reversed))
