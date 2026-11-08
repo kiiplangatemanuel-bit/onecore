@@ -9,11 +9,14 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("payroll_accounting_mappings", sa.Column(
-        "other_deductions_payable_account_id", sa.Integer(),
-        sa.ForeignKey("accounting_accounts.id"), nullable=True
-    ))
+    # Batch mode is required for SQLite's table-copy implementation of ALTER.
+    with op.batch_alter_table("payroll_accounting_mappings") as batch_op:
+        batch_op.add_column(sa.Column(
+            "other_deductions_payable_account_id", sa.Integer(),
+            sa.ForeignKey("accounting_accounts.id"), nullable=True
+        ))
 
 
 def downgrade():
-    op.drop_column("payroll_accounting_mappings", "other_deductions_payable_account_id")
+    with op.batch_alter_table("payroll_accounting_mappings") as batch_op:
+        batch_op.drop_column("other_deductions_payable_account_id")
