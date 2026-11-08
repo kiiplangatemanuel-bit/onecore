@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import jwt
+import secrets
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -48,12 +49,24 @@ def _supabase_user(token: str, db: Session) -> User:
         # Link only a verified Supabase identity to an existing OneCore account with
         # the exact same email; never auto-provision tenant access from an arbitrary JWT.
         user = db.query(User).filter(func.lower(User.email) == email).first()
-        if user is None or not user.is_active:
-            raise jwt.InvalidTokenError("No active OneCore account is linked to this Supabase identity")
-        if user.supabase_auth_user_id and user.supabase_auth_user_id != subject:
-            raise jwt.InvalidTokenError("Supabase identity is already linked to another account")
-        user.supabase_auth_user_id = subject
+        if user is not None:
+            if not user.is_active:
+                raise jwt.InvalidTokenError("The matching OneCore account is inactive")
+            if user.supabase_auth_user_id and user.supabase_auth_user_id != subject:
+                raise jwt.InvalidTokenError("Supabase identity is already linked to another account")
+            user.supabase_auth_user_id = subject
+        else:
+            # A verified Supabase identity may create a OneCore identity, but it
+            # receives no organization membership until explicit onboarding.
+            metadata = payload.get("user_metadata") or {}
+            user = User(
+                email=email, full_name=str(metadata.get("full_name") or "")[:180],
+                password_hash=hash_password(secrets.token_urlsafe(48)),
+                is_active=True, platform_role="customer", supabase_auth_user_id=subject,
+            )
+            db.add(user)
         db.commit()
+        db.refresh(user)
     if not user.is_active:
         raise jwt.InvalidTokenError("OneCore account is inactive")
     return user

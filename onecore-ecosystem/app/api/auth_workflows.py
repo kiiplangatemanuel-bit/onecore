@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,7 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, EmailVerification, Membership, Organization, User
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn
-from app.core.security import hash_password
+from app.core.security import current_user, hash_password
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -132,3 +133,48 @@ def verify_email(payload: EmailVerificationIn, db: Session = Depends(get_db)):
     ))
     db.commit()
     return {"status": "verified", "message": "Email verified. You can now sign in to OneCore."}
+
+
+
+class CompleteOrganizationRegistrationIn(BaseModel):
+    organization_name: str = Field(min_length=2, max_length=200)
+    organization_slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,118}[a-z0-9]$")
+    industry: str = Field(default="general", max_length=100)
+    country: str = Field(default="KE", pattern=r"^[A-Z]{2}$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    timezone: str = Field(default="Africa/Nairobi", max_length=80)
+
+
+@router.post("/complete-organization-registration", status_code=201)
+def complete_organization_registration(
+    payload: CompleteOrganizationRegistrationIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if db.query(Membership).filter_by(user_id=user.id, is_active=True).first():
+        raise HTTPException(409, "This account already belongs to an active organization.")
+    if db.query(Organization).filter_by(slug=payload.organization_slug).first():
+        raise HTTPException(409, "Organization URL is already in use. Choose another slug.")
+    organization = Organization(
+        name=payload.organization_name.strip(), slug=payload.organization_slug,
+        industry=payload.industry, country=payload.country, currency=payload.currency,
+        timezone=payload.timezone, is_active=True,
+    )
+    try:
+        db.add(organization)
+        db.flush()
+        db.add(Membership(
+            user_id=user.id, organization_id=organization.id,
+            role="org_admin", branch_scope="*", is_active=True,
+        ))
+        db.add(AuditEvent(
+            actor_user_id=user.id, organization_id=organization.id,
+            action="organization.registration.completed",
+            resource_type="organization", resource_id=str(organization.id),
+        ))
+        db.commit()
+        db.refresh(organization)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Organization URL is already in use. Choose another slug.")
+    return {"organization": {"id": organization.id, "name": organization.name, "slug": organization.slug}, "role": "org_admin"}
