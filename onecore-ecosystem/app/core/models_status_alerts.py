@@ -18,8 +18,8 @@ class StatusAlertDelivery(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    incident_record_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    incident_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), nullable=False, index=True)
     recipient_email: Mapped[str] = mapped_column(String(320), nullable=False)
     event_key: Mapped[str] = mapped_column(String(180), nullable=False)
     subject: Mapped[str] = mapped_column(String(240), nullable=False)
