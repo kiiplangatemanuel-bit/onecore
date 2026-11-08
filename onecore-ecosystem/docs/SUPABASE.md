@@ -89,6 +89,8 @@ CREATE ROLE onecore_status_alert_worker LOGIN PASSWORD '<generated-secret>' NOBY
 GRANT CONNECT ON DATABASE postgres TO onecore_status_alert_worker;
 GRANT USAGE ON SCHEMA public TO onecore_status_alert_worker;
 GRANT SELECT, UPDATE ON TABLE public.status_alert_deliveries TO onecore_status_alert_worker;
+GRANT SELECT, INSERT ON TABLE public.status_alert_deliveries TO onecore_api;
+GRANT USAGE, SELECT ON SEQUENCE public.status_alert_deliveries_id_seq TO onecore_api;
 ```
 
 The worker verifies its connected PostgreSQL role at startup. The outbox RLS policy permits subscribers to read only their own deliveries; only the dedicated worker role can update delivery state. Configure SMTP using the existing email integration settings. Never reuse the API or Supabase service-role database credentials for this worker.
