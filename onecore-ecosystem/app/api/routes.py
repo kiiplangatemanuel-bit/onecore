@@ -1712,6 +1712,9 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             raise HTTPException(422, "A customer membership is required to redeem loyalty points")
         if not loyalty_policy or not loyalty_policy.is_active:
             raise HTTPException(409, "Loyalty redemption is not enabled for this organization")
+        organization_currency = db.query(Organization.currency).filter_by(id=membership.organization_id).scalar()
+        if organization_currency and payload.currency != organization_currency:
+            raise HTTPException(422, "Loyalty redemption must use the organization base currency")
         if customer.points_balance < loyalty_points_redeemed:
             raise HTTPException(422, "Customer does not have enough loyalty points")
         prepared, loyalty_discount_total, tax_total, total = apply_loyalty_redemption(
