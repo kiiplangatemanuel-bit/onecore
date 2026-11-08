@@ -62,6 +62,7 @@ app.state.login_rate_limiter = LoginRateLimiter(
     window_seconds=settings.login_rate_limit_window_seconds,
 )
 app.include_router(router)
+app.include_router(portal_router)
 app.include_router(inventory_completion_router)
 app.include_router(pos_completion_router)
 app.include_router(platform_router)
