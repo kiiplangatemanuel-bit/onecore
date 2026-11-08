@@ -16,7 +16,8 @@ def test_organization_creation_sets_authenticated_owner():
     routes = (ROOT / "app" / "api" / "routes.py").read_text()
     auth = (ROOT / "app" / "api" / "auth_workflows.py").read_text()
     assert "Organization(**payload.model_dump(), owner_user_id=user.id)" in routes
-    assert "owner_user_id=user.id" in auth
+    assert "organization.owner_user_id = user.id" in auth
+    assert "set_verified_user_context(db, user.id)" in auth
 
 
 def test_membership_policy_allows_owner_admin_but_blocks_peer_escalation():
