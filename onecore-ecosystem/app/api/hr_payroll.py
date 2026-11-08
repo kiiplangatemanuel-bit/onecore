@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -94,6 +94,8 @@ class LeaveIn(BaseModel):
     def valid_range(self):
         if self.end_date < self.start_date:
             raise ValueError("Leave end date must not precede start date")
+        if self.days > Decimal((self.end_date - self.start_date).days + 1):
+            raise ValueError("Leave days cannot exceed the calendar days in the requested range")
         return self
 
 
@@ -326,10 +328,16 @@ def request_leave(employee_id: int, payload: LeaveIn, membership=Depends(active_
     employee = db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
     if not employee or not can_access_branch(membership, employee.branch_id):
         raise HTTPException(404, "Employee not found")
+    start_dt=datetime.combine(payload.start_date,time.min,tzinfo=timezone.utc)
+    end_dt=datetime.combine(payload.end_date,time.max,tzinfo=timezone.utc)
+    overlap=db.query(HRLeaveRequest).filter(HRLeaveRequest.organization_id==membership.organization_id,
+        HRLeaveRequest.employee_id==employee.id,HRLeaveRequest.status.in_(("pending","approved")),
+        HRLeaveRequest.start_date<=end_dt,HRLeaveRequest.end_date>=start_dt).first()
+    if overlap: raise HTTPException(409,"This leave request overlaps an existing pending or approved request")
     row = HRLeaveRequest(organization_id=membership.organization_id, branch_id=employee.branch_id,
         employee_id=employee.id, leave_type=payload.leave_type,
-        start_date=datetime.combine(payload.start_date, time.min, tzinfo=timezone.utc),
-        end_date=datetime.combine(payload.end_date, time.min, tzinfo=timezone.utc),
+        start_date=start_dt,
+        end_date=end_dt,
         days=payload.days, reason=payload.reason, requested_by=user.id)
     db.add(row); db.flush()
     audit(db, user, membership.organization_id, "hr.leave.requested", "hr_leave_request", row.id)
@@ -360,6 +368,10 @@ def decide_leave(request_id: int, payload: LeaveDecisionIn, membership=Depends(a
     row = db.query(HRLeaveRequest).filter_by(id=request_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership, row.branch_id): raise HTTPException(404, "Leave request not found")
     if row.status != "pending": raise HTTPException(409, "Leave request has already been decided")
+    if payload.decision=="approved" and db.query(HRLeaveRequest).filter(HRLeaveRequest.organization_id==membership.organization_id,
+        HRLeaveRequest.employee_id==row.employee_id,HRLeaveRequest.id!=row.id,HRLeaveRequest.status=="approved",
+        HRLeaveRequest.start_date<=row.end_date,HRLeaveRequest.end_date>=row.start_date).first():
+        raise HTTPException(409,"Another approved leave request overlaps this period")
     if row.requested_by == user.id: raise HTTPException(409, "A requester cannot approve their own leave request")
     row.status=payload.decision; row.decision_note=payload.note; row.decided_by=user.id; row.decided_at=datetime.now(timezone.utc)
     audit(db,user,membership.organization_id,"hr.leave."+payload.decision,"hr_leave_request",row.id,payload.note)
@@ -456,18 +468,25 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
         idempotency_key=payload.idempotency_key).first()
     if existing:
         if existing.created_by!=user.id: raise HTTPException(409,"Idempotency key already belongs to another payroll request")
+        same_request=(existing.branch_id==payload.branch_id and existing.period_start.date()==payload.period_start and
+            existing.period_end.date()==payload.period_end and
+            sorted(x["employee_id"] for x in existing.calculation_snapshot.get("items",[]))==sorted(payload.employee_ids))
+        if not same_request: raise HTTPException(409,"Idempotency key was already used with a different payroll request")
         return _run_out(existing)
+    duplicate_period=db.query(PayrollRun).filter_by(organization_id=membership.organization_id,
+        branch_id=payload.branch_id,period_start=datetime.combine(payload.period_start,time.min,tzinfo=timezone.utc),
+        period_end=datetime.combine(payload.period_end,time.max,tzinfo=timezone.utc)).first()
+    if duplicate_period: raise HTTPException(409,"A payroll run already exists for this branch and monthly period")
     start=datetime.combine(payload.period_start,time.min,tzinfo=timezone.utc)
     end=datetime.combine(payload.period_end,time.max,tzinfo=timezone.utc)
     rules=db.query(PayrollRuleSet).filter(PayrollRuleSet.organization_id==membership.organization_id,
         PayrollRuleSet.status=="active",PayrollRuleSet.effective_from<=start,
         ((PayrollRuleSet.effective_to.is_(None))|(PayrollRuleSet.effective_to>=end))).order_by(PayrollRuleSet.version.desc()).first()
     if not rules: raise HTTPException(409,"No approved statutory rule set covers the complete payroll period")
-    if rules.currency!="KES" and rules.currency!="USD":
-        raise HTTPException(409,"Unsupported payroll currency configuration")
     q=db.query(HREmployee).filter(HREmployee.organization_id==membership.organization_id,
-        HREmployee.id.in_(payload.employee_ids),HREmployee.employment_status=="active",
-        HREmployee.currency==rules.currency)
+        HREmployee.id.in_(payload.employee_ids),
+        or_(HREmployee.employment_status=="active",and_(HREmployee.employment_status=="terminated",HREmployee.termination_date>=start)),
+        HREmployee.hire_date<=end,HREmployee.currency==rules.currency)
     if payload.branch_id is not None:q=q.filter(HREmployee.branch_id==payload.branch_id)
     employees=q.all()
     if len(employees)!=len(payload.employee_ids): raise HTTPException(404,"One or more active employees were not found in this tenant, branch or currency")
