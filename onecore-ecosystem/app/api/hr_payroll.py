@@ -615,10 +615,13 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
-    if row.approved_by==user.id: raise HTTPException(409,"The payroll approver cannot authorize its payment")
+    if user.id in {row.created_by,row.submitted_by,row.approved_by}:
+        raise HTTPException(409,"Payroll preparer, submitter and approver cannot authorize its payment")
     accounting_link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).with_for_update().first()
     if not accounting_link or accounting_link.reversal_journal_id:
         raise HTTPException(409,"Post the approved payroll to accounting before recording payment")
+    if user.id==accounting_link.created_by:
+        raise HTTPException(409,"The payroll accounting poster cannot authorize its payment")
     if accounting_link.settlement_journal_id:
         raise HTTPException(409,"Payroll settlement journal already exists")
     if dec(row.net_total)<=0:
@@ -784,6 +787,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     run=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not run or not can_access_branch(membership,run.branch_id):
         raise HTTPException(404,"Payroll run not found")
+    if user.id in {run.created_by,run.submitted_by,run.approved_by}:
+        raise HTTPException(409,"Payroll preparer, submitter and approver cannot post its accounting journal")
     if run.status!="approved":
         raise HTTPException(409,"Only an approved, unpaid payroll run can be posted to accounting")
     existing=db.query(PayrollAccountingLink).filter_by(
