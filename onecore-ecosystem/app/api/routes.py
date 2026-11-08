@@ -1379,7 +1379,7 @@ def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_
         purchase_order_line_id=x.purchase_order_line_id,quantity=x.quantity,unit_cost=x.unit_cost))
     audit(db,user.id,membership.organization_id,"procurement.invoice.three_way_matched","supplier_invoice",invoice.id,payload.invoice_number)
     db.commit()
-    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"status":invoice.status,"subtotal":str(subtotal),"tax_total":str(invoice.tax_total),"total":str(subtotal+invoice.tax_total)}
+    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"status":invoice.status,"subtotal":str(subtotal),"tax_total":str(invoice.tax_total),"total":str(subtotal+invoice.tax_total),"crm_sales_order_id":invoice.crm_sales_order_id}
 
 
 @router.post("/procurement/goods-receipts/{receipt_id}/returns",status_code=201)
