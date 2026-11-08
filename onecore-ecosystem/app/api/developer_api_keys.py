@@ -186,10 +186,11 @@ def current_developer_api_key(
         if expires_at <= now:
             raise HTTPException(401, "Developer API key has expired")
     organization = db.query(Organization).filter_by(id=key.organization_id, is_active=True).first()
+    owner = db.get(User, key.created_by_user_id)
     membership = db.query(Membership).filter_by(
         user_id=key.created_by_user_id, organization_id=key.organization_id, is_active=True
     ).first()
-    if not organization or not membership or membership.role not in {"org_admin", "developer"}:
+    if not organization or not owner or not owner.is_active or not membership or membership.role not in {"org_admin", "developer"}:
         raise HTTPException(401, "Developer API key owner no longer has active organization access")
     db.info["onecore_user_id"] = key.created_by_user_id
     if db.bind is not None and db.bind.dialect.name == "postgresql":
