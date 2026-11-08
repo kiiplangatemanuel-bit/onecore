@@ -38,7 +38,7 @@ def _tables():
         "accounting_accounts", "accounting_journals", "accounting_journal_lines",
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
-        "school_classes", "school_learners", "accounting_invoices",
+        "school_classes", "school_learners", "accounting_invoices", "status_alert_deliveries",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
