@@ -4,7 +4,7 @@ from email.message import EmailMessage
 import logging
 import smtplib
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -41,8 +41,11 @@ def run_status_alert_worker(batch_size: int = 25) -> int:
             now = datetime.now(timezone.utc)
             rows = db.execute(
                 select(StatusAlertDelivery)
-                .where(StatusAlertDelivery.status == "pending",
-                       StatusAlertDelivery.next_attempt_at <= now)
+                .where(
+                    or_(StatusAlertDelivery.status == "pending",
+                        StatusAlertDelivery.status == "processing"),
+                    StatusAlertDelivery.next_attempt_at <= now,
+                )
                 .order_by(StatusAlertDelivery.next_attempt_at, StatusAlertDelivery.id)
                 .limit(max(1, min(batch_size, 100)))
                 .with_for_update(skip_locked=True)
@@ -50,6 +53,7 @@ def run_status_alert_worker(batch_size: int = 25) -> int:
             for delivery in rows:
                 delivery.status = "processing"
                 delivery.attempts += 1
+                delivery.next_attempt_at = now + timedelta(minutes=5)
             db.commit()
             for delivery in rows:
                 try:
