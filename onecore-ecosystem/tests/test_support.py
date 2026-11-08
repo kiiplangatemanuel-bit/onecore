@@ -179,10 +179,10 @@ def test_support_attachments_remain_quarantined_until_security_review():
 
 def test_clamav_scan_response_parser_requires_explicit_verdict():
     from app.api.support import _parse_clamav_response
-    assert _parse_clamav_response('stream: OK\\0') == ('clean', None)
-    assert _parse_clamav_response('stream: Eicar-Test-Signature FOUND\\0') == ('infected', 'Eicar-Test-Signature')
+    assert _parse_clamav_response('stream: OK' + chr(0)') == ('clean', None)
+    assert _parse_clamav_response('stream: Eicar-Test-Signature FOUND' + chr(0)') == ('infected', 'Eicar-Test-Signature')
     with pytest.raises(RuntimeError):
-        _parse_clamav_response('stream: ERROR\\0')
+        _parse_clamav_response('stream: ERROR' + chr(0)')
 
 
 def test_support_attachment_scan_evidence_migration_follows_webhooks():
