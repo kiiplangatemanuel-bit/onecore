@@ -241,6 +241,13 @@ def _verify_rls_database_boundary(connection):
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices",
         "status_alert_deliveries",
+        # HR and payroll are tenant-owned financial records and must never be
+        # served by a production API role unless FORCE ROW LEVEL SECURITY is active.
+        "hr_employees", "hr_leave_requests", "hr_attendance_records",
+        "payroll_rule_sets", "payroll_runs", "payroll_payslips",
+        "payroll_accounting_mappings", "payroll_accounting_links",
+        "payroll_adjustments", "payroll_payment_batches",
+        "payroll_payment_batch_items", "payroll_bank_statement_lines",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""

@@ -40,6 +40,11 @@ def _tables():
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices",
         "status_alert_deliveries",
+        "hr_employees", "hr_leave_requests", "hr_attendance_records",
+        "payroll_rule_sets", "payroll_runs", "payroll_payslips",
+        "payroll_accounting_mappings", "payroll_accounting_links",
+        "payroll_adjustments", "payroll_payment_batches",
+        "payroll_payment_batch_items", "payroll_bank_statement_lines",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
@@ -77,6 +82,22 @@ def test_production_database_boundary_rejects_tables_without_forced_rls():
 def test_production_database_boundary_rejects_missing_critical_rls_table():
     from app.main import _verify_rls_database_boundary
     tables = _tables()[:-1]
+    with pytest.raises(RuntimeError, match="RLS schema"):
+        _verify_rls_database_boundary(_Connection(
+            {"role_name": "onecore_api", "is_superuser": False, "bypasses_rls": False}, tables
+        ))
+
+
+@pytest.mark.parametrize("table_name", [
+    "hr_employees", "hr_leave_requests", "hr_attendance_records",
+    "payroll_rule_sets", "payroll_runs", "payroll_payslips",
+    "payroll_accounting_mappings", "payroll_accounting_links",
+    "payroll_adjustments", "payroll_payment_batches",
+    "payroll_payment_batch_items", "payroll_bank_statement_lines",
+])
+def test_production_readiness_rejects_each_missing_hr_payroll_rls_table(table_name):
+    from app.main import _verify_rls_database_boundary
+    tables = [row for row in _tables() if row["relname"] != table_name]
     with pytest.raises(RuntimeError, match="RLS schema"):
         _verify_rls_database_boundary(_Connection(
             {"role_name": "onecore_api", "is_superuser": False, "bypasses_rls": False}, tables
