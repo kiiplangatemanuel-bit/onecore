@@ -42,3 +42,16 @@ def test_audit_event_rls_preserves_authenticated_and_guest_support_writes():
     assert "CREATE POLICY audit_event_select" in source
     assert "CREATE POLICY audit_event_insert" in source
     assert "app.support_guest_token_hash" in source
+
+
+def test_provider_callbacks_are_token_bound_before_tenant_context_is_known():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    for table in ("mpesa_payment_intents", "mpesa_refund_intents", "procurement_settlements"):
+        assert f'"{table}"' in source
+    assert "app.provider_callback_token_hash" in source
+    assert "app.organization_id" in source
+
+
+def test_generic_tenant_policies_allow_only_explicitly_scoped_worker_transactions():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert "OR {table}.organization_id = {organization_id}" in source
