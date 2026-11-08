@@ -66,7 +66,7 @@ def test_production_settings_require_secure_values():
         app_env="production",
         debug=False,
         secret_key="s" * 48,
-        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        supabase_db_url="postgresql://postgres:pass@db.project-ref.supabase.co:5432/postgres",
         cors_origins="https://app.example.com",
         trusted_hosts="api.example.com",
         force_https=True,
@@ -89,3 +89,32 @@ def test_bootstrap_credentials_must_be_explicit_and_strong():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, bootstrap_admin_email="admin@example.com",
                  bootstrap_admin_password="short")
+
+
+
+def test_production_requires_supabase_managed_postgresql():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    safe = dict(
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        cors_origins="https://app.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
+    with pytest.raises(ValidationError, match="Supabase"):
+        Settings(_env_file=None, **safe)
+
+
+def test_supabase_database_url_takes_precedence_over_local_database_url():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./onecore.db",
+        supabase_db_url="postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert settings.database_connection_url.startswith("postgresql://")
