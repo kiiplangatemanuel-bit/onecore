@@ -104,7 +104,7 @@ def activate_webhook(
 ):
     record = db.query(PortalWorkflowRecord).filter_by(
         id=payload.workflow_record_id, portal_key="developers",
-        record_type="webhook", organization_id=PortalWorkflowRecord.organization_id,
+        record_type="webhook",
     ).first()
     if not record:
         raise HTTPException(404, "Webhook not found")
@@ -266,6 +266,8 @@ def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
     results = []
     for row in rows:
         try:
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
+                db.execute(text("SELECT set_config('app.webhook_worker', 'true', true)"))
             results.append(_deliver_one(db, row))
         except Exception as exc:
             row.attempts += 1
