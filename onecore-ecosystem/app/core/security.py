@@ -17,9 +17,9 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return pwd_context.verify(password, hashed)
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, auth_version: int = 0) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(user_id), "exp": exp}, settings.secret_key, algorithm="HS256")
+    return jwt.encode({"sub": str(user_id), "exp": exp, "ver": int(auth_version)}, settings.secret_key, algorithm="HS256")
 
 def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired credentials",
@@ -27,10 +27,11 @@ def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
         user_id = int(payload.get("sub", "0"))
+        token_version = int(payload.get("ver", 0))
     except (jwt.InvalidTokenError, ValueError):
         raise error
     user = db.get(User, user_id)
-    if not user or not user.is_active:
+    if not user or not user.is_active or int(user.auth_version) != token_version:
         raise error
     return user
 

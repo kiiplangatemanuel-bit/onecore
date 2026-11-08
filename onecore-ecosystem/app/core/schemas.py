@@ -733,3 +733,12 @@ class OrganizationRegistrationIn(BaseModel):
 
 class EmailVerificationIn(BaseModel):
     token: str = Field(min_length=32, max_length=256)
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    new_password: str = Field(min_length=12, max_length=128)

@@ -117,4 +117,4 @@ def exchange_portal_code(payload: PortalCodeExchange, db: Session = Depends(get_
         detail=urlsplit(redirect_uri).netloc,
     ))
     db.commit()
-    return {"access_token": create_access_token(user.id), "token_type": "bearer"}
+    return {"access_token": create_access_token(user.id, user.auth_version), "token_type": "bearer"}

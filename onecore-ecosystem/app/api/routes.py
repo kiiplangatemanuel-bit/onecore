@@ -38,7 +38,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     user = db.query(User).filter(User.email == form.username.lower()).first()
     if not user or not verify_password(form.password, user.password_hash) or not user.is_active:
         raise HTTPException(401, "Incorrect email or password")
-    return {"access_token": create_access_token(user.id), "token_type": "bearer"}
+    return {"access_token": create_access_token(user.id, user.auth_version), "token_type": "bearer"}
 
 @router.get("/auth/me")
 def me(user: User = Depends(current_user)):
