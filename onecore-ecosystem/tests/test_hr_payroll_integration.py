@@ -21,6 +21,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
         User(email="hr@example.test", full_name="HR Admin", password_hash="x"),
         User(email="approver@example.test", full_name="Payroll Approver", password_hash="x"),
         User(email="payment@example.test", full_name="Payment Officer", password_hash="x"),
+        User(email="accounting@example.test", full_name="Payroll Accounting", password_hash="x"),
     ]
     db.add(org)
     db.flush()
@@ -132,7 +133,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert slips.json()[0]["employee_id"] == employee_id
             assert slips.json()[0]["net_pay"] == "17246.25"
 
-            actor["user"], actor["role"] = users[0], "org_admin"
+            actor["user"], actor["role"] = users[3], "payroll_accounting"
             mapping = client.put("/api/v1/payroll/accounting-mapping", json={
                 "salary_expense_account_id": account_ids[0],
                 "employer_contribution_expense_account_id": account_ids[1],
@@ -170,7 +171,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             actor["user"], actor["role"] = users[1], "payroll_approver"
             assert client.post(f"/api/v1/payroll/runs/{december_id}/approve").status_code == 200
 
-            actor["user"], actor["role"] = users[0], "org_admin"
+            actor["user"], actor["role"] = users[3], "payroll_accounting"
             december_post = client.post(f"/api/v1/payroll/runs/{december_id}/post-to-accounting")
             assert december_post.status_code == 201, december_post.text
             reversed_journal = client.post(
