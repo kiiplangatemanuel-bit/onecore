@@ -1606,3 +1606,27 @@ class PortalAuthorizationCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PortalWorkflowRecord(Base):
+    """Typed, tenant-scoped records backing authenticated public-portal workflows.
+
+    Sensitive records (security reports and applicant records) are always owner-scoped.
+    Organization records are always filtered through an active membership in the API.
+    """
+    __tablename__ = "portal_workflow_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portal_key: Mapped[str] = mapped_column(String(24), index=True)
+    record_type: Mapped[str] = mapped_column(String(48), index=True)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    visibility: Mapped[str] = mapped_column(String(16), default="private")
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_portal_workflow_org_portal_type", "organization_id", "portal_key", "record_type"),
+        Index("ix_portal_workflow_owner_portal_type", "owner_user_id", "portal_key", "record_type"),
+        Index("ix_portal_workflow_public", "portal_key", "record_type", "visibility", "status"),
+    )

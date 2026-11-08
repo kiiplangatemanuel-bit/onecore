@@ -3,6 +3,7 @@ import jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
@@ -21,6 +22,17 @@ def create_access_token(user_id: int, auth_version: int = 0) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
     return jwt.encode({"sub": str(user_id), "exp": exp, "ver": int(auth_version)}, settings.secret_key, algorithm="HS256")
 
+@event.listens_for(Session, "after_begin")
+def _apply_database_identity_context(session, transaction, connection):
+    """Set transaction-local identity for PostgreSQL RLS policies."""
+    user_id = session.info.get("onecore_user_id")
+    if user_id is not None and connection.dialect.name == "postgresql":
+        connection.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(user_id)},
+        )
+
+
 def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired credentials",
                           headers={"WWW-Authenticate": "Bearer"})
@@ -30,6 +42,9 @@ def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_
         token_version = int(payload.get("ver", 0))
     except (jwt.InvalidTokenError, ValueError):
         raise error
+    # SQLAlchemy applies this identity on every new PostgreSQL transaction, including
+    # after an endpoint commits and starts another transaction in the same request.
+    db.info["onecore_user_id"] = user_id
     user = db.get(User, user_id)
     if not user or not user.is_active or int(user.auth_version) != token_version:
         raise error

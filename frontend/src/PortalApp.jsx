@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { API_BASE, api, clearToken, getToken, setToken } from "./api";
 import { portalLink, portalUrl } from "./config/portals";
+import PortalWorkflowWorkspace from "./PortalWorkflowWorkspace.jsx";
 import "./portal.css";
 
 const PUBLIC_CONTENT = {
@@ -14,10 +15,25 @@ const PUBLIC_CONTENT = {
   partners: { title:"OneCore partner ecosystem", intro:"Explore partnership opportunities. Commercial agreements, referrals and partner resources are confidential.", sections:[["Technology partners","Build secure integrations using documented APIs and approved sandbox credentials."],["Implementation partners","Support customers with onboarding, configuration, training and governed deployments."],["Partner enquiries","Describe your organization and proposed collaboration through the OneCore contact channels."]], links:[["Developers","developers"],["Contact Support","support"]] },
   admin: { title:"Operations centre", intro:"Privileged platform administration is not public. Every privileged operation is checked by the backend.", sections:[["Access control","Only platform administrators can access platform-wide operations."],["Tenant governance","Organization administrator permissions do not grant platform superadmin privileges."],["Auditability","Administrative changes should be attributable and recorded in the platform audit trail."]], links:[["Sign in","app"]] },
 };
+const PUBLIC_TYPES_BY_PORTAL = {
+  status:["incident"],developers:["api_guide","example"],docs:["guide"],
+  community:["announcement","public_post"],trust:["security_policy","compliance_disclosure"],
+  events:["event","announcement"],careers:["vacancy","company_information"],
+  partners:["opportunity","partner_information"],
+};
 function PublicPortalContent({portal,content}) {
-  const [health,setHealth]=useState("checking");
+  const [health,setHealth]=useState("checking"),[items,setItems]=useState([]);
   useEffect(()=>{if(portal!=="status")return;api("/health").then(()=>setHealth("online")).catch(()=>setHealth("unavailable"));},[portal]);
-  return <><section className="portal-panel portal-public-intro"><span className="portal-kicker">PUBLIC ACCESS · NO ACCOUNT REQUIRED</span><h2>{content.title}</h2><p>{content.intro}</p>{portal==="status"&&<div className="portal-health"><span className={"portal-health-dot "+(health==="online"?"online":"offline")}/><strong>OneCore API: {health==="checking"?"Checking":health==="online"?"Reachable":"Not reachable"}</strong><small>This checks API reachability only; it is not a full service incident monitor.</small></div>}</section><section className="portal-content-grid">{content.sections.map(([title,body])=><article className="portal-panel" key={title}><h3>{title}</h3><p>{body}</p></article>)}</section><section className="portal-panel"><h2>Explore OneCore</h2><div className="portal-link-grid">{content.links.map(([label,key])=><a key={key+label} href={key==="api"?API_BASE+"/docs":key==="health"?API_BASE+"/health":key==="app"?portalUrl("app","login"):portalLink(key)}>{label} ↗</a>)}</div></section></>;
+  useEffect(()=>{
+    const types=PUBLIC_TYPES_BY_PORTAL[portal]||[];
+    let active=true;
+    Promise.all(types.map(type=>api("/api/v1/portals/"+portal+"/public/"+type).catch(()=>[])))
+      .then(groups=>{if(active)setItems(groups.flat());});
+    return ()=>{active=false;};
+  },[portal]);
+  return <><section className="portal-panel portal-public-intro"><span className="portal-kicker">PUBLIC ACCESS · NO ACCOUNT REQUIRED</span><h2>{content.title}</h2><p>{content.intro}</p>{portal==="status"&&<div className="portal-health"><span className={"portal-health-dot "+(health==="online"?"online":"offline")}/><strong>OneCore API: {health==="checking"?"Checking":health==="online"?"Reachable":"Not reachable"}</strong><small>This checks API reachability only; it is not a full service incident monitor.</small></div>}</section>
+  {items.length>0?<section className="portal-content-grid" aria-label="Published public content">{items.map(item=><article className="portal-panel" key={item.id}><span className="portal-kicker">{item.record_type.replaceAll("_"," ")}</span><h3>{item.payload.title||item.payload.name||"OneCore update"}</h3><p>{item.payload.summary||item.payload.description||item.payload.body||item.payload.service||""}</p>{item.payload.starts_at&&<small>Starts: {new Date(item.payload.starts_at).toLocaleString()}</small>}{item.payload.location&&<small> · {item.payload.location}</small>}<small>Reference #{item.id}</small></article>)}</section>:<section className="portal-content-grid">{content.sections.map(([title,body])=><article className="portal-panel" key={title}><h3>{title}</h3><p>{body}</p></article>)}</section>}
+  <section className="portal-panel"><h2>Explore OneCore</h2><div className="portal-link-grid">{content.links.map(([label,key])=><a key={key+label} href={key==="api"?API_BASE+"/docs":key==="health"?API_BASE+"/health":key==="app"?portalUrl("app","login"):portalLink(key)}>{label} ↗</a>)}</div></section></>;
 }
 export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || "support" }) {
   const content=PUBLIC_CONTENT[portal] || {title:"OneCore",intro:"Public information from OneCore Technologies Ltd.",sections:[],links:[]};
@@ -71,6 +87,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   {error&&<div className="portal-error" role="alert">{error}</div>}
   {user?<section className="portal-panel portal-account"><div className="portal-panel-head"><div><span className="portal-kicker">AUTHENTICATED ACCESS</span><h2>Your OneCore identity</h2><p>{user.full_name||user.email} · {user.email}</p></div><span className="portal-role">{user.platform_role||"customer"}</span></div><div className="portal-form-grid"><label>Active organization<select value={activeOrg} onChange={e=>setActiveOrg(e.target.value)}><option value="">Personal access</option>{organizations.map(org=><option key={org.id} value={org.id}>{org.name} · {org.role}</option>)}</select></label><div><strong>Organization memberships</strong><p>{organizations.length} active organization{organizations.length===1?"":"s"} available to this identity.</p></div></div>{adminDenied&&<div className="portal-error">Your identity is authenticated, but this account does not have the platform administrator role required for this application.</div>}<p className="portal-muted">Private records are loaded only from authenticated API endpoints. The organization selector is context only; every backend endpoint must independently validate membership and permissions.</p><a className="portal-account-link" href={portalUrl("app")}>Open OneCore workspace ↗</a></section>:null}
   <PublicPortalContent portal={portal} content={content}/>
+  {user&&!adminDenied&&portal!=="admin"?<PortalWorkflowWorkspace portal={portal} organizationId={activeOrg} organizations={organizations}/>:null}
   <section className="portal-notice" id="contact"><strong>Independent deployment</strong><p>This application is independently deployable. Its public URL and shared API URL are configured in this application's environment. Public browsing does not require an account.</p></section></main><footer className="portal-footer">© {new Date().getFullYear()} OneCore Technologies Ltd · One Platform. Every Organization. Anywhere.</footer></div>;
 }
 
