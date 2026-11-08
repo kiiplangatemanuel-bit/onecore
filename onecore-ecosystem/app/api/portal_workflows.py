@@ -187,10 +187,28 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
     subscriptions = db.query(PortalWorkflowRecord).filter_by(
         portal_key="status", record_type="alert_subscription", status="active"
     ).all()
+    channel_preferences = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="status", record_type="notification_preference", status="active"
+    ).all()
+    email_opt_outs = set()
+    for preference in channel_preferences:
+        preference_payload = preference.payload or {}
+        preference_service = str(preference_payload.get("service") or "all").strip().casefold()
+        if (
+            str(preference_payload.get("channel") or "").strip().casefold() == "email"
+            and preference_payload.get("enabled") is False
+            and preference_service in {"*", "all", service.casefold()}
+        ):
+            email_opt_outs.add(preference.owner_user_id)
+    queued_users = set()
     for subscription in subscriptions:
+        if subscription.owner_user_id in queued_users:
+            continue
         preferences = subscription.payload or {}
         subscribed_service = str(preferences.get("service") or "").strip().casefold()
         if subscribed_service not in {"*", "all", service.casefold()}:
+            continue
+        if subscription.owner_user_id in email_opt_outs:
             continue
         recipient = db.query(User).filter_by(id=subscription.owner_user_id, is_active=True).first()
         if recipient is None or not recipient.email:
@@ -210,6 +228,7 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
             attempts=0,
             next_attempt_at=datetime.now(timezone.utc),
         ))
+        queued_users.add(recipient.id)
 
 
 def _out(row: PortalWorkflowRecord) -> dict:

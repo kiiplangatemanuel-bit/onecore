@@ -2,8 +2,8 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0061_status_alert_delivery_outbox"
-down_revision = "0060_organization_owner_membership_bootstrap"
+revision = "0060_status_alert_email_outbox"
+down_revision = "0059_tenant_domain_row_level_security"
 branch_labels = None
 depends_on = None
 
@@ -35,7 +35,7 @@ def upgrade():
         CREATE POLICY status_alert_fanout_subscription_select ON portal_workflow_records
         FOR SELECT USING (
             portal_key = 'status'
-            AND record_type = 'alert_subscription'
+            AND record_type IN ('alert_subscription', 'notification_preference')
             AND status = 'active'
             AND public.onecore_is_platform_admin()
         )

@@ -2,8 +2,8 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0060_organization_owner_membership_bootstrap"
-down_revision = "0059_tenant_domain_row_level_security"
+revision = "0061_organization_owner_membership_bootstrap"
+down_revision = "0060_status_alert_email_outbox"
 branch_labels = None
 depends_on = None
 

@@ -98,7 +98,6 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
         platform_role="customer",
     )
     organization = Organization(
-        owner_user_id=user.id,
         name=payload.organization_name.strip(), slug=payload.organization_slug,
         industry=payload.industry, country=payload.country, currency=payload.currency,
         timezone=payload.timezone, is_active=True,
@@ -106,6 +105,10 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
     try:
         db.add(user)
         db.add(organization)
+        db.flush()
+        # The user ID is assigned by the database during flush; persist it as
+        # the organization owner before the RLS-protected first membership insert.
+        organization.owner_user_id = user.id
         db.flush()
         set_verified_user_context(db, user.id)
         db.add(Membership(

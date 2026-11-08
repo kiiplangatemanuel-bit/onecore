@@ -78,7 +78,7 @@ GRANT UPDATE ON TABLE public.developer_webhook_deliveries TO onecore_webhook_wor
 
 Set `WEBHOOK_WORKER_DATABASE_URL` to a connection URI using this login. Do not grant table ownership, `BYPASSRLS`, schema creation, or broad write privileges. The API runtime role remains separate and uses the normal OneCore user-identity RLS context.
 
-## Status alert delivery outbox (migration 0061)
+## Status alert delivery outbox (migration 0060)
 
 Public Status incidents enqueue idempotent email deliveries for matching active Status alert subscriptions in the same transaction as the incident publication/update. The worker retries transient delivery failures with bounded exponential backoff (maximum eight attempts). Run `python -m app.workers.status_alert_delivery` as a private worker process; do not expose it through the API.
 
@@ -89,6 +89,8 @@ CREATE ROLE onecore_status_alert_worker LOGIN PASSWORD '<generated-secret>' NOBY
 GRANT CONNECT ON DATABASE postgres TO onecore_status_alert_worker;
 GRANT USAGE ON SCHEMA public TO onecore_status_alert_worker;
 GRANT SELECT, UPDATE ON TABLE public.status_alert_deliveries TO onecore_status_alert_worker;
+GRANT SELECT, INSERT ON TABLE public.status_alert_deliveries TO onecore_api;
+GRANT USAGE, SELECT ON SEQUENCE public.status_alert_deliveries_id_seq TO onecore_api;
 ```
 
 The worker verifies its connected PostgreSQL role at startup. The outbox RLS policy permits subscribers to read only their own deliveries; only the dedicated worker role can update delivery state. Configure SMTP using the existing email integration settings. Never reuse the API or Supabase service-role database credentials for this worker.
