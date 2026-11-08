@@ -256,6 +256,7 @@ def _attachment_download(attachment: SupportAttachment) -> dict:
 def create_public_ticket(payload: SupportTicketCreateIn, request: Request, db: Session = Depends(get_db)):
     enforce_public_write_limit(request, "support-ticket-create")
     access_token = secrets.token_urlsafe(36)
+    _set_guest_context(db, access_token)
     ticket = _create_ticket(payload, db, guest_token_hash=_hash_token(access_token))
     _set_guest_context(db, access_token)
     return {**_ticket_out(ticket, db, include_messages=True), "access_token": access_token}
