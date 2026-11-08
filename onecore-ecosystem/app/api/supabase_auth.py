@@ -106,7 +106,11 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
         UserMFAFactor.user_id == user.id,
         UserMFAFactor.enabled_at.isnot(None),
     ).first()
-    if mfa_factor:
+    supabase_mfa_enabled = any(
+        isinstance(factor, dict) and factor.get("status") == "verified"
+        for factor in (identity.get("factors") or [])
+    )
+    if mfa_factor or supabase_mfa_enabled:
         try:
             claims = jwt.decode(
                 payload.access_token, options={"verify_signature": False, "verify_exp": False},
