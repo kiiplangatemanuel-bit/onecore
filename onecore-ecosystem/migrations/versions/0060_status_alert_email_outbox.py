@@ -28,6 +28,17 @@ def upgrade():
     )
     op.create_index("ix_status_alert_due", "status_alert_deliveries", ["status", "next_attempt_at"])
     if op.get_bind().dialect.name == "postgresql":
+        # Platform administrators need to resolve matching personal subscriptions
+        # while publishing a public incident. This exposes only low-sensitivity
+        # Status preference records to that role.
+        op.execute("""
+            CREATE POLICY status_alert_admin_subscription_read ON portal_workflow_records
+            FOR SELECT USING (
+                portal_key = 'status'
+                AND record_type IN ('alert_subscription', 'notification_preference')
+                AND public.onecore_is_platform_admin()
+            )
+        """)
         op.execute("ALTER TABLE status_alert_deliveries ENABLE ROW LEVEL SECURITY")
         op.execute("ALTER TABLE status_alert_deliveries FORCE ROW LEVEL SECURITY")
         op.execute("""
@@ -57,6 +68,7 @@ def upgrade():
 
 def downgrade():
     if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP POLICY IF EXISTS status_alert_admin_subscription_read ON portal_workflow_records")
         for policy in (
             "status_alert_delivery_worker_delete",
             "status_alert_delivery_worker_update",
