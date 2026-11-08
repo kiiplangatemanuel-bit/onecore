@@ -12,8 +12,8 @@ def upgrade():
     op.create_table(
         "status_alert_deliveries",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("incident_record_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("incident_record_id", sa.Integer(), sa.ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), nullable=False),
         sa.Column("recipient_email", sa.String(length=320), nullable=False),
         sa.Column("event_key", sa.String(length=180), nullable=False),
         sa.Column("subject", sa.String(length=240), nullable=False),
