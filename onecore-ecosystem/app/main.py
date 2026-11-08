@@ -31,6 +31,7 @@ from app.api.ai_routes import router as ai_router
 from app.api.hr_payroll import router as hr_payroll_router
 from app.api.support import router as support_router
 from app.api.auth_workflows import router as auth_workflows_router
+from app.api.portal_auth import router as portal_auth_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
@@ -84,6 +85,7 @@ app.include_router(ai_router)
 app.include_router(hr_payroll_router)
 app.include_router(support_router)
 app.include_router(auth_workflows_router)
+app.include_router(portal_auth_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
@@ -163,7 +165,7 @@ async def platform_security_middleware(request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
     public_write_request = request.method == "POST" and request.url.path in {
-        "/api/v1/auth/register-organization", "/api/v1/support/public/tickets"
+        "/api/v1/auth/register-organization", "/api/v1/auth/exchange-portal-code", "/api/v1/support/public/tickets"
     }
     response = None
     if settings.force_https and request.url.scheme != "https":
