@@ -67,6 +67,7 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/complete" in paths
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/download" in paths
     assert "/api/v1/support/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan" in paths
+    assert "CLAMAV_HOST" in __import__("app.core.config", fromlist=["Settings"]).Settings.model_fields
 
 
 def test_support_organization_ticket_owner_loses_access_when_membership_is_revoked():
@@ -175,3 +176,20 @@ def test_support_attachments_remain_quarantined_until_security_review():
         assert denied.value.status_code == 409
         assert "security review" in denied.value.detail
     engine.dispose()
+
+
+
+def test_clamav_response_parser_accepts_clean_and_detects_infected_results():
+    from app.services.support_scanner import parse_clamav_response
+
+    assert parse_clamav_response(b"stream: OK\\x00") is False
+    assert parse_clamav_response(b"stream: Eicar-Test-Signature FOUND\\x00") is True
+
+
+def test_clamav_response_parser_fails_closed_on_errors():
+    from app.services.support_scanner import parse_clamav_response
+
+    with pytest.raises(ValueError):
+        parse_clamav_response(b"stream: ERROR\\x00")
+    with pytest.raises(ValueError):
+        parse_clamav_response(b"unexpected response")
