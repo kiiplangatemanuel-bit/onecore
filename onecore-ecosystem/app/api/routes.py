@@ -1,5 +1,5 @@
 import json, re, uuid, hashlib, secrets
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
