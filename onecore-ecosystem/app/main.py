@@ -35,6 +35,7 @@ from app.api.portal_auth import router as portal_auth_router
 from app.api.portal_workflows import router as portal_workflows_router
 from app.api.auth_mfa import router as auth_mfa_router
 from app.api.developer_api_keys import router as developer_api_keys_router
+from app.api.developer_webhooks import router as developer_webhooks_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
@@ -92,6 +93,7 @@ app.include_router(portal_auth_router)
 app.include_router(portal_workflows_router)
 app.include_router(auth_mfa_router)
 app.include_router(developer_api_keys_router)
+app.include_router(developer_webhooks_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
