@@ -16,3 +16,7 @@ def test_react_procurement_workspace_is_mounted_and_api_backed():
         assert endpoint in component
     assert 'path==="/procurement"?<ProcurementWorkspace' in app
     assert "SUPABASE_DB_URL" in component
+    assert "getToken" in component
+    legacy = (root / "onecore-ecosystem" / "app" / "web" / "procurement.html").read_text(encoding="utf-8")
+    assert "onecore_access_token" in legacy
+    assert "history.replaceState" in legacy
