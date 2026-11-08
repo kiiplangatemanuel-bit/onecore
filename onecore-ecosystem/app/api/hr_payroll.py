@@ -301,7 +301,8 @@ def _tiered_contribution(gross, tiers, rate_key):
     return rounded(total)
 
 
-def _calculate(employee, rules, period_start, period_end):
+def _calculate(employee, rules, period_start, period_end, overtime_minutes=0,
+               weighted_differential_minutes=ZERO, unpaid_leave_days=ZERO):
     total_days = (period_end - period_start).days + 1
     hired = employee.hire_date.date() if isinstance(employee.hire_date, datetime) else employee.hire_date
     terminated = employee.termination_date.date() if isinstance(employee.termination_date, datetime) else employee.termination_date
@@ -314,25 +315,49 @@ def _calculate(employee, rules, period_start, period_end):
     allowances = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_allowances or {}).items()}
     benefits = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_benefits or {}).items()}
     prorated_salary = rounded(dec(employee.base_salary) * factor)
-    gross = rounded(prorated_salary + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
+    overtime_minutes = int(overtime_minutes or 0)
+    weighted_differential_minutes = dec(weighted_differential_minutes)
+    overtime_pay = ZERO
+    shift_pay = ZERO
+    if overtime_minutes or weighted_differential_minutes:
+        standard_hours = dec(rules.get("standard_monthly_hours"))
+        if standard_hours <= 0:
+            raise HTTPException(409, "Configure standard monthly hours in the approved payroll rules before calculating overtime or shift premiums")
+        hourly_rate = dec(employee.base_salary) / standard_hours
+        if overtime_minutes:
+            multiplier = dec(rules.get("overtime_multiplier"))
+            if multiplier <= 0:
+                raise HTTPException(409, "Configure an overtime multiplier in the approved payroll rules before calculating overtime")
+            overtime_pay = rounded(hourly_rate * Decimal(overtime_minutes) / Decimal(60) * multiplier)
+        if weighted_differential_minutes:
+            shift_pay = rounded(hourly_rate * weighted_differential_minutes / Decimal(60))
+    unpaid_leave_days = min(dec(unpaid_leave_days), Decimal(eligible_days))
+    unpaid_leave_deduction = rounded((dec(employee.base_salary) / Decimal(total_days)) * unpaid_leave_days)
+    gross = rounded(prorated_salary + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO) + overtime_pay + shift_pay)
+    contribution_base = max(ZERO, gross - unpaid_leave_deduction)
     pension = rounded(dec(employee.pension_contribution) * factor)
     deductible_pension = min(pension, dec(rules["pension_tax_deductible_limit"]))
-    taxable = max(ZERO, gross - deductible_pension)
+    taxable = max(ZERO, contribution_base - deductible_pension)
     paye = max(ZERO, _progressive_tax(taxable, rules["paye_bands"]) - dec(rules["personal_relief"]))
     paye = rounded(paye)
-    nssf_employee = _tiered_contribution(gross, rules["nssf_tiers"], "employee_rate")
-    nssf_employer = _tiered_contribution(gross, rules["nssf_tiers"], "employer_rate")
-    shif = rounded(gross * dec(rules["shif_rate"]))
-    housing_employee = rounded(gross * dec(rules["housing_levy_employee_rate"]))
-    housing_employer = rounded(gross * dec(rules["housing_levy_employer_rate"]))
-    deductions = rounded(paye + nssf_employee + shif + housing_employee + pension)
+    nssf_employee = _tiered_contribution(contribution_base, rules["nssf_tiers"], "employee_rate")
+    nssf_employer = _tiered_contribution(contribution_base, rules["nssf_tiers"], "employer_rate")
+    shif = rounded(contribution_base * dec(rules["shif_rate"]))
+    housing_employee = rounded(contribution_base * dec(rules["housing_levy_employee_rate"]))
+    housing_employer = rounded(contribution_base * dec(rules["housing_levy_employer_rate"]))
+    deductions = rounded(paye + nssf_employee + shif + housing_employee + pension + unpaid_leave_deduction)
     net = rounded(gross - deductions)
     if net < 0:
         raise HTTPException(422, f"Payroll deductions exceed gross pay for employee {employee.employee_number}")
     return {"employee_id": employee.id, "employee_number": employee.employee_number,
             "employee_name": (employee.first_name + " " + employee.last_name).strip(),
             "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
-            "proration_days": eligible_days, "period_days": total_days, "proration_factor": str(factor), "base_salary_prorated": str(prorated_salary),
+            "proration_days": eligible_days, "period_days": total_days, "proration_factor": str(factor),
+            "base_salary_prorated": str(prorated_salary), "overtime_minutes": overtime_minutes,
+            "overtime_pay": str(overtime_pay), "shift_differential_minutes": str(weighted_differential_minutes),
+            "shift_differential_pay": str(shift_pay), "unpaid_leave_days": str(unpaid_leave_days),
+            "unpaid_leave_deduction": str(unpaid_leave_deduction),
+            "earned_gross": str(contribution_base),
             "nssf_employee": str(nssf_employee), "nssf_employer": str(nssf_employer),
             "shif_employee": str(shif), "housing_levy_employee": str(housing_employee),
             "housing_levy_employer": str(housing_employer), "pension_employee": str(pension),
