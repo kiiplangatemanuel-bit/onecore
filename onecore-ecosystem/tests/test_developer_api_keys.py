@@ -167,3 +167,28 @@ def test_developer_api_key_cannot_be_managed_by_another_tenant():
         assert denied.value.status_code == 404
         assert db.query(DeveloperApiKey).filter_by(id=created["id"]).one().revoked_at is None
     engine.dispose()
+
+
+def test_developer_api_key_stops_working_when_issuing_user_is_deactivated():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="Tenant A", slug="tenant-a")
+        db.add(org)
+        db.flush()
+        developer = _user(db, org, "dev@example.com")
+        db.commit()
+        created = create_developer_api_key(
+            DeveloperApiKeyCreate(organization_id=org.id, name="Deactivation test"),
+            developer, db,
+        )
+        developer.is_active = False
+        db.commit()
+        request = Request({
+            "type": "http", "method": "GET", "path": "/api/v1/developer/v1/organization",
+            "headers": [], "query_string": b"", "scheme": "https",
+            "server": ("api.example.com", 443), "client": ("127.0.0.1", 1234),
+        })
+        with pytest.raises(HTTPException) as denied:
+            current_developer_api_key(request, created["secret"], db)
+        assert denied.value.status_code == 401
+    engine.dispose()
