@@ -25,11 +25,13 @@ Set `VITE_API_BASE_URL` to the deployed HTTPS API origin. Set the relevant porta
 
 Set backend CORS to the exact origins of every deployed frontend. Do not use wildcard CORS with bearer-token authentication. Do not put Supabase service-role keys, database credentials, signing secrets or provider credentials in any `VITE_*` variable.
 
-## Current implementation boundary
+## Public and authenticated access model
 
-The packages currently share a public/authenticated portal shell and use the existing OneCore API login and `/auth/me` identity endpoint. The Superadmin portal additionally calls the existing `/api/v1/admin/overview` endpoint, which enforces the backend platform-admin role. This is not yet a full SSO implementation: the existing frontend stores bearer tokens in per-origin session storage, so signing into one subdomain does not automatically sign a user into another. Cross-domain SSO requires a backend-issued, short-lived, single-use authorization-code exchange (or a shared Supabase Auth session) and explicit allowed redirect origins.
+All nine public applications use the shared portal shell. Public sections render without an account; the Status portal checks the public `/health` endpoint for API reachability. Support retains its public ticket submission and token-protected guest ticket access plus authenticated ticket history and replies. Authenticated portal views validate the shared OneCore API session with `/api/v1/auth/me` and load only the memberships returned by `/api/v1/organizations`. The organization selector is display context only: it is never treated as authorization, and backend endpoints must independently verify membership and permission.
 
-Likewise, the portal shells do not pretend that missing domain workflows are live. Ticket creation and replies, status subscriptions and incident management, developer application/key lifecycle, community posts, trust disclosures, event bookings, careers applications and partner CRM workflows need their dedicated backend APIs, database models, permissions, migrations and tests before being enabled. The current public/authenticated portal structure is the deployment and UI foundation for those modules.
+This is shared API identity, not cross-domain SSO. Browser `sessionStorage` is isolated per origin, so each portal currently requires a sign-in on that origin. Do not pass bearer tokens in redirect URLs. A secure cross-domain SSO flow still requires a backend-issued, short-lived, single-use authorization-code exchange bound to a configured redirect-origin allowlist (or a shared Supabase Auth session).
+
+The public/authenticated layout is implemented, but the following domain-specific private workflows are not yet delivered by this change: Status alert subscriptions and tenant-specific incidents; developer application/API-key/webhook/sandbox lifecycle; private organization documentation; community posting/groups; confidential trust case submission and case tracking; event registration and attendance; careers applicant profiles/applications; partner leads/referrals/agreements. These must not be presented as live until their backend APIs, database models, tenant/role authorization, migrations and tests are implemented. Support attachments are also not enabled by the current support API.
 
 ## Supabase and backend
 
