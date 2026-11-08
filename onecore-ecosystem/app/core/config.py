@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     email_username: str = ""
     email_password: str = ""
     email_from: str = ""
+    email_use_starttls: bool = True
+    public_site_url: str = ""
 
     integration_sms_enabled: bool = False
     sms_base_url: str = ""
