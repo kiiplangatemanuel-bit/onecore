@@ -287,7 +287,7 @@ def create_employee(payload: EmployeeIn, membership=Depends(active_membership),
 
 
 class EmploymentChangeIn(BaseModel):
-    status: str = Field(pattern="^(active|on_leave|terminated)$")
+    status: str = Field(pattern="^(active|terminated)$")
     termination_date: date | None = None
     reason: str = Field(min_length=3, max_length=500)
 
