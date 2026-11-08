@@ -743,14 +743,53 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     employees=q.all()
     if len(employees)!=len(payload.employee_ids): raise HTTPException(404,"One or more active employees were not found in this tenant, branch or currency")
     if any(not can_access_branch(membership,x.branch_id) for x in employees): raise HTTPException(404,"Employee not found")
+    employee_ids=[x.id for x in employees]
+    pending_attendance=db.query(HRAttendance).filter(
+        HRAttendance.organization_id==membership.organization_id,
+        HRAttendance.employee_id.in_(employee_ids),
+        HRAttendance.attendance_date>=payload.period_start,
+        HRAttendance.attendance_date<=payload.period_end,
+        HRAttendance.approval_status=="pending").first()
+    if pending_attendance:
+        raise HTTPException(409,"Approve or reject all attendance records for the selected employees before payroll calculation")
+    attendance_rows=db.query(HRAttendance).filter(
+        HRAttendance.organization_id==membership.organization_id,
+        HRAttendance.employee_id.in_(employee_ids),
+        HRAttendance.attendance_date>=payload.period_start,
+        HRAttendance.attendance_date<=payload.period_end,
+        HRAttendance.approval_status=="approved",
+        HRAttendance.status=="present").all()
+    attendance_by_employee={}
+    for record in attendance_rows:
+        attendance_by_employee.setdefault(record.employee_id,[]).append(record)
+    unpaid_rows=db.query(HRLeaveRequest).filter(
+        HRLeaveRequest.organization_id==membership.organization_id,
+        HRLeaveRequest.employee_id.in_(employee_ids),
+        HRLeaveRequest.leave_type=="unpaid",HRLeaveRequest.status=="approved",
+        HRLeaveRequest.start_date<=end,HRLeaveRequest.end_date>=start).all()
+    unpaid_by_employee={}
+    for leave_row in unpaid_rows:
+        req_start,req_end=leave_row.start_date.date(),leave_row.end_date.date()
+        req_days=max(1,(req_end-req_start).days+1)
+        overlap_start=max(req_start,payload.period_start)
+        overlap_end=min(req_end,payload.period_end)
+        overlap_days=max(0,(overlap_end-overlap_start).days+1)
+        if overlap_days:
+            prorated_days=dec(leave_row.days)*Decimal(overlap_days)/Decimal(req_days)
+            unpaid_by_employee[leave_row.employee_id]=unpaid_by_employee.get(leave_row.employee_id,ZERO)+prorated_days
     snapshots=[]
     for employee in employees:
-        item=_calculate(employee,rules.rules,payload.period_start,payload.period_end); item["rule_set_id"]=rules.id
+        records=attendance_by_employee.get(employee.id,[])
+        overtime_minutes=sum(x.overtime_minutes for x in records)
+        weighted_differential_minutes=sum((Decimal(x.differential_minutes)*dec(x.differential_rate) for x in records),ZERO)
+        item=_calculate(employee,rules.rules,payload.period_start,payload.period_end,
+            overtime_minutes,weighted_differential_minutes,unpaid_by_employee.get(employee.id,ZERO))
+        item["rule_set_id"]=rules.id
         snapshots.append(item)
     gross=sum((dec(x["gross_pay"]) for x in snapshots),ZERO)
     deductions=sum((dec(x["total_deductions"]) for x in snapshots),ZERO)
     net=sum((dec(x["net_pay"]) for x in snapshots),ZERO)
-    employer=sum((dec(x["gross_pay"])+dec(x["nssf_employer"])+dec(x["housing_levy_employer"]) for x in snapshots),ZERO)
+    employer=sum((dec(x["earned_gross"])+dec(x["nssf_employer"])+dec(x["housing_levy_employer"]) for x in snapshots),ZERO)
     row=PayrollRun(organization_id=membership.organization_id,branch_id=payload.branch_id,rule_set_id=rules.id,
         period_start=start,period_end=end,status="draft",currency=rules.currency,employee_count=len(snapshots),
         gross_total=rounded(gross),deductions_total=rounded(deductions),net_total=rounded(net),
@@ -764,7 +803,8 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
             db.add(PayrollPayslip(organization_id=membership.organization_id,payroll_run_id=row.id,
                 employee_id=item["employee_id"],employee_number=item["employee_number"],employee_name=item["employee_name"],
                 currency=rules.currency,gross_pay=dec(item["gross_pay"]),taxable_pay=dec(item["taxable_pay"]),
-                paye=dec(item["paye"]),nssf_employee=dec(item["nssf_employee"]),shif_employee=dec(item["shif_employee"]),
+                paye=dec(item["paye"]),overtime_pay=dec(item["overtime_pay"]),shift_differential_pay=dec(item["shift_differential_pay"]),
+                unpaid_leave_deduction=dec(item["unpaid_leave_deduction"]),nssf_employee=dec(item["nssf_employee"]),shif_employee=dec(item["shif_employee"]),
                 housing_levy_employee=dec(item["housing_levy_employee"]),pension_employee=dec(item["pension_employee"]),
                 total_deductions=dec(item["total_deductions"]),net_pay=dec(item["net_pay"]),
                 nssf_employer=dec(item["nssf_employer"]),housing_levy_employer=dec(item["housing_levy_employer"]),
