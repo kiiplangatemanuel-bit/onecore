@@ -78,8 +78,8 @@ class EmployeeIn(BaseModel):
     @field_validator("recurring_allowances", "recurring_benefits")
     @classmethod
     def valid_components(cls, values):
-        if len(values) > 30 or any(not k.strip() or len(k) > 80 or dec(v) < 0 for k, v in values.items()):
-            raise ValueError("Pay components must have named, non-negative amounts")
+        if len(values) > 30 or any(not k.strip() or len(k) > 80 or not dec(v).is_finite() or dec(v) < 0 or dec(v).quantize(CENT) != dec(v) for k, v in values.items()):
+            raise ValueError("Pay components must have named, finite, non-negative amounts with at most two decimal places")
         return values
 
 
@@ -123,6 +123,8 @@ class RuleSetIn(BaseModel):
             raise ValueError("Effective end must not precede effective start")
         previous = Decimal("0")
         for index, band in enumerate(self.paye_bands):
+            if not {"lower_bound", "upper_bound", "rate"}.issubset(band):
+                raise ValueError("Each PAYE band requires lower_bound, upper_bound and rate")
             lower = dec(band.get("lower_bound"))
             upper = None if band.get("upper_bound") is None else dec(band["upper_bound"])
             rate = dec(band.get("rate"))
@@ -136,6 +138,8 @@ class RuleSetIn(BaseModel):
             raise ValueError("The final PAYE band must be open-ended")
         previous = Decimal("0")
         for tier in self.nssf_tiers:
+            if not {"lower_bound", "upper_bound", "employee_rate", "employer_rate"}.issubset(tier):
+                raise ValueError("Each NSSF tier requires lower_bound, upper_bound, employee_rate and employer_rate")
             lower, upper = dec(tier.get("lower_bound")), dec(tier.get("upper_bound"))
             if lower != previous or upper <= lower:
                 raise ValueError("NSSF tiers must be contiguous and increasing")
@@ -154,6 +158,11 @@ class RuleSetIn(BaseModel):
                 raise ValueError("Evidence must link to official HTTPS KRA, NSSF or SHA sources")
             if not item.get("title") or not item.get("effective_date") or not item.get("checked_on"):
                 raise ValueError("Each statutory source needs title, effective_date and checked_on")
+            try:
+                date.fromisoformat(str(item["effective_date"]))
+                date.fromisoformat(str(item["checked_on"]))
+            except ValueError:
+                raise ValueError("Statutory evidence dates must use YYYY-MM-DD")
             authorities.add(authority)
         if not {"KRA", "NSSF", "SHA"}.issubset(authorities):
             raise ValueError("Current official KRA, NSSF and SHA evidence is required")
