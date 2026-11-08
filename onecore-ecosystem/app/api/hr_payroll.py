@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, HRShift, HRAttendance
 from app.core.models import AuditEvent, Branch, Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingFiscalPeriod
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -140,6 +140,8 @@ class RuleSetIn(BaseModel):
     shif_rate: Decimal = Field(ge=0, le=1, decimal_places=6)
     housing_levy_employee_rate: Decimal = Field(ge=0, le=1, decimal_places=6)
     housing_levy_employer_rate: Decimal = Field(ge=0, le=1, decimal_places=6)
+    standard_monthly_hours: Decimal | None = Field(default=None, gt=0, max_digits=8, decimal_places=2)
+    overtime_multiplier: Decimal | None = Field(default=None, gt=0, le=5, max_digits=6, decimal_places=3)
     source_evidence: list[dict] = Field(min_length=3, max_length=20)
 
     @model_validator(mode="after")
@@ -437,7 +439,9 @@ def create_rule_set(payload: RuleSetIn, membership=Depends(active_membership),
         "personal_relief":str(payload.personal_relief),"pension_tax_deductible_limit":str(payload.pension_tax_deductible_limit),
         "nssf_tiers":[{k:str(v) for k,v in t.items()} for t in payload.nssf_tiers],
         "shif_rate":str(payload.shif_rate),"housing_levy_employee_rate":str(payload.housing_levy_employee_rate),
-        "housing_levy_employer_rate":str(payload.housing_levy_employer_rate)}
+        "housing_levy_employer_rate":str(payload.housing_levy_employer_rate),
+        "standard_monthly_hours":str(payload.standard_monthly_hours) if payload.standard_monthly_hours is not None else None,
+        "overtime_multiplier":str(payload.overtime_multiplier) if payload.overtime_multiplier is not None else None}
     row=PayrollRuleSet(organization_id=membership.organization_id,version=(version[0] if version else 0)+1,
         effective_from=datetime.combine(payload.effective_from,time.min,tzinfo=timezone.utc),
         effective_to=datetime.combine(payload.effective_to,time.max,tzinfo=timezone.utc) if payload.effective_to else None,
