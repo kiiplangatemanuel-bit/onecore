@@ -60,6 +60,6 @@ def test_status_alert_worker_retries_failures_with_bounded_backoff(tmp_path, mon
         delivery = db.query(StatusAlertDelivery).one()
         assert delivery.status == "pending"
         assert delivery.attempts == 1
-        assert delivery.next_attempt_at > datetime.now(timezone.utc)
+        assert delivery.next_attempt_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
         assert delivery.last_error == "TimeoutError"
     engine.dispose()
