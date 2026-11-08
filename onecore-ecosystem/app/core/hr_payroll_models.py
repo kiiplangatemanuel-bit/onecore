@@ -35,6 +35,8 @@ class HREmployee(Base):
     recurring_allowances: Mapped[dict] = mapped_column(JSON, default=dict)
     recurring_benefits: Mapped[dict] = mapped_column(JSON, default=dict)
     pension_contribution: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    scheduled_minutes_per_day: Mapped[int] = mapped_column(default=480)
+    overtime_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
