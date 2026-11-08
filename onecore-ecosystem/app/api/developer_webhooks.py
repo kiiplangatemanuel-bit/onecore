@@ -63,10 +63,14 @@ def _active_developer(db: Session, user: User, organization_id: int):
 
 
 def _validate_endpoint(url: str):
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        raise HTTPException(422, "Webhook destination URL is invalid")
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise HTTPException(422, "Webhook destination must be an HTTPS URL without embedded credentials")
-    if parsed.port not in (None, 443):
+    if port not in (None, 443):
         raise HTTPException(422, "Webhook destination must use the standard HTTPS port")
     if len(url) > 2048 or parsed.fragment:
         raise HTTPException(422, "Webhook destination URL is invalid")
@@ -106,7 +110,7 @@ def activate_webhook(
     record = db.query(PortalWorkflowRecord).filter_by(
         id=payload.workflow_record_id, portal_key="developers",
         record_type="webhook",
-    ).first()
+    ).with_for_update().first()
     if not record:
         raise HTTPException(404, "Webhook not found")
     _active_developer(db, user, record.organization_id)
@@ -150,7 +154,7 @@ def rotate_webhook_secret(
 ):
     record = db.query(PortalWorkflowRecord).filter_by(
         id=workflow_record_id, portal_key="developers", record_type="webhook"
-    ).first()
+    ).with_for_update().first()
     if not record:
         raise HTTPException(404, "Webhook not found")
     _active_developer(db, user, record.organization_id)
@@ -429,6 +433,7 @@ def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
     secret = _decrypt(endpoint.secret_encrypted)
     signature = hmac.new(secret.encode("utf-8"), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
     delivery.attempts += 1
+    delivery.response_status = None
     try:
         with httpx.Client(timeout=httpx.Timeout(8.0, connect=3.0), follow_redirects=False, trust_env=False) as client:
             response = client.post(url, content=body, headers={
@@ -457,19 +462,21 @@ def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
 
 
 def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
-    """Worker entry point. A trusted worker sets its RLS bypass flag transaction-locally."""
+    """Claim and process one locked delivery at a time for safe multi-worker concurrency."""
     if not 1 <= limit <= 250:
         raise ValueError("Webhook batch size must be between 1 and 250")
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         role = db.execute(text("SELECT current_user")).scalar_one()
         if role != "onecore_webhook_worker":
             raise RuntimeError("Webhook delivery requires the dedicated onecore_webhook_worker database role")
-    rows = db.query(DeveloperWebhookDelivery).filter(
-        DeveloperWebhookDelivery.status == "pending",
-        DeveloperWebhookDelivery.next_attempt_at <= _now(),
-    ).order_by(DeveloperWebhookDelivery.next_attempt_at).with_for_update(skip_locked=True).limit(limit).all()
     results = []
-    for row in rows:
+    for _ in range(limit):
+        row = db.query(DeveloperWebhookDelivery).filter(
+            DeveloperWebhookDelivery.status == "pending",
+            DeveloperWebhookDelivery.next_attempt_at <= _now(),
+        ).order_by(DeveloperWebhookDelivery.next_attempt_at).with_for_update(skip_locked=True).first()
+        if row is None:
+            break
         try:
             results.append(_deliver_one(db, row))
         except Exception as exc:
@@ -478,6 +485,7 @@ def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
             row.status = "failed" if row.attempts >= MAX_ATTEMPTS else "pending"
             row.next_attempt_at = _now() + timedelta(seconds=min(3600, 15 * (2 ** (row.attempts - 1))))
             results.append({"id": row.id, "status": row.status, "attempts": row.attempts})
+        # Release this row's lock only after its HTTP attempt and durable state update.
         db.commit()
     return results
 
