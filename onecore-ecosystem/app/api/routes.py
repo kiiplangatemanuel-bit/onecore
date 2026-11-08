@@ -1967,12 +1967,12 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             raise HTTPException(409, f"Return quantity exceeds remaining sold quantity for line {original.id}")
         if item.quantity == remaining:
             amount = money(Decimal(str(original.line_total)) - returned_value)
-            discount_amount = money(Decimal(str(original.discount_amount)) - returned_discount)
+            discount_amount = money(Decimal(str(original.discount_amount)) + Decimal(str(original.loyalty_discount_amount)) - returned_discount)
             tax_amount = money(Decimal(str(original.tax_amount)) - returned_tax)
         else:
             ratio = Decimal(str(item.quantity)) / Decimal(str(original.quantity))
             amount = money(Decimal(str(original.line_total)) * ratio)
-            discount_amount = money(Decimal(str(original.discount_amount)) * ratio)
+            discount_amount = money((Decimal(str(original.discount_amount)) + Decimal(str(original.loyalty_discount_amount))) * ratio)
             tax_amount = money(Decimal(str(original.tax_amount)) * ratio)
         total += amount
         prepared.append((original, item.quantity, amount, discount_amount, tax_amount))
