@@ -9,6 +9,7 @@ depends_on = None
 
 _SPECIALIZED_TABLES = {
     "memberships",
+    "audit_events",
     "portal_workflow_records",
     "support_tickets",
     "support_messages",
@@ -101,6 +102,48 @@ def upgrade():
         )
     """)
 
+    # Audit logs are append-only and include authenticated and guest Support events.
+    op.execute("ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE audit_events FORCE ROW LEVEL SECURITY")
+    op.execute("""
+        CREATE POLICY audit_event_select ON audit_events
+        FOR SELECT USING (
+            actor_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+            OR (
+                organization_id IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = audit_events.organization_id
+                      AND m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                      AND m.is_active = true
+                )
+            )
+            OR public.onecore_is_platform_admin()
+        )
+    """)
+    op.execute("""
+        CREATE POLICY audit_event_insert ON audit_events
+        FOR INSERT WITH CHECK (
+            (
+                actor_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                AND (
+                    organization_id IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM memberships m
+                        WHERE m.organization_id = audit_events.organization_id
+                          AND m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND m.is_active = true
+                    )
+                    OR public.onecore_is_platform_admin()
+                )
+            )
+            OR (
+                actor_user_id IS NULL AND organization_id IS NULL
+                AND NULLIF(current_setting('app.support_guest_token_hash', true), '') IS NOT NULL
+            )
+        )
+    """)
+
     preparer = bind.dialect.identifier_preparer
     user_id = "NULLIF(current_setting('app.user_id', true), '')::integer"
     for table_name in _tenant_tables(bind):
@@ -147,6 +190,10 @@ def downgrade():
         op.execute(f"DROP POLICY IF EXISTS tenant_scope_access ON {table}")
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    for policy in ("audit_event_insert", "audit_event_select"):
+        op.execute(f"DROP POLICY IF EXISTS {policy} ON audit_events")
+    op.execute("ALTER TABLE audit_events NO FORCE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE audit_events DISABLE ROW LEVEL SECURITY")
     for policy in ("membership_delete", "membership_update", "membership_insert", "membership_select"):
         op.execute(f"DROP POLICY IF EXISTS {policy} ON memberships")
     op.execute("ALTER TABLE memberships NO FORCE ROW LEVEL SECURITY")
