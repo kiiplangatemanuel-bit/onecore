@@ -120,3 +120,13 @@ def test_registration_and_verification_routes_are_registered():
     paths = set(app.openapi()["paths"])
     assert "/api/v1/auth/register-organization" in paths
     assert "/api/v1/auth/verify-email" in paths
+
+
+
+def test_registration_route_keeps_json_request_body_contract():
+    from app.main import app
+
+    operation = app.openapi()["paths"]["/api/v1/auth/register-organization"]["post"]
+    assert "requestBody" in operation
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert schema["$ref"].endswith("/OrganizationRegistrationIn")

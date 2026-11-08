@@ -55,7 +55,6 @@ def _send_verification_email(email: str, full_name: str, token: str):
         smtp.send_message(message)
 
 
-@router.post("/register-organization", status_code=202)
 def _send_password_reset_email(email: str, full_name: str, token: str):
     required = (
         settings.integration_email_enabled and settings.email_host
@@ -70,10 +69,10 @@ def _send_password_reset_email(email: str, full_name: str, token: str):
     message["From"] = settings.email_from
     message["To"] = email
     message.set_content(
-        f"Hello {full_name or 'OneCore user'},\\n\\n"
+        f"Hello {full_name or 'OneCore user'},\n\n"
         "A password reset was requested for your OneCore account. "
-        "Use this link within 30 minutes to choose a new password:\\n\\n"
-        f"{reset_url}\\n\\n"
+        "Use this link within 30 minutes to choose a new password:\n\n"
+        f"{reset_url}\n\n"
         "If you did not request this change, ignore this email. Your current password will remain active."
     )
     with smtplib.SMTP(settings.email_host, settings.email_port, timeout=15) as smtp:
@@ -84,6 +83,7 @@ def _send_password_reset_email(email: str, full_name: str, token: str):
         smtp.send_message(message)
 
 
+@router.post("/register-organization", status_code=202)
 def register_organization(payload: OrganizationRegistrationIn, db: Session = Depends(get_db)):
     email = str(payload.email).lower()
     if db.query(User).filter(func.lower(User.email) == email).first():
