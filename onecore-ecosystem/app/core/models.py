@@ -1717,6 +1717,8 @@ class DeveloperWebhookEndpoint(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     workflow_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), unique=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    endpoint_url: Mapped[str] = mapped_column(String(2048))
+    events: Mapped[list] = mapped_column(JSON, default=list)
     secret_encrypted: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
