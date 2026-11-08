@@ -1555,9 +1555,10 @@ class SupportTicket(Base):
     organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     assigned_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
-    guest_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    guest_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("uq_support_ticket_guest_token_hash", "guest_token_hash", unique=True),)
 
 
 class SupportMessage(Base):
