@@ -14,7 +14,7 @@ from app.main import app
 def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     db = TestingSession()
     org = Organization(name="Payroll Test", slug="payroll-test", industry="general")
     users = [
