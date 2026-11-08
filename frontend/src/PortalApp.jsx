@@ -26,6 +26,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   const [user,setUser]=useState(null),[checking,setChecking]=useState(Boolean(getToken())),[showLogin,setShowLogin]=useState(false),[error,setError]=useState("");
   useEffect(()=>{if(!getToken()){setChecking(false);return;}api("/api/v1/auth/me").then(setUser).catch(()=>{clearToken();setUser(null);}).finally(()=>setChecking(false));},[]);
   const adminDenied=portal==="admin" && user && !["root_superadmin","platform_admin"].includes(user.platform_role);
+  if(portal!=="support" && portal!=="admin") return <PortalExperience portal={portal}/>;
   async function loadAdmin(){try{const overview=await api("/api/v1/admin/overview");setError("");return overview;}catch(e){setError(e.message);return null;}}
   useEffect(()=>{if(portal==="admin"&&user)loadAdmin();},[portal,user]);
   function signOut(){clearToken();setUser(null);}
