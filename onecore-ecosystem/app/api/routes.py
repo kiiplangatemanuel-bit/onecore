@@ -2028,7 +2028,6 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
             status="pending" if item.method == "mpesa" else "recorded"))
-    from app.core.pos_completion_models import POSCustomerSale, POSCustomer, POSLoyaltyEntry
     customer_sale=db.query(POSCustomerSale).filter_by(organization_id=membership.organization_id,sale_id=sale.id).first()
     if customer_sale:
         earned=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
@@ -2037,7 +2036,6 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="reversal").scalar() or 0)
         cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
             organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
-        refund_ratio=min(Decimal("1"),Decimal(str(cumulative_refunds))/Decimal(str(sale.total_amount))) if Decimal(str(sale.total_amount))>0 else Decimal("1")
         redeemed=int(sale.loyalty_points_redeemed or 0)
         already_restored=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
             organization_id=membership.organization_id,customer_id=customer_sale.customer_id,
