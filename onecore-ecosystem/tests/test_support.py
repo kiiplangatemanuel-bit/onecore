@@ -109,10 +109,10 @@ def test_support_organization_ticket_owner_loses_access_when_membership_is_revok
 def test_support_rls_migration_is_part_of_the_alembic_chain():
     from pathlib import Path
 
-    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0053_support_row_level_security.py"
+    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0054_support_row_level_security.py"
     source = migration.read_text()
-    assert 'revision = "0053_support_row_level_security"' in source
-    assert 'down_revision = "0052_portal_workflow_records"' in source
+    assert 'revision = "0054_support_row_level_security"' in source
+    assert 'down_revision = "0053_user_mfa"' in source
     assert "support_ticket_select" in source
     assert "support_message_insert" in source
     assert "ENABLE ROW LEVEL SECURITY" in source
@@ -139,10 +139,10 @@ def test_support_attachment_metadata_constraints_and_safe_filename():
 def test_support_attachment_migration_follows_support_rls_and_quarantines_metadata():
     from pathlib import Path
 
-    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0054_support_attachments.py"
+    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0055_support_attachments.py"
     source = migration.read_text()
-    assert 'revision = "0054_support_attachments"' in source
-    assert 'down_revision = "0053_support_row_level_security"' in source
+    assert 'revision = "0055_support_attachments"' in source
+    assert 'down_revision = "0054_support_row_level_security"' in source
     assert "support_attachment_select" in source
     assert "support_attachment_insert" in source
     assert "support_attachment_update" in source
