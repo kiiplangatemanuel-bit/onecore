@@ -180,6 +180,7 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
     title = str(payload.get("title") or "Service incident").strip()
     severity = str(payload.get("severity") or "information").strip()
     summary = str(payload.get("summary") or "").strip()
+    set_status_alert_fanout_context(db, incident.id)
     subscriptions = db.query(PortalWorkflowRecord).filter_by(
         portal_key="status", record_type="alert_subscription", status="active"
     ).all()
