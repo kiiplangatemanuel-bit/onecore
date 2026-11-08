@@ -26,10 +26,39 @@ def create_access_token(user_id: int, auth_version: int = 0) -> str:
 def _apply_database_identity_context(session, transaction, connection):
     """Set transaction-local identity for PostgreSQL RLS policies."""
     user_id = session.info.get("onecore_user_id")
-    if user_id is not None and connection.dialect.name == "postgresql":
-        connection.execute(
-            text("SELECT set_config('app.user_id', :user_id, true)"),
-            {"user_id": str(user_id)},
+    organization_id = session.info.get("onecore_organization_id")
+    if connection.dialect.name == "postgresql":
+        if user_id is not None:
+            connection.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(user_id)},
+            )
+        if organization_id is not None:
+            connection.execute(
+                text("SELECT set_config('app.organization_id', :organization_id, true)"),
+                {"organization_id": str(organization_id)},
+            )
+
+
+def set_verified_organization_context(db: Session, organization_id: int) -> None:
+    """Scope trusted integration/worker transactions to a previously verified tenant."""
+    value = int(organization_id)
+    if value <= 0:
+        raise ValueError("A positive organization ID is required")
+    db.info["onecore_organization_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.organization_id', :organization_id, true)"),
+            {"organization_id": str(value)},
+        )
+
+
+def set_provider_callback_token_context(db: Session, token_hash: str) -> None:
+    """Allow one callback-token-bound row lookup before its tenant is known."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.provider_callback_token_hash', :token_hash, true)"),
+            {"token_hash": token_hash},
         )
 
 
