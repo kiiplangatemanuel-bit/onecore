@@ -5,7 +5,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_organization_owner_migration_follows_tenant_rls():
-    source = (ROOT / "migrations" / "versions" / "0060_organization_owner_membership_bootstrap.py").read_text()
+    source = (ROOT / "migrations" / "versions" / "0061_organization_owner_membership_bootstrap.py").read_text()
     assert 'revision = "0060_organization_owner_membership_bootstrap"' in source
     assert 'down_revision = "0059_tenant_domain_row_level_security"' in source
     assert "UPDATE organizations o" in source
