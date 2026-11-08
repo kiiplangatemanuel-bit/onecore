@@ -63,11 +63,12 @@ def test_hr_payroll_routes_are_registered():
     expected = {
         "/api/v1/hr/employees", "/api/v1/hr/employees/{employee_id}/employment-status",
         "/api/v1/hr/employees/{employee_id}/leave", "/api/v1/hr/shifts",
+        "/api/v1/hr/employees/{employee_id}/default-shift",
         "/api/v1/hr/attendance", "/api/v1/hr/attendance/{attendance_id}/decision",
         "/api/v1/hr/leave-requests", "/api/v1/hr/leave-requests/{request_id}/decision",
         "/api/v1/payroll/rule-sets", "/api/v1/payroll/rule-sets/{rule_set_id}/submit",
         "/api/v1/payroll/rule-sets/{rule_set_id}/approve", "/api/v1/payroll/runs",
-        "/api/v1/payroll/runs/{run_id}/submit", "/api/v1/payroll/runs/{run_id}/approve",
+        "/api/v1/payroll/runs/{run_id}/submit", "/api/v1/payroll/runs/{run_id}/cancel", "/api/v1/payroll/runs/{run_id}/approve",
         "/api/v1/payroll/runs/{run_id}/mark-paid", "/api/v1/payroll/runs/{run_id}/payslips",
         "/api/v1/payroll/accounting-mapping", "/api/v1/payroll/runs/{run_id}/post-to-accounting",
         "/api/v1/payroll/runs/{run_id}/reverse-accounting-journal",
