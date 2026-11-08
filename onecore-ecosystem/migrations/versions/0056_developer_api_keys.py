@@ -26,8 +26,6 @@ def upgrade():
     )
     op.create_index("ix_developer_api_keys_organization_id", "developer_api_keys", ["organization_id"])
     op.create_index("ix_developer_api_keys_created_by_user_id", "developer_api_keys", ["created_by_user_id"])
-    op.create_index("ix_developer_api_keys_key_prefix", "developer_api_keys", ["key_prefix"], unique=True)
-    op.create_index("ix_developer_api_keys_secret_hash", "developer_api_keys", ["secret_hash"], unique=True)
 
     op.create_table(
         "developer_api_key_usages",
@@ -170,8 +168,6 @@ def downgrade():
     op.drop_index("ix_developer_api_key_usages_organization_id", table_name="developer_api_key_usages")
     op.drop_index("ix_developer_api_key_usages_api_key_id", table_name="developer_api_key_usages")
     op.drop_table("developer_api_key_usages")
-    op.drop_index("ix_developer_api_keys_secret_hash", table_name="developer_api_keys")
-    op.drop_index("ix_developer_api_keys_key_prefix", table_name="developer_api_keys")
     op.drop_index("ix_developer_api_keys_created_by_user_id", table_name="developer_api_keys")
     op.drop_index("ix_developer_api_keys_organization_id", table_name="developer_api_keys")
     op.drop_table("developer_api_keys")
