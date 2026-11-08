@@ -11,6 +11,8 @@ from app.core.database import SessionLocal
 from app.core.models import User
 from app.core.security import hash_password
 from app.api.routes import router
+from app.api.portal_routes import router as portal_router
+from app.core import portal_models  # noqa: F401 - register portal tables
 from app.api.inventory_completion import router as inventory_completion_router
 from app.api.pos_completion import router as pos_completion_router
 from app.api.platform_routes import router as platform_router
