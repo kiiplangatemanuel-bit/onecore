@@ -13,7 +13,7 @@ def upgrade():
     with op.batch_alter_table("payroll_accounting_mappings") as batch_op:
         batch_op.add_column(sa.Column(
             "other_deductions_payable_account_id", sa.Integer(),
-            sa.ForeignKey("accounting_accounts.id"), nullable=True
+            sa.ForeignKey("accounting_accounts.id", name="fk_payroll_mapping_other_deductions_account"), nullable=True
         ))
 
 
