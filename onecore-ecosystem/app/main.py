@@ -33,6 +33,7 @@ from app.api.support import router as support_router
 from app.api.auth_workflows import router as auth_workflows_router
 from app.api.portal_auth import router as portal_auth_router
 from app.api.portal_workflows import router as portal_workflows_router
+from app.api.auth_mfa import router as auth_mfa_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
@@ -88,6 +89,7 @@ app.include_router(support_router)
 app.include_router(auth_workflows_router)
 app.include_router(portal_auth_router)
 app.include_router(portal_workflows_router)
+app.include_router(auth_mfa_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
@@ -167,7 +169,7 @@ async def platform_security_middleware(request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
     public_write_request = request.method == "POST" and request.url.path in {
-        "/api/v1/auth/register-organization", "/api/v1/auth/verify-email", "/api/v1/auth/exchange-portal-code", "/api/v1/auth/password-reset/request", "/api/v1/auth/password-reset/confirm", "/api/v1/support/public/tickets"
+        "/api/v1/auth/register-organization", "/api/v1/auth/verify-email", "/api/v1/auth/exchange-portal-code", "/api/v1/auth/password-reset/request", "/api/v1/auth/password-reset/confirm", "/api/v1/auth/mfa/challenge", "/api/v1/support/public/tickets"
     }
     response = None
     if settings.force_https and request.url.scheme != "https":

@@ -65,3 +65,49 @@ applied server-side. Branch IDs are UUID strings.
 The branch APIs are backend foundations. A dedicated admin frontend, branch
 transfer/reassignment workflow, and migration plan for historical branch data
 remain outstanding.
+
+
+## Multi-factor authentication (TOTP)
+
+The account-security screen supports TOTP authenticator enrollment, single-use recovery
+codes, recovery-code rotation and MFA disablement. The API contract is:
+
+- GET /api/v1/auth/mfa/status reports whether TOTP is enabled and how many
+  recovery codes remain; it never returns the stored seed.
+- POST /api/v1/auth/mfa/enroll requires the current password and creates a
+  ten-minute pending enrollment. It returns the TOTP seed and otpauth URI
+  once for manual entry into an authenticator app.
+- POST /api/v1/auth/mfa/confirm verifies a current six-digit TOTP and enables
+  MFA. Ten one-time recovery codes are returned once. Enabling MFA increments
+  the authentication version and consumes outstanding portal authorization
+  codes, so existing access tokens must be replaced by signing in again.
+- Password login for an MFA-enabled account returns a five-minute challenge
+  instead of an access token. POST /api/v1/auth/mfa/challenge accepts a TOTP
+  or unused recovery code. Challenges expire, are single-use, allow at most
+  five failed attempts and are stored only as SHA-256 digests.
+- POST /api/v1/auth/mfa/recovery-codes/rotate and
+  POST /api/v1/auth/mfa/disable require password re-authentication and a
+  current TOTP or unused recovery code. Rotation revokes previous codes.
+  Disablement increments the authentication version and consumes outstanding
+  portal authorization codes.
+
+TOTP seeds are encrypted at rest with a dedicated Fernet key. Configure
+MFA_ENCRYPTION_KEY in the deployment secret manager using a fresh key generated
+with Fernet.generate_key(). MFA enrollment fails closed with HTTP 503 when
+the key is absent or invalid; do not use a shared development key in production.
+Losing or rotating this key without first re-encrypting enrolled seeds requires
+users to re-enroll. Keep the key backed up under the same access controls as
+other authentication secrets.
+
+TOTP is RFC 6238 with SHA-1, six digits, a 30-second step and one step of
+clock drift in either direction. A successful TOTP step cannot be replayed.
+After confirming enrollment, the next sign-in must use a fresh TOTP time-step.
+Recovery codes are random 64-bit values displayed in four-character groups;
+only SHA-256 digests are stored. The challenge endpoint is protected by the
+public-write rate limiter and an additional five-attempt per-challenge limit.
+
+MFA is an optional account-level control in this increment. It is not an OIDC
+identity provider, a replacement for organization/branch RBAC, or proof of
+provider/production security certification. Hardware security keys, passkeys,
+enforced MFA policy by role/tenant, privileged step-up for individual actions,
+durable session/device inventory and distributed WAF throttling remain open.
