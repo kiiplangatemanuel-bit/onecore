@@ -30,7 +30,7 @@ export function portalUrl(key, path = "") {
   } catch { return ""; }
 }
 export function portalLink(key, path = "") {
-  return portalUrl(key, path) || "#portal-configuration";
+  return portalUrl(key, path) || "#contact";
 }
 export function portalConfiguration() {
   return Object.entries(KEYS).filter(([key]) => key !== "api")
