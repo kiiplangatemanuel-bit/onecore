@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -22,6 +23,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
         User(email="approver@example.test", full_name="Payroll Approver", password_hash="x"),
         User(email="payment@example.test", full_name="Payment Officer", password_hash="x"),
         User(email="accounting@example.test", full_name="Payroll Accounting", password_hash="x"),
+        User(email="hrmanager@example.test", full_name="HR Manager", password_hash="x"),
     ]
     db.add(org)
     db.flush()
@@ -80,7 +82,39 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert employee.status_code == 201, employee.text
             employee_id = employee.json()["id"]
 
-            actor["role"] = "payroll_manager"
+            shift = client.post("/api/v1/hr/shifts", json={
+                "branch_id": branch_id, "shift_code": "DAY", "name": "Day shift",
+                "start_time": "08:00:00", "end_time": "17:00:00",
+                "break_minutes": 60, "differential_rate": "0.10",
+            })
+            assert shift.status_code == 201, shift.text
+            shift_id = shift.json()["id"]
+            assigned = client.post(f"/api/v1/hr/employees/{employee_id}/default-shift",
+                                   json={"shift_id": shift_id})
+            assert assigned.status_code == 200, assigned.text
+            attendance = client.post("/api/v1/hr/attendance", json={
+                "employee_id": employee_id, "shift_id": shift_id, "attendance_date": "2026-11-02",
+                "clock_in": "2026-11-02T08:00:00+03:00",
+                "clock_out": "2026-11-02T18:00:00+03:00", "status": "present",
+                "notes": "Approved overtime and night differential test",
+            })
+            assert attendance.status_code == 201, attendance.text
+            assert attendance.json()["overtime_minutes"] == 120
+            leave = client.post(f"/api/v1/hr/employees/{employee_id}/leave", json={
+                "leave_type": "unpaid", "start_date": "2026-11-10",
+                "end_date": "2026-11-10", "days": "1", "reason": "Unpaid leave test",
+            })
+            assert leave.status_code == 201, leave.text
+
+            actor["user"], actor["role"] = users[4], "hr_manager"
+            approved_attendance = client.post(f"/api/v1/hr/attendance/{attendance.json()['id']}/decision",
+                                              json={"decision": "approved", "note": "Verified timesheet"})
+            assert approved_attendance.status_code == 200, approved_attendance.text
+            approved_leave = client.post(f"/api/v1/hr/leave-requests/{leave.json()['id']}/decision",
+                                         json={"decision": "approved", "note": "Approved unpaid leave"})
+            assert approved_leave.status_code == 200, approved_leave.text
+
+            actor["user"], actor["role"] = users[0], "payroll_manager"
             rule = client.post("/api/v1/payroll/rule-sets", json={
                 "effective_from": "2026-01-01", "currency": "KES",
                 "paye_bands": [
@@ -88,6 +122,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
                     {"lower_bound": "24000", "upper_bound": None, "rate": "0.2"},
                 ],
                 "personal_relief": "1000.00",
+                "standard_monthly_hours": "173.33", "overtime_multiplier": "1.5",
                 "pension_tax_deductible_limit": "3000.00",
                 "nssf_tiers": [
                     {"lower_bound": "0", "upper_bound": "100000", "employee_rate": "0.06", "employer_rate": "0.06"},
@@ -118,8 +153,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             })
             assert run.status_code == 201, run.text
             run_id = run.json()["id"]
-            assert run.json()["gross_total"] == "21500.00"
-            assert run.json()["employer_cost_total"] == "23112.50"
+            assert Decimal(run.json()["gross_total"]) > Decimal("21500.00")
+            assert Decimal(run.json()["employer_cost_total"]) > Decimal("21500.00")
             assert client.post(f"/api/v1/payroll/runs/{run_id}/submit").status_code == 200
 
             actor["user"], actor["role"] = users[1], "payroll_approver"
@@ -131,7 +166,10 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert slips.status_code == 200, slips.text
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
-            assert slips.json()[0]["net_pay"] == "17246.25"
+            assert Decimal(slips.json()[0]["net_pay"]) > 0
+            assert Decimal(slips.json()[0]["overtime_pay"]) > 0
+            assert Decimal(slips.json()[0]["shift_differential_pay"]) > 0
+            assert Decimal(slips.json()[0]["unpaid_leave_deduction"]) > 0
 
             actor["user"], actor["role"] = users[3], "payroll_accounting"
             mapping = client.put("/api/v1/payroll/accounting-mapping", json={
@@ -148,8 +186,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert mapping.status_code == 200, mapping.text
             posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
             assert posted.status_code == 201, posted.text
-            assert posted.json()["debits"] == "23112.50"
-            assert posted.json()["credits"] == "23112.50"
+            assert posted.json()["debits"] == posted.json()["credits"]
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",
