@@ -276,7 +276,7 @@ def test_payroll_payment_batch_and_statement_models_are_tenant_scoped():
     assert "uq_payroll_payment_batch_org_idempotency" in {
         x.name for x in PayrollPaymentBatch.__table__.indexes
     }
-    assert "ix_payroll_batch_item_org_reference" in {
+    assert "uq_payroll_batch_item_org_reference" in {
         x.name for x in PayrollPaymentBatchItem.__table__.indexes
     }
     assert "uq_payroll_bank_statement_fingerprint" in {
