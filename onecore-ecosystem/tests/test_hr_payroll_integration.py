@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.authorization import ROLE_PERMISSIONS
 from app.core.database import Base, get_db
-from app.core.models import Organization, User, Branch
+from app.core.models import Organization, User, Branch, AccountingAccount
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.main import app
@@ -28,7 +28,19 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
     db.flush()
     branch = Branch(id="payroll-branch", organization_id=org.id, code="HQ", name="Head Office")
     db.add(branch)
+    accounts = [
+        AccountingAccount(organization_id=org.id, code="5000", name="Salaries expense", account_type="expense", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="5010", name="Employer statutory expense", account_type="expense", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2100", name="Net payroll payable", account_type="liability", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2110", name="PAYE payable", account_type="liability", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2120", name="NSSF payable", account_type="liability", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2130", name="SHIF payable", account_type="liability", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2140", name="Housing Levy payable", account_type="liability", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2150", name="Pension payable", account_type="liability", created_by=users[0].id),
+    ]
+    db.add_all(accounts)
     db.commit()
+    account_ids = [x.id for x in accounts]
     org_id, branch_id = org.id, branch.id
     db.close()
 
@@ -118,6 +130,23 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
             assert slips.json()[0]["net_pay"] == "17246.25"
+
+            actor["user"], actor["role"] = users[0], "org_admin"
+            mapping = client.put("/api/v1/payroll/accounting-mapping", json={
+                "salary_expense_account_id": account_ids[0],
+                "employer_contribution_expense_account_id": account_ids[1],
+                "net_payable_account_id": account_ids[2],
+                "paye_payable_account_id": account_ids[3],
+                "nssf_payable_account_id": account_ids[4],
+                "shif_payable_account_id": account_ids[5],
+                "housing_levy_payable_account_id": account_ids[6],
+                "pension_payable_account_id": account_ids[7],
+            })
+            assert mapping.status_code == 200, mapping.text
+            posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
+            assert posted.status_code == 201, posted.text
+            assert posted.json()["debits"] == "23112.50"
+            assert posted.json()["credits"] == "23112.50"
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",
