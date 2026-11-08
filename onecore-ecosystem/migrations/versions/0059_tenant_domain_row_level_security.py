@@ -13,6 +13,7 @@ _SPECIALIZED_TABLES = {
     "mpesa_payment_intents",
     "mpesa_refund_intents",
     "procurement_settlements",
+    "crm_campaign_deliveries",
     "portal_workflow_records",
     "support_tickets",
     "support_messages",
@@ -186,6 +187,35 @@ def upgrade():
             )
         """)
 
+    if "crm_campaign_deliveries" in sa.inspect(bind).get_table_names():
+        table = preparer.quote("crm_campaign_deliveries")
+        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        op.execute(f"""
+            CREATE POLICY crm_delivery_tenant_scope ON {table}
+            FOR ALL
+            USING (
+                organization_id = {organization_id}
+                OR NULLIF(current_setting('app.crm_delivery_callback_authenticated', true), '') = 'true'
+                OR unsubscribe_token_hash = NULLIF(current_setting('app.crm_unsubscribe_token_hash', true), '')
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = {table}.organization_id
+                      AND m.user_id = {user_id} AND m.is_active = true
+                )
+                OR public.onecore_is_platform_admin()
+            )
+            WITH CHECK (
+                organization_id = {organization_id}
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = {table}.organization_id
+                      AND m.user_id = {user_id} AND m.is_active = true
+                )
+                OR public.onecore_is_platform_admin()
+            )
+        """)
+
     for table_name in _tenant_tables(bind):
         table = preparer.quote(table_name)
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
@@ -227,6 +257,11 @@ def downgrade():
     if bind.dialect.name != "postgresql":
         return
     preparer = bind.dialect.identifier_preparer
+    if "crm_campaign_deliveries" in sa.inspect(bind).get_table_names():
+        table = preparer.quote("crm_campaign_deliveries")
+        op.execute(f"DROP POLICY IF EXISTS crm_delivery_tenant_scope ON {table}")
+        op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
     for table_name in _tenant_tables(bind):
         table = preparer.quote(table_name)
         op.execute(f"DROP POLICY IF EXISTS tenant_scope_access ON {table}")
