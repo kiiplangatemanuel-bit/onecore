@@ -603,14 +603,45 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
     if row.approved_by==user.id: raise HTTPException(409,"The payroll approver cannot authorize its payment")
-    accounting_link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).first()
+    accounting_link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).with_for_update().first()
     if not accounting_link or accounting_link.reversal_journal_id:
         raise HTTPException(409,"Post the approved payroll to accounting before recording payment")
+    if accounting_link.settlement_journal_id:
+        raise HTTPException(409,"Payroll settlement journal already exists")
+    if dec(row.net_total)<=0:
+        raise HTTPException(422,"Payroll with zero net pay cannot be marked paid")
+    mapping=db.query(PayrollAccountingMapping).filter_by(organization_id=membership.organization_id).first()
+    if not mapping:
+        raise HTTPException(409,"Payroll accounting mapping is missing")
+    bank=db.query(AccountingAccount).filter_by(id=mapping.bank_account_id,
+        organization_id=membership.organization_id,is_active=True,account_type="asset").first()
+    if not bank: raise HTTPException(409,"Configured payroll bank account is no longer active")
+    settlement_date=datetime.now(timezone.utc).date()
+    _assert_accounting_date_open(db,membership.organization_id,settlement_date)
+    settlement_lines=[
+        {"account_id":mapping.net_payable_account_id,"description":"Settle net payroll payable",
+         "debit":dec(row.net_total),"credit":ZERO,"branch_id":row.branch_id},
+        {"account_id":mapping.bank_account_id,"description":"Payroll bank disbursement confirmation",
+         "debit":ZERO,"credit":dec(row.net_total),"branch_id":row.branch_id},
+    ]
+    validate_journal_lines([type("Line",(),x)() for x in settlement_lines])
+    journal=AccountingJournal(organization_id=membership.organization_id,branch_id=row.branch_id,
+        journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=f"PAYROLL-PAYMENT-{row.id}",
+        memo=f"Settlement for payroll run {row.id}; payment reference {payload.payment_reference}",
+        status="posted",entry_date=datetime.combine(settlement_date,time.min,tzinfo=timezone.utc),
+        created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+    db.add(journal); db.flush()
+    for line in settlement_lines:
+        db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=line["account_id"],branch_id=line["branch_id"],description=line["description"],
+            debit=line["debit"],credit=line["credit"]))
+    accounting_link.settlement_journal_id=journal.id
     row.status="paid"; row.paid_by=user.id; row.paid_at=datetime.now(timezone.utc); row.payment_reference=payload.payment_reference
     audit(db,user,membership.organization_id,"payroll.run.marked_paid","payroll_run",row.id,
-          "Payment confirmation recorded; this endpoint does not initiate a bank or mobile-money transfer")
+          f"External payment confirmed; settlement journal {journal.journal_number}; no transfer initiated by this API")
     db.commit()
-    return _run_out(row)
+    result=_run_out(row); result["settlement_journal_id"]=journal.id
+    return result
 
 
 @router.get("/payroll/runs/{run_id}/payslips")
@@ -639,6 +670,7 @@ class PayrollAccountingMappingIn(BaseModel):
     shif_payable_account_id: int = Field(gt=0)
     housing_levy_payable_account_id: int = Field(gt=0)
     pension_payable_account_id: int = Field(gt=0)
+    bank_account_id: int = Field(gt=0)
 
 
 class PayrollJournalReversalIn(BaseModel):
@@ -649,7 +681,7 @@ def _payroll_mapping_out(row):
     return {name: getattr(row, name) for name in (
         "id", "salary_expense_account_id", "employer_contribution_expense_account_id",
         "net_payable_account_id", "paye_payable_account_id", "nssf_payable_account_id",
-        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id"
+        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id", "bank_account_id"
     )}
 
 
@@ -663,6 +695,7 @@ def _validate_payroll_mapping(db, organization_id, payload):
         "shif_payable_account_id": "liability",
         "housing_levy_payable_account_id": "liability",
         "pension_payable_account_id": "liability",
+        "bank_account_id": "asset",
     }
     ids = {getattr(payload, name) for name in expected}
     accounts = db.query(AccountingAccount).filter(
