@@ -3,12 +3,33 @@ from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from app.core.database import Base
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """Preserve aware UTC datetimes on SQLite as well as PostgreSQL."""
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class StatusAlertDelivery(Base):
@@ -26,8 +47,8 @@ class StatusAlertDelivery(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow, index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_error: Mapped[str] = mapped_column(String(120), nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow, onupdate=_utcnow)
