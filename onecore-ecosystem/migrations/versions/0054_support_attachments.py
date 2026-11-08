@@ -53,6 +53,7 @@ def upgrade():
                               )
                           )
                       )
+                  )
             )
         """)
         op.execute("""
