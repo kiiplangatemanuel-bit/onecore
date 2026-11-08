@@ -89,3 +89,5 @@
 .resource-row>div:first-child{display:flex;flex-direction:column;gap:5px;min-width:0}.resource-row strong{font-size:13px;color:#213b53;overflow-wrap:anywhere}.resource-row small{font-size:10px;color:#8190a0;overflow-wrap:anywhere}
 .resource-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.resource-actions select{max-width:160px;border:1px solid #dce4eb;border-radius:7px;padding:8px;background:#fff;color:#334b60;font-size:10px}
 @media(max-width:850px){.portal-columns{grid-template-columns:1fr}}@media(max-width:560px){.portal-form-grid{grid-template-columns:1fr}.portal-inline-form{flex-direction:column}.portal-toolbar{align-items:stretch}.resource-row{align-items:flex-start;flex-direction:column}.resource-actions{justify-content:flex-start}}
+
+.org-context-select{max-width:190px;border:1px solid #dce4eb;border-radius:7px;padding:8px 10px;background:#fff;color:#334b60;font-size:10px}@media(max-width:560px){.org-context-select{max-width:120px}}
