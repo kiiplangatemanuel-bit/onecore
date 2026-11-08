@@ -151,6 +151,10 @@ class SupportAttachmentIntent(BaseModel):
     size_bytes: int = Field(gt=0, le=10 * 1024 * 1024)
 
 
+class SupportAttachmentScanResult(BaseModel):
+    status: str = Field(pattern=r"^(available|rejected)$")
+
+
 _ALLOWED_ATTACHMENT_TYPES = {
     "application/pdf", "image/jpeg", "image/png", "text/plain", "text/csv",
 }
@@ -228,14 +232,16 @@ def _complete_attachment(ticket: SupportTicket, attachment_id: int, db: Session)
         raise HTTPException(422, "Uploaded attachment size does not match the declared size")
     if remote.get("ContentType", "").lower() != attachment.content_type:
         raise HTTPException(422, "Uploaded attachment content type does not match")
-    attachment.status = "uploaded"
+    # Keep the object quarantined until an authorized malware-scanning/review
+    # process explicitly releases it for customer downloads.
+    attachment.status = "pending_scan"
     db.commit()
     return {"id": attachment.id, "status": attachment.status}
 
 
 def _attachment_download(attachment: SupportAttachment) -> dict:
-    if attachment.status != "uploaded":
-        raise HTTPException(409, "Attachment upload has not been completed")
+    if attachment.status != "available":
+        raise HTTPException(409, "Attachment is not available for download until its security review is complete")
     storage = _storage_client()
     try:
         url = storage.generate_presigned_url(
@@ -381,6 +387,27 @@ def download_ticket_attachment(
     if not attachment:
         raise HTTPException(404, "Support attachment not found")
     return _attachment_download(attachment)
+
+
+
+@router.patch("/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan")
+def set_support_attachment_scan_result(
+    ticket_number: str, attachment_id: int, payload: SupportAttachmentScanResult,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
+    if not ticket:
+        raise HTTPException(404, "Support ticket not found")
+    attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    if attachment.status not in {"pending_scan", "available", "rejected"}:
+        raise HTTPException(409, "Attachment upload must complete before security review")
+    attachment.status = payload.status
+    _audit(db, user.id, ticket.organization_id, "support.attachment.security_reviewed",
+           ticket, f"attachment_id={attachment.id};status={attachment.status}")
+    db.commit()
+    return {"id": attachment.id, "status": attachment.status}
 
 
 @router.get("/admin/tickets/{ticket_number}/attachments/{attachment_id}/download")
