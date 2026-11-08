@@ -45,9 +45,11 @@ Use a disposable Supabase staging project to verify:
 - PostgreSQL row locking, uniqueness, transaction rollback, idempotency and concurrent goods-receipt/settlement operations.
 - API/worker schema parity, backup/PITR and restore rehearsal.
 
-Migration 0052 enables RLS for portal workflow records, migration 0053 adds MFA tables, and migrations 0054–0055 enable and force RLS for Support tickets/messages and Support attachment metadata. The API binds verified OneCore identity and validated guest ticket-token hashes to transaction-local PostgreSQL settings. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. Verify the actual connected role and policies in staging before production rollout.
+Migration 0052 enables RLS for portal workflow records, migration 0053 adds MFA tables, migrations 0054–0055 enable and force RLS for Support tickets/messages and Support attachment metadata, and migration 0059 enables and forces tenant RLS across organization-owned domain tables (including inventory, accounting, CRM, procurement, POS, school and healthcare records). Migration 0059 adds dedicated membership policies (users see their own memberships; tenant administrators can manage memberships within their tenant but cannot grant the `org_admin` role; platform administrators retain controlled access) and append-only audit-event policies for authenticated tenant activity and validated guest Support events. Fixed-search-path SECURITY DEFINER helpers avoid recursive membership-policy evaluation. The API binds verified OneCore identity, verified tenant scope for background CRM scheduling, provider callback token hashes (M-Pesa and supplier settlements), CRM delivery callback provider-message IDs (after shared-secret verification), CRM unsubscribe token hashes, and validated guest ticket-token hashes to transaction-local PostgreSQL settings. Integration contexts are set only after server-side credential/token validation and are cleared automatically at transaction boundaries; the CRM scheduler iterates one organization at a time. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. The `/ready` endpoint verifies the runtime role and a critical set of portal, Support, developer and core business RLS tables before reporting production readiness. Verify the complete migration and policy set in staging before production rollout.
 
 Developer API keys are stored only as SHA-256 digests, require an active organization membership on every key-authenticated request, and are revoked server-side. The `X-OneCore-API-Key` header is accepted by the developer API example endpoint; do not use API keys in browser applications. Sandbox API keys are isolated from production tenant records: the organization example endpoint returns synthetic OneCore sandbox fixture data for sandbox keys, while production keys return only their authorized organization. Issuing a production API key requires an active organization administrator; developers can issue sandbox keys and manage their own credentials. This is an API-level fixture environment, not a separate PostgreSQL database or production-equivalent data plane.
+
+In production, `/ready` also verifies that the connected API database role is neither a superuser nor `BYPASSRLS`, and that portal workflow, Support ticket/message/attachment, developer API-key/usage and webhook endpoint/delivery tables exist with RLS enabled, forced and at least one policy. A failed check returns HTTP 503 so the deployment platform does not route traffic to an unsafe or incompletely migrated API. Provision a dedicated `NOBYPASSRLS` API login and apply migrations before expecting readiness to pass. This guard is a deployment safety check, not a substitute for reviewing each policy's authorization semantics or testing cross-tenant access.
 
 SQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
 
@@ -75,3 +77,20 @@ GRANT UPDATE ON TABLE public.developer_webhook_deliveries TO onecore_webhook_wor
 ```
 
 Set `WEBHOOK_WORKER_DATABASE_URL` to a connection URI using this login. Do not grant table ownership, `BYPASSRLS`, schema creation, or broad write privileges. The API runtime role remains separate and uses the normal OneCore user-identity RLS context.
+
+## Status alert delivery outbox (migration 0060)
+
+Public Status incidents enqueue idempotent email deliveries for matching active Status alert subscriptions in the same transaction as the incident publication/update. The worker retries transient delivery failures with bounded exponential backoff (maximum eight attempts). Run `python -m app.workers.status_alert_delivery` as a private worker process; do not expose it through the API.
+
+Provision a separate `NOBYPASSRLS` role and set `STATUS_ALERT_WORKER_DATABASE_URL` only in the worker's secret environment:
+
+```sql
+CREATE ROLE onecore_status_alert_worker LOGIN PASSWORD '<generated-secret>' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE postgres TO onecore_status_alert_worker;
+GRANT USAGE ON SCHEMA public TO onecore_status_alert_worker;
+GRANT SELECT, UPDATE ON TABLE public.status_alert_deliveries TO onecore_status_alert_worker;
+GRANT SELECT, INSERT ON TABLE public.status_alert_deliveries TO onecore_api;
+GRANT USAGE, SELECT ON SEQUENCE public.status_alert_deliveries_id_seq TO onecore_api;
+```
+
+The worker verifies its connected PostgreSQL role at startup. The outbox RLS policy permits subscribers to read only their own deliveries; only the dedicated worker role can update delivery state. Configure SMTP using the existing email integration settings. Never reuse the API or Supabase service-role database credentials for this worker.

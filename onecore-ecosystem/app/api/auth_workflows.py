@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, EmailVerification, Membership, Organization, PasswordResetToken, PortalAuthorizationCode, User
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn, PasswordResetRequestIn, PasswordResetConfirmIn
-from app.core.security import hash_password
+from app.core.security import hash_password, set_verified_user_context
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
@@ -106,6 +106,11 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
         db.add(user)
         db.add(organization)
         db.flush()
+        # The user ID is assigned by the database during flush; persist it as
+        # the organization owner before the RLS-protected first membership insert.
+        organization.owner_user_id = user.id
+        db.flush()
+        set_verified_user_context(db, user.id)
         db.add(Membership(
             user_id=user.id, organization_id=organization.id,
             role="org_admin", branch_scope="*", is_active=True,

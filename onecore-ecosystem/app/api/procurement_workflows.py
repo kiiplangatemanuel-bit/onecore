@@ -28,7 +28,7 @@ from app.core.procurement_workflow_models import (
     ProcurementSupplierPortalToken, ProcurementInvoiceDiscrepancy,
     ProcurementSupplierStatement, ProcurementSupplierStatementLine,
 )
-from app.core.security import current_user
+from app.core.security import current_user, set_provider_callback_token_context, set_verified_organization_context
 from app.core.config import settings
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -426,11 +426,13 @@ def verify_supplier_settlement(settlement_id: int, payload: SettlementVerifyIn,
 
 def _supplier_b2c_callback(db: Session, token: str, body: dict, timeout: bool = False):
     digest = hashlib.sha256(token.encode()).hexdigest()
+    set_provider_callback_token_context(db, digest)
     settlement = db.query(ProcurementSettlement).filter_by(
         callback_token_hash=digest, provider="mpesa"
     ).with_for_update().first()
     if not settlement:
         return False
+    set_verified_organization_context(db, settlement.organization_id)
     result = body.get("Result") or body
     conversation = str(result.get("ConversationID") or "")
     if not conversation:
