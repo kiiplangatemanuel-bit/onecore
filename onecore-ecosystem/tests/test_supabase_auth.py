@@ -1,5 +1,7 @@
 import uuid
+from datetime import datetime, timezone
 
+import jwt
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -7,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import Base
-from app.core.models import AuditEvent, User
+from app.core.models import AuditEvent, User, UserMFAFactor
 from app.core.security import current_user
 from app.api.supabase_auth import SupabaseSessionExchange, exchange_supabase_session
 
@@ -23,7 +25,7 @@ class FakeSupabaseResponse:
 
 def _db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[User.__table__, AuditEvent.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, UserMFAFactor.__table__, AuditEvent.__table__])
     return engine
 
 
@@ -149,3 +151,27 @@ def test_supabase_auth_exchange_route_is_registered():
     from app.main import app
 
     assert "/api/v1/auth/supabase-session" in app.openapi()["paths"]
+
+
+def test_supabase_aal1_session_cannot_bypass_enabled_onecore_mfa(monkeypatch):
+    identity = _identity()
+    _configure_supabase(monkeypatch, identity)
+    engine = _db()
+    with Session(engine) as db:
+        user = User(email=identity["email"], full_name="MFA User", password_hash="unused")
+        db.add(user)
+        db.flush()
+        db.add(UserMFAFactor(
+            user_id=user.id, secret_ciphertext="encrypted-totp-secret",
+            enabled_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+        aal1_token = jwt.encode(
+            {"sub": identity["id"], "aal": "aal1"},
+            "test-only-unverified-signature", algorithm="HS256",
+        )
+        with pytest.raises(HTTPException) as denied:
+            exchange_supabase_session(SupabaseSessionExchange(access_token=aal1_token), db)
+        assert denied.value.status_code == 403
+        assert "multi-factor" in denied.value.detail
+    engine.dispose()
