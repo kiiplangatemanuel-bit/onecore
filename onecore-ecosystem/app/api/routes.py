@@ -8,6 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.inventory_models import InventoryWarehouse, InventoryReservation
+from app.core.pos_completion_models import POSCustomer, POSCustomerSale, POSLoyaltyEntry, POSLoyaltyRewardPolicy
 from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
 from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
@@ -17,7 +18,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
+from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption, calculate_loyalty_return_adjustments
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -1625,7 +1626,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         ).order_by(POSPayment.id).all()
         return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
                 "status": "already_synced", "total_amount": str(existing.total_amount),
-                "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                "loyalty_points_redeemed": existing.loyalty_points_redeemed,
+                "loyalty_discount_amount": str(existing.loyalty_discount_amount), "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
                              for p in existing_payments]}
     shift = db.query(POSShift).filter_by(
         id=payload.shift_id, organization_id=membership.organization_id,
@@ -1689,9 +1691,37 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         tax_total += tax
         total += line_total
         aggregate_qty[line.product_id] = aggregate_qty.get(line.product_id, Decimal("0")) + line.quantity
-        prepared.append((line, unit_price, subtotal, discount, Decimal(str(product.tax_rate)), tax, line_total))
+        prepared.append((line, unit_price, subtotal, discount, Decimal(str(product.tax_rate)), tax, line_total, Decimal("0.00")))
     subtotal_total, discount_total, tax_total, total = map(
         money, (subtotal_total, discount_total, tax_total, total))
+    loyalty_points_redeemed = int(payload.loyalty_points_redeemed or 0)
+    loyalty_policy = db.query(POSLoyaltyRewardPolicy).filter_by(
+        organization_id=membership.organization_id
+    ).first()
+    loyalty_discount_total = Decimal("0.00")
+    if loyalty_points_redeemed:
+        created_at = payload.offline_created_at
+        if created_at is None:
+            raise HTTPException(409, "Loyalty redemption requires a fresh online checkout authorization")
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        request_age = (datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)).total_seconds()
+        if request_age < -30 or request_age > 120:
+            raise HTTPException(409, "Loyalty redemption authorization expired; reconnect and retry checkout")
+        if customer is None:
+            raise HTTPException(422, "A customer membership is required to redeem loyalty points")
+        if not loyalty_policy or not loyalty_policy.is_active:
+            raise HTTPException(409, "Loyalty redemption is not enabled for this organization")
+        organization_currency = db.query(Organization.currency).filter_by(id=membership.organization_id).scalar()
+        if organization_currency and payload.currency != organization_currency:
+            raise HTTPException(422, "Loyalty redemption must use the organization base currency")
+        if customer.points_balance < loyalty_points_redeemed:
+            raise HTTPException(422, "Customer does not have enough loyalty points")
+        prepared, loyalty_discount_total, tax_total, total = apply_loyalty_redemption(
+            prepared, loyalty_points_redeemed, loyalty_policy.points_per_currency_unit,
+            Decimal(loyalty_policy.max_redemption_percent),
+        )
+        discount_total = money(discount_total + loyalty_discount_total)
     validate_payment_total(total, payload.payments)
     warehouse_allocations = {}
     branch_warehouses = db.query(InventoryWarehouse).filter_by(
@@ -1743,28 +1773,38 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         shift_id=shift.id, cashier_user_id=user.id,
         client_transaction_id=payload.client_transaction_id, request_hash=request_hash,
         total_amount=total, subtotal_amount=subtotal_total,
-        discount_amount=discount_total, tax_amount=tax_total,
+        discount_amount=discount_total, loyalty_points_redeemed=loyalty_points_redeemed,
+        loyalty_discount_amount=loyalty_discount_total, tax_amount=tax_total,
         currency=payload.currency, status="posted",
         offline_created_at=payload.offline_created_at
     )
     db.add(sale)
     db.flush()
     if customer:
-        from app.core.pos_completion_models import POSCustomerSale, POSLoyaltyEntry
         db.add(POSCustomerSale(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id))
         customer.lifetime_spend=Decimal(customer.lifetime_spend or 0)+total
-        points_earned=int(total//Decimal("100"))
+        if loyalty_points_redeemed:
+            customer.points_balance-=loyalty_points_redeemed
+            db.add(POSLoyaltyEntry(
+                organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id,
+                entry_type="redeem",points_delta=-loyalty_points_redeemed,
+                idempotency_key=f"sale:{sale.id}:redeem",
+                note=f"Checkout redemption: {loyalty_points_redeemed} points for {loyalty_discount_total} {payload.currency}",
+                created_by=user.id,
+            ))
+        earn_rate = loyalty_policy.earn_points_per_100_units if loyalty_policy else 1
+        points_earned=int(total//Decimal("100"))*int(earn_rate)
         if points_earned:
             db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,sale_id=sale.id,
                 entry_type="earn",points_delta=points_earned,idempotency_key=f"sale:{sale.id}:earn",
-                note="1 point per 100 currency units spent",created_by=user.id))
+                note=f"{earn_rate} point(s) per 100 {payload.currency} spent after discounts",created_by=user.id))
             customer.points_balance+=points_earned
     movement_index=0
-    for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total) in enumerate(prepared):
+    for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total, loyalty_share) in enumerate(prepared):
         db.add(POSSaleLine(organization_id=membership.organization_id, sale_id=sale.id,
                            product_id=line.product_id, quantity=line.quantity,
                            unit_price=unit_price, discount_percent=line.discount_percent,
-                           discount_amount=discount, tax_rate=tax_rate,
+                           discount_amount=discount, loyalty_discount_amount=loyalty_share, tax_rate=tax_rate,
                            tax_amount=tax, line_total=line_total))
         line_remaining=Decimal(str(line.quantity))
         allocations=warehouse_allocations.get(line.product_id,[])
@@ -1821,7 +1861,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).order_by(POSPayment.id).all()
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
             "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency,
-            "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+            "loyalty_points_redeemed": sale.loyalty_points_redeemed,
+            "loyalty_discount_amount": str(sale.loyalty_discount_amount), "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
                          for p in sale_payments],
             "accounting_status": accounting_link.status, "accounting_journal_id": accounting_link.journal_id}
 
@@ -1861,6 +1902,8 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
         "total_amount": str(sale.total_amount),
         "subtotal_amount": str(sale.subtotal_amount),
         "discount_amount": str(sale.discount_amount),
+        "loyalty_points_redeemed": sale.loyalty_points_redeemed,
+        "loyalty_discount_amount": str(sale.loyalty_discount_amount),
         "tax_amount": str(sale.tax_amount),
         "created_at": sale.created_at.isoformat(),
         "lines": [{
@@ -1872,6 +1915,7 @@ def get_pos_sale_receipt(sale_id: int, membership=Depends(active_membership),
             "unit_price": str(line.unit_price),
             "discount_percent": str(line.discount_percent),
             "discount_amount": str(line.discount_amount),
+            "loyalty_discount_amount": str(line.loyalty_discount_amount),
             "tax_rate": str(line.tax_rate), "tax_amount": str(line.tax_amount),
             "line_total": str(line.line_total),
         } for line, name, sku in lines],
@@ -1934,12 +1978,12 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             raise HTTPException(409, f"Return quantity exceeds remaining sold quantity for line {original.id}")
         if item.quantity == remaining:
             amount = money(Decimal(str(original.line_total)) - returned_value)
-            discount_amount = money(Decimal(str(original.discount_amount)) - returned_discount)
+            discount_amount = money(Decimal(str(original.discount_amount)) + Decimal(str(original.loyalty_discount_amount)) - returned_discount)
             tax_amount = money(Decimal(str(original.tax_amount)) - returned_tax)
         else:
             ratio = Decimal(str(item.quantity)) / Decimal(str(original.quantity))
             amount = money(Decimal(str(original.line_total)) * ratio)
-            discount_amount = money(Decimal(str(original.discount_amount)) * ratio)
+            discount_amount = money((Decimal(str(original.discount_amount)) + Decimal(str(original.loyalty_discount_amount))) * ratio)
             tax_amount = money(Decimal(str(original.tax_amount)) * ratio)
         total += amount
         prepared.append((original, item.quantity, amount, discount_amount, tax_amount))
@@ -1984,7 +2028,6 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         db.add(POSRefund(organization_id=membership.organization_id, return_id=result.id,
             method=item.method, amount=money(item.amount), provider_reference=item.provider_reference,
             status="pending" if item.method == "mpesa" else "recorded"))
-    from app.core.pos_completion_models import POSCustomerSale, POSCustomer, POSLoyaltyEntry
     customer_sale=db.query(POSCustomerSale).filter_by(organization_id=membership.organization_id,sale_id=sale.id).first()
     if customer_sale:
         earned=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
@@ -1993,17 +2036,28 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="reversal").scalar() or 0)
         cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
             organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
-        target_reversal=min(int(earned),int(Decimal(str(cumulative_refunds))//Decimal("100")))
-        points_to_reverse=max(0,target_reversal-int(already_reversed))
-        if points_to_reverse:
-            loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
-            if loyalty_customer:
+        redeemed=int(sale.loyalty_points_redeemed or 0)
+        already_restored=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,
+            sale_id=sale.id,entry_type="restore").scalar() or 0
+        points_to_restore,points_to_reverse=calculate_loyalty_return_adjustments(
+            redeemed,int(earned),Decimal(str(cumulative_refunds)),Decimal(str(sale.total_amount)),
+            int(already_restored),int(already_reversed))
+        loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
+        if loyalty_customer:
+            loyalty_customer.lifetime_spend=max(Decimal("0"),Decimal(loyalty_customer.lifetime_spend or 0)-total)
+            if points_to_reverse:
                 loyalty_customer.points_balance-=points_to_reverse
-                loyalty_customer.lifetime_spend=max(Decimal("0"),Decimal(loyalty_customer.lifetime_spend or 0)-total)
                 db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
                     sale_id=sale.id,entry_type="reversal",points_delta=-points_to_reverse,
                     idempotency_key=f"return:{result.id}:loyalty-reversal",
                     note="Loyalty points reversed against cumulative POS refunds",created_by=user.id))
+            if points_to_restore:
+                loyalty_customer.points_balance+=points_to_restore
+                db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
+                    sale_id=sale.id,entry_type="restore",points_delta=points_to_restore,
+                    idempotency_key=f"return:{result.id}:loyalty-restore",
+                    note="Redeemed loyalty points restored proportionally against returned sale value",created_by=user.id))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
