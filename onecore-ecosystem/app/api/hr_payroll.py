@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, HRAttendanceRecord, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, HRAttendanceRecord, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, PayrollAdjustment
 from app.core.models import AuditEvent, Branch, Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingFiscalPeriod
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -218,6 +218,31 @@ class PaidIn(BaseModel):
     payment_reference: str = Field(min_length=3, max_length=120)
 
 
+class PayrollAdjustmentIn(BaseModel):
+    adjustment_type: str = Field(pattern="^(earning|deduction)$")
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    effective_date: date
+    description: str = Field(min_length=2, max_length=160)
+    reason: str = Field(min_length=3, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+class PayrollAdjustmentDecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
+
+
+def payroll_adjustment_out(row):
+    return {
+        "id": row.id, "employee_id": row.employee_id, "branch_id": row.branch_id,
+        "adjustment_type": row.adjustment_type, "amount": str(row.amount),
+        "effective_date": row.effective_date.isoformat(), "description": row.description,
+        "reason": row.reason, "status": row.status, "submitted_by": row.submitted_by,
+        "decided_by": row.decided_by, "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+        "payroll_run_id": row.payroll_run_id, "created_at": row.created_at.isoformat(),
+    }
+
+
 def employee_out(x):
     return {"id": x.id, "termination_date": x.termination_date.date().isoformat() if x.termination_date else None, "branch_id": x.branch_id, "employee_number": x.employee_number,
             "first_name": x.first_name, "last_name": x.last_name, "email": x.email,
@@ -250,7 +275,8 @@ def _tiered_contribution(gross, tiers, rate_key):
     return rounded(total)
 
 
-def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, unpaid_leave_days=ZERO):
+def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, unpaid_leave_days=ZERO,
+               one_off_earnings=ZERO, one_off_deductions=ZERO, one_off_items=None):
     total_days = (period_end - period_start).days + 1
     hired = employee.hire_date.date() if isinstance(employee.hire_date, datetime) else employee.hire_date
     terminated = employee.termination_date.date() if isinstance(employee.termination_date, datetime) else employee.termination_date
@@ -274,7 +300,9 @@ def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, un
         monthly_work_minutes = Decimal(26) * Decimal(employee.scheduled_minutes_per_day or 480)
         minute_rate = dec(employee.base_salary) / monthly_work_minutes
         overtime_earnings = rounded(minute_rate * Decimal(overtime_minutes) * dec(employee.overtime_multiplier))
-    gross = rounded(prorated_salary - unpaid_leave_deduction + overtime_earnings + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
+    one_off_earnings = rounded(one_off_earnings)
+    one_off_deductions = rounded(one_off_deductions)
+    gross = rounded(prorated_salary - unpaid_leave_deduction + overtime_earnings + one_off_earnings + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
     pension = rounded(dec(employee.pension_contribution) * factor)
     deductible_pension = min(pension, dec(rules["pension_tax_deductible_limit"]))
     taxable = max(ZERO, gross - deductible_pension)
@@ -285,7 +313,7 @@ def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, un
     shif = rounded(gross * dec(rules["shif_rate"]))
     housing_employee = rounded(gross * dec(rules["housing_levy_employee_rate"]))
     housing_employer = rounded(gross * dec(rules["housing_levy_employer_rate"]))
-    deductions = rounded(paye + nssf_employee + shif + housing_employee + pension)
+    deductions = rounded(paye + nssf_employee + shif + housing_employee + pension + one_off_deductions)
     net = rounded(gross - deductions)
     if net < 0:
         raise HTTPException(422, f"Payroll deductions exceed gross pay for employee {employee.employee_number}")
@@ -293,6 +321,8 @@ def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, un
             "employee_name": (employee.first_name + " " + employee.last_name).strip(),
             "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
             "overtime_minutes": int(overtime_minutes), "overtime_earnings": str(overtime_earnings),
+            "one_off_earnings": str(one_off_earnings), "one_off_deductions": str(one_off_deductions),
+            "one_off_adjustments": one_off_items or [],
             "unpaid_leave_days": str(unpaid_leave_days), "unpaid_leave_deduction": str(unpaid_leave_deduction),
             "proration_days": eligible_days, "period_days": total_days, "proration_factor": str(factor), "base_salary_prorated": str(prorated_salary),
             "nssf_employee": str(nssf_employee), "nssf_employer": str(nssf_employer),
@@ -563,6 +593,7 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     if len(employees)!=len(payload.employee_ids): raise HTTPException(404,"One or more active employees were not found in this tenant, branch or currency")
     if any(not can_access_branch(membership,x.branch_id) for x in employees): raise HTTPException(404,"Employee not found")
     snapshots=[]
+    adjustments_by_employee = {}
     for employee in employees:
         attendance_rows = db.query(HRAttendanceRecord).filter(
             HRAttendanceRecord.organization_id == membership.organization_id,
@@ -590,8 +621,26 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
             leave_calendar_days = (leave_end - leave_start).days + 1
             if overlap_days and leave_calendar_days:
                 unpaid_days += dec(leave.days) * Decimal(overlap_days) / Decimal(leave_calendar_days)
+        adjustments = db.query(PayrollAdjustment).filter(
+            PayrollAdjustment.organization_id == membership.organization_id,
+            PayrollAdjustment.employee_id == employee.id,
+            PayrollAdjustment.status == "approved",
+            PayrollAdjustment.payroll_run_id.is_(None),
+            PayrollAdjustment.effective_date >= payload.period_start,
+            PayrollAdjustment.effective_date <= payload.period_end,
+        ).order_by(PayrollAdjustment.id).with_for_update().all()
+        adjustments_by_employee[employee.id] = adjustments
+        one_off_earnings = sum((dec(x.amount) for x in adjustments if x.adjustment_type == "earning"), ZERO)
+        one_off_deductions = sum((dec(x.amount) for x in adjustments if x.adjustment_type == "deduction"), ZERO)
+        adjustment_snapshot = [{
+            "id": x.id, "type": x.adjustment_type, "amount": str(x.amount),
+            "effective_date": x.effective_date.isoformat(), "description": x.description,
+            "reason": x.reason,
+        } for x in adjustments]
         item = _calculate(employee, rules.rules, payload.period_start, payload.period_end,
-                          overtime_minutes=overtime_minutes, unpaid_leave_days=unpaid_days)
+                          overtime_minutes=overtime_minutes, unpaid_leave_days=unpaid_days,
+                          one_off_earnings=one_off_earnings, one_off_deductions=one_off_deductions,
+                          one_off_items=adjustment_snapshot)
         item["attendance_records_count"] = len(attendance_rows)
         item["rule_set_id"] = rules.id
         snapshots.append(item)
@@ -608,6 +657,12 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     db.add(row)
     try:
         db.flush()
+        for adjustment_rows in adjustments_by_employee.values():
+            for adjustment in adjustment_rows:
+                adjustment.status = "applied"
+                adjustment.payroll_run_id = row.id
+                audit(db, user, membership.organization_id, "payroll.adjustment.applied",
+                      "payroll_adjustment", adjustment.id, f"Applied to payroll run {row.id}")
         for item in snapshots:
             db.add(PayrollPayslip(organization_id=membership.organization_id,payroll_run_id=row.id,
                 employee_id=item["employee_id"],employee_number=item["employee_number"],employee_name=item["employee_name"],
@@ -735,6 +790,7 @@ class PayrollAccountingMappingIn(BaseModel):
     housing_levy_payable_account_id: int = Field(gt=0)
     pension_payable_account_id: int = Field(gt=0)
     bank_account_id: int = Field(gt=0)
+    other_deductions_payable_account_id: int | None = Field(default=None, gt=0)
 
 
 class PayrollJournalReversalIn(BaseModel):
@@ -745,7 +801,8 @@ def _payroll_mapping_out(row):
     return {name: getattr(row, name) for name in (
         "id", "salary_expense_account_id", "employer_contribution_expense_account_id",
         "net_payable_account_id", "paye_payable_account_id", "nssf_payable_account_id",
-        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id", "bank_account_id"
+        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id", "bank_account_id",
+        "other_deductions_payable_account_id"
     )}
 
 
@@ -760,8 +817,9 @@ def _validate_payroll_mapping(db, organization_id, payload):
         "housing_levy_payable_account_id": "liability",
         "pension_payable_account_id": "liability",
         "bank_account_id": "asset",
+        "other_deductions_payable_account_id": "liability",
     }
-    ids = {getattr(payload, name) for name in expected}
+    ids = {getattr(payload, name) for name in expected if getattr(payload, name) is not None}
     accounts = db.query(AccountingAccount).filter(
         AccountingAccount.organization_id == organization_id,
         AccountingAccount.is_active == True,
@@ -771,7 +829,7 @@ def _validate_payroll_mapping(db, organization_id, payload):
     if set(by_id) != ids:
         raise HTTPException(404, "One or more mapped accounting accounts were not found in this organization")
     for field, account_type in expected.items():
-        if by_id[getattr(payload, field)].account_type != account_type:
+        if getattr(payload, field) is not None and by_id[getattr(payload, field)].account_type != account_type:
             raise HTTPException(422, f"{field} must map to an active {account_type} account")
     return by_id
 
@@ -859,6 +917,9 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     housing_employee=sum((dec(x.housing_levy_employee) for x in payslips),ZERO)
     housing_employer=sum((dec(x.housing_levy_employer) for x in payslips),ZERO)
     pension=sum((dec(x.pension_employee) for x in payslips),ZERO)
+    other_deductions=sum((dec((x.snapshot or {}).get("one_off_deductions", 0)) for x in payslips),ZERO)
+    if other_deductions and not mapping.other_deductions_payable_account_id:
+        raise HTTPException(409,"Map an other-deductions liability account before posting payroll with one-off deductions")
     employer_contributions=rounded(nssf_employer+housing_employer)
     lines=[]
     _append_journal_line(lines,mapping.salary_expense_account_id,"Payroll gross earnings",debit=run.gross_total,branch_id=run.branch_id)
@@ -869,6 +930,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     _append_journal_line(lines,mapping.shif_payable_account_id,"SHIF payable",credit=shif,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.housing_levy_payable_account_id,"Employee and employer Housing Levy payable",credit=housing_employee+housing_employer,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.pension_payable_account_id,"Employee pension payable",credit=pension,branch_id=run.branch_id)
+    if other_deductions:
+        _append_journal_line(lines,mapping.other_deductions_payable_account_id,"Other employee deductions payable",credit=other_deductions,branch_id=run.branch_id)
     validate_journal_lines([type("Line",(),x)() for x in lines])
     journal=AccountingJournal(organization_id=membership.organization_id,branch_id=run.branch_id,
         journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=f"PAYROLL-RUN-{run.id}",
@@ -884,7 +947,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
         journal_id=journal.id,mapping_snapshot={name:getattr(mapping,name) for name in (
             "salary_expense_account_id","employer_contribution_expense_account_id","net_payable_account_id",
             "paye_payable_account_id","nssf_payable_account_id","shif_payable_account_id",
-            "housing_levy_payable_account_id","pension_payable_account_id","bank_account_id")},
+            "housing_levy_payable_account_id","pension_payable_account_id","bank_account_id",
+            "other_deductions_payable_account_id")},
         created_by=user.id)
     db.add(link)
     audit(db,user,membership.organization_id,"payroll.run.posted_to_accounting","payroll_run",run.id,
@@ -937,6 +1001,14 @@ def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversal
             debit=line["debit"],credit=line["credit"]))
     link.reversal_journal_id=journal.id; link.reversed_by=user.id
     link.reversed_at=datetime.now(timezone.utc); link.reversal_reason=payload.reason
+    released_adjustments = db.query(PayrollAdjustment).filter_by(
+        organization_id=membership.organization_id, payroll_run_id=run.id, status="applied"
+    ).all()
+    for adjustment in released_adjustments:
+        adjustment.status = "approved"
+        adjustment.payroll_run_id = None
+        audit(db, user, membership.organization_id, "payroll.adjustment.released",
+              "payroll_adjustment", adjustment.id, f"Released from cancelled payroll run {run.id}")
     run.status="cancelled"
     audit(db,user,membership.organization_id,"payroll.run.accounting_journal_reversed","payroll_run",run.id,
           f"Reversal journal {journal.journal_number}: {payload.reason}")
@@ -1087,3 +1159,85 @@ def decide_attendance(attendance_id: int, payload: AttendanceDecisionIn,
           "hr_attendance", row.id, payload.note)
     db.commit()
     return attendance_out(row)
+
+
+@router.get("/hr/payroll-adjustments")
+def list_payroll_adjustments(employee_id: int | None = None, status: str | None = None,
+                             membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    require_hr_read(membership)
+    if status and status not in {"pending", "approved", "rejected", "applied"}:
+        raise HTTPException(422, "Invalid payroll adjustment status")
+    q = db.query(PayrollAdjustment).filter_by(organization_id=membership.organization_id)
+    q = scoped(q, PayrollAdjustment, membership)
+    if employee_id is not None:
+        q = q.filter(PayrollAdjustment.employee_id == employee_id)
+    if status:
+        q = q.filter(PayrollAdjustment.status == status)
+    return [payroll_adjustment_out(x) for x in q.order_by(PayrollAdjustment.id.desc()).limit(500).all()]
+
+
+@router.post("/hr/employees/{employee_id}/payroll-adjustments", status_code=201)
+def create_payroll_adjustment(employee_id: int, payload: PayrollAdjustmentIn,
+                              membership=Depends(active_membership), user: User=Depends(current_user),
+                              db: Session=Depends(get_db)):
+    require_hr_write(membership)
+    employee = db.query(HREmployee).filter_by(
+        id=employee_id, organization_id=membership.organization_id, employment_status="active"
+    ).first()
+    if not employee or not can_access_branch(membership, employee.branch_id):
+        raise HTTPException(404, "Active employee not found")
+    if payload.effective_date < employee.hire_date.date() or (
+        employee.termination_date and payload.effective_date > employee.termination_date.date()
+    ):
+        raise HTTPException(422, "Adjustment date is outside the employee's employment period")
+    existing = db.query(PayrollAdjustment).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if existing:
+        same = (existing.employee_id == employee.id and existing.adjustment_type == payload.adjustment_type
+                and dec(existing.amount) == dec(payload.amount) and existing.effective_date == payload.effective_date
+                and existing.description == payload.description and existing.reason == payload.reason)
+        if not same or existing.submitted_by != user.id:
+            raise HTTPException(409, "Payroll adjustment idempotency key belongs to another submission")
+        return payroll_adjustment_out(existing)
+    row = PayrollAdjustment(
+        organization_id=membership.organization_id, branch_id=employee.branch_id, employee_id=employee.id,
+        adjustment_type=payload.adjustment_type, amount=rounded(payload.amount),
+        effective_date=payload.effective_date, description=payload.description, reason=payload.reason,
+        status="pending", idempotency_key=payload.idempotency_key, submitted_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        audit(db, user, membership.organization_id, "payroll.adjustment.submitted",
+              "payroll_adjustment", row.id, payload.reason)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Payroll adjustment idempotency conflict")
+    db.refresh(row)
+    return payroll_adjustment_out(row)
+
+
+@router.post("/hr/payroll-adjustments/{adjustment_id}/decision")
+def decide_payroll_adjustment(adjustment_id: int, payload: PayrollAdjustmentDecisionIn,
+                              membership=Depends(active_membership), user: User=Depends(current_user),
+                              db: Session=Depends(get_db)):
+    require_hr_write(membership)
+    row = db.query(PayrollAdjustment).filter_by(
+        id=adjustment_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Payroll adjustment not found")
+    if row.status != "pending":
+        raise HTTPException(409, "Only pending payroll adjustments can be decided")
+    if row.submitted_by == user.id:
+        raise HTTPException(409, "Adjustment submitter cannot approve or reject their own adjustment")
+    row.status = payload.decision
+    row.decided_by = user.id
+    row.decided_at = datetime.now(timezone.utc)
+    audit(db, user, membership.organization_id, "payroll.adjustment." + payload.decision,
+          "payroll_adjustment", row.id, payload.note)
+    db.commit()
+    return payroll_adjustment_out(row)
