@@ -16,7 +16,7 @@ def test_status_alert_outbox_has_user_and_worker_specific_rls_policies():
     assert "public.onecore_is_platform_admin()" in source
 
 
-def test_platform_admin_can_only_read_status_subscription_record_types_for_fanout():
+def test_platform_admin_reads_only_status_subscription_record_types_for_fanout():
     source = (Path(__file__).parents[1] / "migrations" / "versions" / "0060_status_alert_email_outbox.py").read_text()
     assert "portal_key = 'status'" in source
     assert "record_type IN ('alert_subscription', 'notification_preference')" in source
