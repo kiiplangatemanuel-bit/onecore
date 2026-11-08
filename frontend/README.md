@@ -21,6 +21,10 @@ npm run preview
 
 Vite writes the deployable site to `dist/`.
 
+## Database
+
+Production data is stored in Supabase-managed PostgreSQL through the backend `SUPABASE_DB_URL` setting (which takes precedence over `DATABASE_URL`). The frontend connects only to the authenticated FastAPI API; never expose Supabase connection strings or service-role keys through `VITE_*` variables. See `onecore-ecosystem/docs/SUPABASE.md`.
+
 ## Vercel
 
 - Import this repository.
