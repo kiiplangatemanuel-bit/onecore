@@ -120,7 +120,16 @@ def upgrade():
                 )
                 OR (
                     organization_id IS NULL AND visibility = 'public' AND status = 'published'
-                    AND portal_key IN ('status', 'developers', 'docs', 'community', 'trust', 'events', 'careers', 'partners')
+                    AND (
+                        (portal_key = 'status' AND record_type = 'incident')
+                        OR (portal_key = 'developers' AND record_type IN ('api_guide', 'example'))
+                        OR (portal_key = 'docs' AND record_type = 'guide')
+                        OR (portal_key = 'community' AND record_type IN ('announcement', 'public_post'))
+                        OR (portal_key = 'trust' AND record_type IN ('security_policy', 'compliance_disclosure'))
+                        OR (portal_key = 'events' AND record_type IN ('event', 'announcement'))
+                        OR (portal_key = 'careers' AND record_type IN ('vacancy', 'company_information'))
+                        OR (portal_key = 'partners' AND record_type IN ('opportunity', 'partner_information'))
+                    )
                     AND EXISTS (
                         SELECT 1 FROM users u
                         WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
