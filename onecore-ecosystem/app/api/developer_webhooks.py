@@ -288,12 +288,11 @@ def send_webhook_test(
         raise HTTPException(409, "Activate this webhook before sending a test")
     if not endpoint.events:
         raise HTTPException(422, "Webhook has no subscribed event types")
-    recent_test = db.query(DeveloperWebhookDelivery).filter(
+    recent_rows = db.query(DeveloperWebhookDelivery).filter(
         DeveloperWebhookDelivery.endpoint_id == endpoint.id,
-        DeveloperWebhookDelivery.payload["data"]["test"].as_boolean().is_(True),
         DeveloperWebhookDelivery.created_at >= _now() - timedelta(minutes=1),
-    ).first()
-    if recent_test:
+    ).order_by(DeveloperWebhookDelivery.created_at.desc()).limit(20).all()
+    if any((row.payload or {}).get("data", {}).get("test") is True for row in recent_rows):
         raise HTTPException(429, "A test event was already queued in the last minute")
     event_id = "evt_test_" + secrets.token_urlsafe(18)
     event_type = endpoint.events[0]
