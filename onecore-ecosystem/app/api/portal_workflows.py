@@ -169,6 +169,41 @@ def _audit(db: Session, user: User, row: PortalWorkflowRecord, action: str):
     ))
 
 
+
+
+def _validate_related_records(portal: str, record_type: str, payload: dict,
+                              organization_id: int | None, db: Session):
+    """Resolve cross-record references inside the same tenant or public catalogue."""
+    if portal == "community" and record_type == "comment":
+        post = db.query(PortalWorkflowRecord).filter_by(
+            id=payload["post_id"], portal_key="community", record_type="post",
+            organization_id=organization_id, visibility="organization",
+        ).first()
+        if not post:
+            raise HTTPException(404, "Community post not found")
+    if portal == "events" and record_type in {"registration", "booking", "attendance"}:
+        event = db.query(PortalWorkflowRecord).filter_by(
+            id=payload["event_id"], portal_key="events", record_type="event",
+            organization_id=None, visibility="public", status="published",
+        ).first()
+        if not event:
+            raise HTTPException(404, "Public event not found")
+        if record_type == "attendance":
+            attendee = db.query(Membership.id).filter_by(
+                user_id=payload["attendee_user_id"], organization_id=organization_id,
+                is_active=True,
+            ).first()
+            if not attendee:
+                raise HTTPException(404, "Attendee is not an active member of this organization")
+    if portal == "careers" and record_type == "application":
+        vacancy = db.query(PortalWorkflowRecord).filter_by(
+            id=payload["vacancy_id"], portal_key="careers", record_type="vacancy",
+            organization_id=None, visibility="public", status="published",
+        ).first()
+        if not vacancy:
+            raise HTTPException(404, "Public vacancy not found")
+
+
 def _validate_payload(portal: str, record_type: str, payload: dict):
     required = REQUIRED_FIELDS.get((portal, record_type), set())
     required = required | {
@@ -270,6 +305,7 @@ def create_portal_record(
             allowed_roles = {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
         if membership.role not in allowed_roles:
             raise HTTPException(403, "Your organization role cannot create this portal resource")
+    _validate_related_records(portal, record_type, payload.payload, payload.organization_id, db)
     initial_status = {
         ("trust", "security_report"): "submitted",
         ("careers", "application"): "submitted",
