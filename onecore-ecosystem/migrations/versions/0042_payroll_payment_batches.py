@@ -51,8 +51,12 @@ def upgrade():
                     "payroll_payment_batch_items", ["organization_id"])
     op.create_index("ix_payroll_payment_batch_items_batch_id",
                     "payroll_payment_batch_items", ["batch_id"])
-    op.create_index("uq_payroll_payment_batch_items_payroll_run_id",
-                    "payroll_payment_batch_items", ["payroll_run_id"], unique=True)
+    op.create_index("ix_payroll_payment_batch_items_payroll_run_id",
+                    "payroll_payment_batch_items", ["payroll_run_id"])
+    op.create_index("uq_payroll_batch_item_active_run",
+                    "payroll_payment_batch_items", ["payroll_run_id"], unique=True,
+                    sqlite_where=sa.text("status <> 'cancelled'"),
+                    postgresql_where=sa.text("status <> 'cancelled'"))
     op.create_index("ix_payroll_payment_batch_items_branch_id",
                     "payroll_payment_batch_items", ["branch_id"])
     op.create_index("uq_payroll_batch_item_org_reference",
