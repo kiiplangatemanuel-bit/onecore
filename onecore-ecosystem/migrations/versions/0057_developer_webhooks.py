@@ -123,8 +123,20 @@ def upgrade():
             CREATE POLICY developer_webhook_delivery_update ON developer_webhook_deliveries
             FOR UPDATE USING (
                 current_user = 'onecore_webhook_worker'
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = developer_webhook_deliveries.organization_id
+                      AND m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                      AND m.is_active = true AND m.role IN ('org_admin', 'developer')
+                )
             ) WITH CHECK (
                 current_user = 'onecore_webhook_worker'
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = developer_webhook_deliveries.organization_id
+                      AND m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                      AND m.is_active = true AND m.role IN ('org_admin', 'developer')
+                )
             )
         """)
 
