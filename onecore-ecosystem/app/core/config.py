@@ -1,3 +1,4 @@
+import ipaddress
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, model_validator
 
@@ -138,8 +139,19 @@ class Settings(BaseSettings):
                 raise ValueError("PORTAL_REDIRECT_ORIGINS must contain the exact HTTPS origins of the independently deployed portals")
         if production and self.integration_object_storage_enabled and not self.support_attachment_scanning_enabled:
             raise ValueError("SUPPORT_ATTACHMENT_SCANNING_ENABLED must be true when production Support object storage is enabled")
-        if self.support_attachment_scanning_enabled and not self.clamav_host.strip():
-            raise ValueError("CLAMAV_HOST is required when Support attachment scanning is enabled")
+        if self.support_attachment_scanning_enabled:
+            scanner_host = self.clamav_host.strip().lower().rstrip(".")
+            if not scanner_host:
+                raise ValueError("CLAMAV_HOST is required when Support attachment scanning is enabled")
+            try:
+                scanner_ip = ipaddress.ip_address(scanner_host.strip("[]"))
+                if not scanner_ip.is_private:
+                    raise ValueError("CLAMAV_HOST must resolve to a private network address")
+            except ValueError as exc:
+                if "must resolve" in str(exc):
+                    raise
+                if "." in scanner_host and not scanner_host.endswith((".internal", ".local", ".svc", ".cluster.local")):
+                    raise ValueError("CLAMAV_HOST must be a private IP or internal-only DNS hostname") from exc
         if bool(self.supabase_url.strip()) != bool(self.supabase_anon_key.strip()):
             raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured together")
         if self.supabase_url and not self.supabase_url.strip().startswith("https://"):
