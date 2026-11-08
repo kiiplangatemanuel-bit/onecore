@@ -51,7 +51,7 @@ def scoped(query, model, membership):
 
 
 def require_hr_read(membership):
-    allowed={"org_admin","branch_admin","manager","accountant","hr_admin","hr_manager","payroll_manager","payroll_approver","payroll_payment"}
+    allowed={"org_admin","branch_admin","manager","accountant","hr_admin","hr_manager","payroll_manager","payroll_approver","payroll_payment","payroll_accounting"}
     if (membership.role or "").lower() not in allowed:
         raise HTTPException(403,"HR and payroll data requires an authorized HR, finance or organization role")
 
