@@ -661,6 +661,10 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
+    if db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, payroll_run_id=row.id
+    ).first():
+        raise HTTPException(409, "Payroll run is reserved by a payment batch; settle or cancel that batch")
     if user.id in {row.created_by,row.submitted_by,row.approved_by}:
         raise HTTPException(409,"Payroll preparer, submitter and approver cannot authorize its payment")
     accounting_link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).with_for_update().first()
@@ -909,6 +913,10 @@ def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversal
         raise HTTPException(404,"Payroll run not found")
     if run.status!="approved":
         raise HTTPException(409,"Only approved and unpaid payroll journals can be reversed")
+    if db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, payroll_run_id=run.id
+    ).first():
+        raise HTTPException(409,"Cancel the unprocessed payment batch before reversing its payroll journal")
     link=db.query(PayrollAccountingLink).filter_by(
         organization_id=membership.organization_id,payroll_run_id=run.id).with_for_update().first()
     if not link: raise HTTPException(404,"Payroll accounting journal not found")
@@ -1238,6 +1246,30 @@ def create_payroll_payment_batch(payload: PayrollPaymentBatchIn,
         db.rollback()
         raise HTTPException(409, "One or more payroll runs were concurrently reserved by another payment batch")
     db.refresh(batch)
+    return _payment_batch_out(db, batch)
+
+
+@router.post("/payroll/payment-batches/{batch_id}/cancel")
+def cancel_payroll_payment_batch(batch_id: int, membership=Depends(active_membership),
+        user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_payroll_action(membership, "prepare")
+    batch = db.query(PayrollPaymentBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    _assert_payment_batch_branch_scope(db, batch, membership)
+    if user.id != batch.created_by and (membership.role or "").lower() != "org_admin":
+        raise HTTPException(403, "Only the batch creator or organization administrator can cancel it")
+    if batch.status not in {"draft", "pending_approval"}:
+        raise HTTPException(409, "Only an unapproved batch can be cancelled")
+    db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, batch_id=batch.id
+    ).delete(synchronize_session=False)
+    batch.status = "cancelled"
+    audit(db, user, membership.organization_id, "payroll.payment_batch.cancelled",
+          "payroll_payment_batch", batch.id, "Unprocessed batch cancelled; payroll runs released")
+    db.commit()
     return _payment_batch_out(db, batch)
 
 
