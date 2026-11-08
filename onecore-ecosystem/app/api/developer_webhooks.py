@@ -206,6 +206,67 @@ def enqueue_webhook_event(
     return {"event_id": event_id, "queued_deliveries": created}
 
 
+
+@router.get("/webhooks")
+def list_developer_webhooks(
+    organization_id: int = Query(gt=0),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    _active_developer(db, user, organization_id)
+    records = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="developers", record_type="webhook", organization_id=organization_id
+    ).order_by(PortalWorkflowRecord.updated_at.desc()).all()
+    result = []
+    for record in records:
+        endpoint = db.query(DeveloperWebhookEndpoint).filter_by(workflow_record_id=record.id).first()
+        counts = dict(db.query(
+            DeveloperWebhookDelivery.status,
+            __import__("sqlalchemy").func.count(DeveloperWebhookDelivery.id),
+        ).filter_by(endpoint_id=endpoint.id).group_by(DeveloperWebhookDelivery.status).all()) if endpoint else {}
+        result.append({
+            "workflow_record_id": record.id,
+            "name": (record.payload or {}).get("name", "Webhook"),
+            "endpoint_url": (record.payload or {}).get("endpoint_url", ""),
+            "events": (record.payload or {}).get("events", []),
+            "active": bool(endpoint and endpoint.active),
+            "deliveries": counts,
+        })
+    return result
+
+
+@router.get("/webhooks/{workflow_record_id}/deliveries")
+def list_webhook_deliveries(
+    workflow_record_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(PortalWorkflowRecord).filter_by(
+        id=workflow_record_id, portal_key="developers", record_type="webhook"
+    ).first()
+    if not record:
+        raise HTTPException(404, "Webhook not found")
+    _active_developer(db, user, record.organization_id)
+    endpoint = db.query(DeveloperWebhookEndpoint).filter_by(workflow_record_id=record.id).first()
+    if not endpoint:
+        return {"items": [], "total": 0}
+    rows = db.query(DeveloperWebhookDelivery).filter_by(endpoint_id=endpoint.id).order_by(
+        DeveloperWebhookDelivery.created_at.desc()
+    ).limit(limit).all()
+    total = db.query(DeveloperWebhookDelivery).filter_by(endpoint_id=endpoint.id).count()
+    return {
+        "total": total,
+        "items": [{
+            "event_id": row.event_id, "event_type": row.event_type,
+            "status": row.status, "attempts": row.attempts,
+            "response_status": row.response_status, "last_error": row.last_error,
+            "created_at": row.created_at.isoformat(),
+            "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+            "next_attempt_at": row.next_attempt_at.isoformat() if row.status == "pending" else None,
+        } for row in rows],
+    }
+
 def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
     endpoint = db.query(DeveloperWebhookEndpoint).filter_by(
         id=delivery.endpoint_id, active=True
