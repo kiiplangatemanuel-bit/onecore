@@ -95,18 +95,26 @@ def apply_loyalty_redemption(prepared, points: int, points_per_currency_unit: in
         raise HTTPException(422, "The selected loyalty points are worth less than one cent")
     if loyalty_discount > maximum:
         raise HTTPException(422, "Loyalty redemption exceeds the configured per-sale percentage limit")
-    remaining = loyalty_discount
+    shares = []
+    for item in prepared:
+        taxable_base = money(Decimal(item[2]) - Decimal(item[3]))
+        raw = loyalty_discount * taxable_base / discountable_base
+        share = (raw * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
+        shares.append(min(money(share), taxable_base))
+    remaining = money(loyalty_discount - sum(shares, Decimal("0.00")))
+    for index in range(len(shares) - 1, -1, -1):
+        taxable_base = money(Decimal(prepared[index][2]) - Decimal(prepared[index][3]))
+        capacity = money(taxable_base - shares[index])
+        extra = min(remaining, capacity)
+        shares[index] = money(shares[index] + extra)
+        remaining = money(remaining - extra)
+        if remaining <= 0:
+            break
+    if remaining > 0:
+        raise HTTPException(422, "Loyalty discount cannot be allocated to the selected sale lines")
     adjusted = []
-    for index, item in enumerate(prepared):
+    for item, share in zip(prepared, shares):
         line, unit_price, subtotal, discount, tax_rate, tax, line_total, _ = item
-        taxable_base = money(Decimal(subtotal) - Decimal(discount))
-        if index == len(prepared) - 1:
-            share = remaining
-        else:
-            raw = loyalty_discount * taxable_base / discountable_base
-            share = (raw * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
-            share = min(money(share), remaining, taxable_base)
-        remaining = money(remaining - share)
         new_taxable = money(Decimal(subtotal) - Decimal(discount) - share)
         new_tax = money(new_taxable * Decimal(tax_rate) / Decimal("100"))
         new_total = money(new_taxable + new_tax)
