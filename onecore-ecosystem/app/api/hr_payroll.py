@@ -1087,3 +1087,427 @@ def decide_attendance(attendance_id: int, payload: AttendanceDecisionIn,
           "hr_attendance", row.id, payload.note)
     db.commit()
     return attendance_out(row)
+
+
+# Payroll payment batches and bank reconciliation
+class PayrollPaymentBatchIn(BaseModel):
+    payroll_run_ids: list[int] = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+    @field_validator("payroll_run_ids")
+    @classmethod
+    def unique_run_ids(cls, values):
+        if len(values) != len(set(values)):
+            raise ValueError("Payroll run IDs must be unique")
+        return values
+
+
+class PayrollBatchSettlementItemIn(BaseModel):
+    payroll_run_id: int = Field(gt=0)
+    payment_reference: str = Field(min_length=3, max_length=120)
+
+
+class PayrollBatchSettlementIn(BaseModel):
+    items: list[PayrollBatchSettlementItemIn] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_settlements(self):
+        ids = [x.payroll_run_id for x in self.items]
+        refs = [x.payment_reference for x in self.items]
+        if len(ids) != len(set(ids)) or len(refs) != len(set(refs)):
+            raise ValueError("Settlement run IDs and payment references must be unique")
+        return self
+
+
+class PayrollStatementLineIn(BaseModel):
+    transaction_date: date
+    reference: str = Field(min_length=1, max_length=120)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    currency: str = Field(default="KES", pattern="^[A-Z]{3}$")
+
+
+class PayrollStatementImportIn(BaseModel):
+    lines: list[PayrollStatementLineIn] = Field(min_length=1, max_length=1000)
+
+
+class PayrollStatementResolveIn(BaseModel):
+    batch_item_id: int = Field(gt=0)
+    note: str = Field(min_length=5, max_length=500)
+
+
+def _payment_batch_out(db, batch):
+    items = db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=batch.organization_id, batch_id=batch.id
+    ).order_by(PayrollPaymentBatchItem.id).all()
+    return {
+        "id": batch.id, "currency": batch.currency, "status": batch.status,
+        "item_count": batch.item_count, "total_amount": str(batch.total_amount),
+        "idempotency_key": batch.idempotency_key,
+        "created_by": batch.created_by, "submitted_by": batch.submitted_by,
+        "approved_by": batch.approved_by,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "submitted_at": batch.submitted_at.isoformat() if batch.submitted_at else None,
+        "approved_at": batch.approved_at.isoformat() if batch.approved_at else None,
+        "items": [{
+            "id": x.id, "payroll_run_id": x.payroll_run_id, "branch_id": x.branch_id,
+            "currency": x.currency, "amount": str(x.amount), "status": x.status,
+            "payment_reference": x.payment_reference,
+            "settlement_journal_id": x.settlement_journal_id,
+            "paid_by": x.paid_by, "paid_at": x.paid_at.isoformat() if x.paid_at else None,
+        } for x in items],
+    }
+
+
+@router.get("/payroll/payment-batches")
+def list_payroll_payment_batches(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    require_hr_read(membership)
+    rows = db.query(PayrollPaymentBatch).filter_by(
+        organization_id=membership.organization_id
+    ).order_by(PayrollPaymentBatch.created_at.desc()).limit(200).all()
+    return [_payment_batch_out(db, x) for x in rows]
+
+
+@router.post("/payroll/payment-batches", status_code=201)
+def create_payroll_payment_batch(payload: PayrollPaymentBatchIn,
+        membership=Depends(active_membership), user: User=Depends(current_user),
+        db: Session=Depends(get_db)):
+    require_payroll_action(membership, "prepare")
+    existing = db.query(PayrollPaymentBatch).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if existing:
+        existing_ids = [x.payroll_run_id for x in db.query(PayrollPaymentBatchItem).filter_by(batch_id=existing.id).all()]
+        if set(existing_ids) != set(payload.payroll_run_ids) or len(existing_ids) != len(payload.payroll_run_ids):
+            raise HTTPException(409, "Payment batch idempotency key was already used for different payroll runs")
+        return _payment_batch_out(db, existing)
+    runs = db.query(PayrollRun).filter(
+        PayrollRun.organization_id == membership.organization_id,
+        PayrollRun.id.in_(payload.payroll_run_ids)
+    ).with_for_update().all()
+    if len(runs) != len(payload.payroll_run_ids):
+        raise HTTPException(404, "One or more payroll runs were not found in this organization")
+    currencies = {x.currency for x in runs}
+    if len(currencies) != 1:
+        raise HTTPException(422, "A payment batch can contain only one currency")
+    for run in runs:
+        if not can_access_branch(membership, run.branch_id):
+            raise HTTPException(404, "One or more payroll runs were not found in your branch scope")
+        if run.status != "approved" or dec(run.net_total) <= 0:
+            raise HTTPException(409, "Only approved payroll runs with a positive net total can enter a payment batch")
+        link = db.query(PayrollAccountingLink).filter_by(
+            organization_id=membership.organization_id, payroll_run_id=run.id
+        ).first()
+        if not link or link.reversal_journal_id or link.settlement_journal_id:
+            raise HTTPException(409, "Every payroll run must have an unreversed accrual journal and no prior settlement")
+        if db.query(PayrollPaymentBatchItem).filter_by(payroll_run_id=run.id).first():
+            raise HTTPException(409, "A payroll run is already reserved by a payment batch")
+    batch = PayrollPaymentBatch(
+        organization_id=membership.organization_id, currency=next(iter(currencies)),
+        status="draft", item_count=len(runs), total_amount=rounded(sum((dec(x.net_total) for x in runs), ZERO)),
+        idempotency_key=payload.idempotency_key, created_by=user.id,
+    )
+    db.add(batch)
+    try:
+        db.flush()
+        for run in runs:
+            db.add(PayrollPaymentBatchItem(
+                organization_id=membership.organization_id, batch_id=batch.id,
+                payroll_run_id=run.id, branch_id=run.branch_id, currency=run.currency,
+                amount=rounded(run.net_total), status="pending",
+            ))
+        audit(db, user, membership.organization_id, "payroll.payment_batch.created",
+              "payroll_payment_batch", batch.id, f"{len(runs)} payroll runs; total {batch.total_amount} {batch.currency}")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "One or more payroll runs were concurrently reserved by another payment batch")
+    db.refresh(batch)
+    return _payment_batch_out(db, batch)
+
+
+@router.post("/payroll/payment-batches/{batch_id}/submit")
+def submit_payroll_payment_batch(batch_id: int, membership=Depends(active_membership),
+        user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_payroll_action(membership, "prepare")
+    batch = db.query(PayrollPaymentBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    if batch.status != "draft":
+        raise HTTPException(409, "Only draft payment batches can be submitted")
+    batch.status = "pending_approval"
+    batch.submitted_by = user.id
+    batch.submitted_at = datetime.now(timezone.utc)
+    audit(db, user, membership.organization_id, "payroll.payment_batch.submitted",
+          "payroll_payment_batch", batch.id)
+    db.commit()
+    return _payment_batch_out(db, batch)
+
+
+@router.post("/payroll/payment-batches/{batch_id}/approve")
+def approve_payroll_payment_batch(batch_id: int, membership=Depends(active_membership),
+        user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_payroll_action(membership, "approve")
+    batch = db.query(PayrollPaymentBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not batch:
+        raise HTTPException(404, "Payment batch not found")
+    if batch.status != "pending_approval":
+        raise HTTPException(409, "Only submitted payment batches can be approved")
+    if user.id in {batch.created_by, batch.submitted_by}:
+        raise HTTPException(409, "Payment batch creator or submitter cannot approve the batch")
+    items = db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, batch_id=batch.id
+    ).all()
+    if len(items) != batch.item_count or not items:
+        raise HTTPException(409, "Payment batch items are incomplete")
+    for item in items:
+        run = db.query(PayrollRun).filter_by(
+            id=item.payroll_run_id, organization_id=membership.organization_id
+        ).with_for_update().first()
+        link = db.query(PayrollAccountingLink).filter_by(
+            organization_id=membership.organization_id, payroll_run_id=item.payroll_run_id
+        ).first()
+        if not run or run.status != "approved" or not link or link.reversal_journal_id or link.settlement_journal_id:
+            raise HTTPException(409, "A payroll run changed after batch creation; refresh or rebuild the batch")
+    batch.status = "approved"
+    batch.approved_by = user.id
+    batch.approved_at = datetime.now(timezone.utc)
+    audit(db, user, membership.organization_id, "payroll.payment_batch.approved",
+          "payroll_payment_batch", batch.id)
+    db.commit()
+    return _payment_batch_out(db, batch)
+
+
+@router.post("/payroll/payment-batches/{batch_id}/settlements")
+def settle_payroll_payment_batch(batch_id: int, payload: PayrollBatchSettlementIn,
+        membership=Depends(active_membership), user: User=Depends(current_user),
+        db: Session=Depends(get_db)):
+    require_payroll_action(membership, "pay")
+    batch = db.query(PayrollPaymentBatch).filter_by(
+        id=batch_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not batch or batch.status not in {"approved", "partially_paid"}:
+        raise HTTPException(409, "Only approved or partially paid batches can be settled")
+    if user.id in {batch.created_by, batch.submitted_by, batch.approved_by}:
+        raise HTTPException(409, "Batch creator, submitter and approver cannot authorize its payment")
+    items_by_run = {x.payroll_run_id: x for x in db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, batch_id=batch.id
+    ).with_for_update().all()}
+    mapping = db.query(PayrollAccountingMapping).filter_by(
+        organization_id=membership.organization_id
+    ).first()
+    if not mapping:
+        raise HTTPException(409, "Payroll accounting mapping is not configured")
+    bank = db.query(AccountingAccount).filter_by(
+        id=mapping.bank_account_id, organization_id=membership.organization_id,
+        is_active=True, account_type="asset"
+    ).first()
+    payable = db.query(AccountingAccount).filter_by(
+        id=mapping.net_payable_account_id, organization_id=membership.organization_id,
+        is_active=True, account_type="liability"
+    ).first()
+    if not bank or not payable:
+        raise HTTPException(409, "The mapped bank or net-payable account is no longer active")
+    settled = []
+    for requested in payload.items:
+        item = items_by_run.get(requested.payroll_run_id)
+        if not item:
+            raise HTTPException(404, "A requested payroll run is not part of this batch")
+        if item.status != "pending":
+            raise HTTPException(409, "A payment batch item has already been settled")
+        if db.query(PayrollPaymentBatchItem).filter(
+            PayrollPaymentBatchItem.organization_id == membership.organization_id,
+            PayrollPaymentBatchItem.payment_reference == requested.payment_reference,
+            PayrollPaymentBatchItem.id != item.id
+        ).first():
+            raise HTTPException(409, "Payment reference is already used by another payroll item")
+        run = db.query(PayrollRun).filter_by(
+            id=item.payroll_run_id, organization_id=membership.organization_id
+        ).with_for_update().first()
+        link = db.query(PayrollAccountingLink).filter_by(
+            organization_id=membership.organization_id, payroll_run_id=run.id
+        ).with_for_update().first()
+        if not run or run.status != "approved" or not link or link.reversal_journal_id or link.settlement_journal_id:
+            raise HTTPException(409, "Payroll run is no longer eligible for settlement")
+        if user.id == link.created_by:
+            raise HTTPException(409, "The payroll accounting poster cannot authorize its settlement")
+        settlement_date = datetime.now(timezone.utc).date()
+        _assert_accounting_date_open(db, membership.organization_id, settlement_date)
+        lines = [
+            {"account_id": mapping.net_payable_account_id, "description": f"Settle payroll run {run.id} net payable",
+             "debit": dec(item.amount), "credit": ZERO, "branch_id": run.branch_id},
+            {"account_id": mapping.bank_account_id, "description": f"Payroll bank payment {requested.payment_reference}",
+             "debit": ZERO, "credit": dec(item.amount), "branch_id": run.branch_id},
+        ]
+        validate_journal_lines([type("Line", (), x)() for x in lines])
+        journal = AccountingJournal(
+            organization_id=membership.organization_id, branch_id=run.branch_id,
+            journal_number="JRN-" + uuid.uuid4().hex[:16].upper(),
+            reference=f"PAYROLL-BATCH-{batch.id}-RUN-{run.id}",
+            memo=f"Payroll batch {batch.id} settlement; external payment reference {requested.payment_reference}",
+            status="posted", entry_date=datetime.combine(settlement_date, time.min, tzinfo=timezone.utc),
+            created_by=user.id, posted_by=user.id, posted_at=datetime.now(timezone.utc),
+        )
+        db.add(journal)
+        db.flush()
+        for line in lines:
+            db.add(AccountingJournalLine(
+                organization_id=membership.organization_id, journal_id=journal.id,
+                account_id=line["account_id"], branch_id=line["branch_id"],
+                description=line["description"], debit=line["debit"], credit=line["credit"],
+            ))
+        link.settlement_journal_id = journal.id
+        run.status = "paid"
+        run.paid_by = user.id
+        run.paid_at = datetime.now(timezone.utc)
+        run.payment_reference = requested.payment_reference
+        item.payment_reference = requested.payment_reference
+        item.status = "paid"
+        item.settlement_journal_id = journal.id
+        item.paid_by = user.id
+        item.paid_at = datetime.now(timezone.utc)
+        audit(db, user, membership.organization_id, "payroll.payment_batch.item_paid",
+              "payroll_payment_batch_item", item.id,
+              f"Run {run.id}; amount {item.amount} {item.currency}; external reference {requested.payment_reference}")
+        settled.append({"payroll_run_id": run.id, "payment_reference": requested.payment_reference,
+                        "settlement_journal_id": journal.id})
+    remaining = sum(1 for x in items_by_run.values() if x.status == "pending")
+    batch.status = "paid" if remaining == 0 else "partially_paid"
+    audit(db, user, membership.organization_id, "payroll.payment_batch.settled",
+          "payroll_payment_batch", batch.id, f"Settled {len(settled)} item(s); {remaining} remain")
+    db.commit()
+    return {"batch": _payment_batch_out(db, batch), "settled": settled}
+
+
+@router.post("/payroll/bank-statements/import", status_code=201)
+def import_payroll_bank_statement(payload: PayrollStatementImportIn,
+        membership=Depends(active_membership), user: User=Depends(current_user),
+        db: Session=Depends(get_db)):
+    require_payroll_action(membership, "accounting")
+    mapping = db.query(PayrollAccountingMapping).filter_by(
+        organization_id=membership.organization_id
+    ).first()
+    if not mapping:
+        raise HTTPException(409, "Configure payroll accounting mapping before importing bank statements")
+    bank = db.query(AccountingAccount).filter_by(
+        id=mapping.bank_account_id, organization_id=membership.organization_id,
+        is_active=True, account_type="asset"
+    ).first()
+    if not bank:
+        raise HTTPException(409, "Configured payroll bank account is not active")
+    created = []
+    for line in payload.lines:
+        tx_date = datetime.combine(line.transaction_date, time.min, tzinfo=timezone.utc)
+        row = PayrollBankStatementLine(
+            organization_id=membership.organization_id, bank_account_id=bank.id,
+            transaction_date=tx_date, reference=line.reference, amount=rounded(line.amount),
+            currency=line.currency, status="unmatched", imported_by=user.id,
+        )
+        candidates = db.query(PayrollPaymentBatchItem).join(
+            PayrollPaymentBatch, PayrollPaymentBatch.id == PayrollPaymentBatchItem.batch_id
+        ).filter(
+            PayrollPaymentBatchItem.organization_id == membership.organization_id,
+            PayrollPaymentBatchItem.status == "paid",
+            PayrollPaymentBatchItem.payment_reference == line.reference,
+            PayrollPaymentBatchItem.amount == rounded(line.amount),
+            PayrollPaymentBatch.currency == line.currency,
+        ).all()
+        if len(candidates) == 1:
+            candidate = candidates[0]
+            already_matched = db.query(PayrollBankStatementLine).filter_by(
+                organization_id=membership.organization_id, batch_item_id=candidate.id
+            ).first()
+            if not already_matched:
+                row.status = "matched"
+                row.batch_item_id = candidate.id
+                row.matched_by = user.id
+                row.matched_at = datetime.now(timezone.utc)
+                row.match_note = "Automatically matched by exact payment reference, amount and currency"
+            else:
+                row.status = "exception"
+                row.match_note = "Payment item already has a matched bank statement line"
+        elif len(candidates) > 1:
+            row.status = "exception"
+            row.match_note = "Multiple payroll payment items share this reference and amount"
+        else:
+            row.status = "unmatched"
+            row.match_note = "No exact paid payroll item matched this bank line"
+        db.add(row)
+        created.append(row)
+    try:
+        db.flush()
+        audit(db, user, membership.organization_id, "payroll.bank_statement.imported",
+              "payroll_bank_statement", created[0].id,
+              f"Imported {len(created)} line(s); matched {sum(1 for x in created if x.status == 'matched')}")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "The statement contains a duplicate line already imported for this bank account")
+    return [{"id": x.id, "transaction_date": x.transaction_date.date().isoformat(),
+             "reference": x.reference, "amount": str(x.amount), "currency": x.currency,
+             "status": x.status, "batch_item_id": x.batch_item_id, "match_note": x.match_note}
+            for x in created]
+
+
+@router.get("/payroll/bank-statements")
+def list_payroll_bank_statement_lines(status: str | None = None,
+        membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    require_hr_read(membership)
+    if status and status not in {"matched", "unmatched", "exception"}:
+        raise HTTPException(422, "Invalid statement reconciliation status")
+    q = db.query(PayrollBankStatementLine).filter_by(organization_id=membership.organization_id)
+    if status:
+        q = q.filter(PayrollBankStatementLine.status == status)
+    return [{"id": x.id, "transaction_date": x.transaction_date.date().isoformat(),
+             "reference": x.reference, "amount": str(x.amount), "currency": x.currency,
+             "status": x.status, "batch_item_id": x.batch_item_id, "match_note": x.match_note,
+             "matched_by": x.matched_by, "matched_at": x.matched_at.isoformat() if x.matched_at else None}
+            for x in q.order_by(PayrollBankStatementLine.transaction_date.desc()).limit(1000).all()]
+
+
+@router.post("/payroll/bank-statements/{line_id}/resolve")
+def resolve_payroll_bank_statement_line(line_id: int, payload: PayrollStatementResolveIn,
+        membership=Depends(active_membership), user: User=Depends(current_user),
+        db: Session=Depends(get_db)):
+    require_payroll_action(membership, "accounting")
+    line = db.query(PayrollBankStatementLine).filter_by(
+        id=line_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not line:
+        raise HTTPException(404, "Bank statement line not found")
+    if line.status == "matched":
+        raise HTTPException(409, "A reconciled bank statement line cannot be rematched")
+    item = db.query(PayrollPaymentBatchItem).filter_by(
+        id=payload.batch_item_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not item or item.status != "paid":
+        raise HTTPException(404, "Paid payroll batch item not found")
+    mapping = db.query(PayrollAccountingMapping).filter_by(
+        organization_id=membership.organization_id
+    ).first()
+    if not mapping or line.bank_account_id != mapping.bank_account_id:
+        raise HTTPException(409, "Statement line does not belong to the configured payroll bank account")
+    if line.amount != item.amount or line.currency != item.currency:
+        raise HTTPException(409, "Statement amount and currency must exactly match the payroll payment")
+    if db.query(PayrollBankStatementLine).filter(
+        PayrollBankStatementLine.organization_id == membership.organization_id,
+        PayrollBankStatementLine.batch_item_id == item.id,
+        PayrollBankStatementLine.id != line.id
+    ).first():
+        raise HTTPException(409, "Payroll payment item is already reconciled against another statement line")
+    line.status = "matched"
+    line.batch_item_id = item.id
+    line.matched_by = user.id
+    line.matched_at = datetime.now(timezone.utc)
+    line.match_note = "Manually resolved by authorized finance reviewer: " + payload.note
+    audit(db, user, membership.organization_id, "payroll.bank_statement.manually_matched",
+          "payroll_bank_statement", line.id, line.match_note)
+    db.commit()
+    return {"id": line.id, "status": line.status, "batch_item_id": line.batch_item_id,
+            "matched_by": line.matched_by, "matched_at": line.matched_at.isoformat(),
+            "match_note": line.match_note}
