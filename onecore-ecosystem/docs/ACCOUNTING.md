@@ -323,3 +323,10 @@ API:
 This integration does not execute external refunds or settle payment-provider clearing accounts; those remain separate payment-provider and reconciliation workflows. Account types, base-currency consistency and tax treatment require finance configuration and review.
 
 The Accounting workspace now includes a POS ledger-mapping form, integration status table, pending-post action and legacy-source backfill action. Mapping controls are manager-authorized; integration status is available to users with accounting read access.
+
+
+## CRM sales-order invoice attribution
+
+Receivable invoices may optionally link to a confirmed CRM sales order. The API verifies organization, contact, branch, currency and remaining uninvoiced order value; payable invoices cannot carry a CRM order link. When a linked receivable invoice becomes fully paid, the payment transaction appends an idempotent `invoice_paid` campaign attribution event linked to the exact accounting invoice and CRM sales order. Repeated payment requests and repeated event processing cannot create duplicate campaign revenue. The Finance workspace can create linked customer invoices from CRM order snapshots and record payments.
+
+This does not initiate bank or M-Pesa transfers. Historical invoice backfill and credit-note/refund attribution remain follow-up work.
