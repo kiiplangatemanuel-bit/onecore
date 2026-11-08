@@ -276,6 +276,10 @@ class PaidIn(BaseModel):
     payment_reference: str = Field(min_length=3, max_length=120)
 
 
+class CancelPayrollRunIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
 def employee_out(x):
     return {"id": x.id, "default_shift_id": x.default_shift_id, "termination_date": x.termination_date.date().isoformat() if x.termination_date else None, "branch_id": x.branch_id, "employee_number": x.employee_number,
             "first_name": x.first_name, "last_name": x.last_name, "email": x.email,
@@ -830,6 +834,22 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
         db.rollback()
         raise HTTPException(409,"Payroll idempotency conflict or duplicate employee payslip")
     db.refresh(row)
+    return _run_out(row)
+
+
+@router.post("/payroll/runs/{run_id}/cancel")
+def cancel_payroll_run(run_id:int,payload:CancelPayrollRunIn,membership=Depends(active_membership),
+                       user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_payroll_action(membership,"prepare")
+    row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
+    if row.status in {"paid","cancelled"}: raise HTTPException(409,"Paid or cancelled payroll cannot be cancelled")
+    link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).first()
+    if link and not link.reversal_journal_id:
+        raise HTTPException(409,"Reverse the posted accrual journal before cancelling this payroll run")
+    row.status="cancelled"
+    audit(db,user,membership.organization_id,"payroll.run.cancelled","payroll_run",row.id,payload.reason)
+    db.commit()
     return _run_out(row)
 
 
