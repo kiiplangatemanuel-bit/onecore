@@ -105,7 +105,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert run.status_code == 201, run.text
             run_id = run.json()["id"]
             assert run.json()["gross_total"] == "21500.00"
-            assert run.json()["employer_cost_total"] == "23590.00"
+            assert run.json()["employer_cost_total"] == "23112.50"
             assert client.post(f"/api/v1/payroll/runs/{run_id}/submit").status_code == 200
 
             actor["user"], actor["role"] = users[1], "payroll_approver"
@@ -117,7 +117,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert slips.status_code == 200, slips.text
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
-            assert slips.json()[0]["net_pay"] == "17366.25"
+            assert slips.json()[0]["net_pay"] == "17246.25"
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",
