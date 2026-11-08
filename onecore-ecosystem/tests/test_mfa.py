@@ -80,7 +80,7 @@ def test_password_login_returns_challenge_and_only_second_factor_mints_access_to
         assert login_result["mfa_required"] is True
         assert "access_token" not in login_result
         factor = db.query(UserMFAFactor).filter_by(user_id=user.id).one()
-        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp() + 31)
+        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp())
         result = complete_mfa_challenge(MFAChallengeIn(
             challenge_token=login_result["challenge_token"], code=code
         ), db)
@@ -123,7 +123,7 @@ def test_totp_time_step_cannot_be_replayed_across_challenges(monkeypatch):
         monkeypatch.setattr(mfa, "_now", lambda: fixed_now)
         _enable(db, user)
         factor = db.query(UserMFAFactor).filter_by(user_id=user.id).one()
-        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp() + 31)
+        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp())
         first = issue_mfa_challenge(db, user)
         complete_mfa_challenge(MFAChallengeIn(challenge_token=first["challenge_token"], code=code), db)
         second = issue_mfa_challenge(db, user)
@@ -164,7 +164,7 @@ def test_disable_requires_password_and_second_factor_and_revokes_access(monkeypa
         _enable(db, user)
         old_access_token = mfa.create_access_token(user.id, user.auth_version)
         factor = db.query(UserMFAFactor).filter_by(user_id=user.id).one()
-        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp() + 31)
+        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp())
         result = disable_mfa(MFASensitiveActionIn(password="correct-password", code=code), user, db)
         db.refresh(user)
         assert result["status"] == "disabled"
