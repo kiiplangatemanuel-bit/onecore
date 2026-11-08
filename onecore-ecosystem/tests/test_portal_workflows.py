@@ -232,3 +232,25 @@ def test_comments_and_applications_cannot_reference_other_tenant_or_unpublished_
             )
         assert missing_vacancy.value.status_code == 404
     engine.dispose()
+
+
+def test_portal_records_reject_nested_credential_material():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="A", slug="org-a")
+        db.add(org)
+        db.flush()
+        user = _identity(db, "dev@example.com", org, "developer")
+        db.commit()
+        with pytest.raises(HTTPException) as denied:
+            create_portal_record(
+                "developers", "webhook",
+                PortalRecordCreate(
+                    organization_id=org.id, visibility="organization",
+                    payload={"name": "Deploy hook", "endpoint_url": "https://example.com/hook",
+                             "events": ["deployment"], "config": {"signing_secret": "do-not-store"}},
+                ), user, db,
+            )
+        assert denied.value.status_code == 422
+        assert db.query(PortalWorkflowRecord).count() == 0
+    engine.dispose()
