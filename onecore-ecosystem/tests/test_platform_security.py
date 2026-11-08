@@ -77,7 +77,7 @@ def test_production_settings_require_secure_values():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{**safe, "cors_origins": "*"})
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, **{**safe, "database_url": "sqlite:///./onecore.db"})
+        Settings(_env_file=None, **{**safe, "supabase_db_url": "sqlite:///./onecore.db"})
 
 
 def test_bootstrap_credentials_must_be_explicit_and_strong():
