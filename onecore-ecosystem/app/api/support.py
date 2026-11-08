@@ -133,7 +133,6 @@ def read_public_ticket(
     x_support_access_token: str = Header(default="", alias="X-Support-Access-Token"),
     db: Session = Depends(get_db),
 ):
-    enforce_public_write_limit(request, "support-ticket-read")
     ticket = _guest_ticket(db, ticket_number, x_support_access_token)
     return _ticket_out(ticket, db, include_messages=True)
 
