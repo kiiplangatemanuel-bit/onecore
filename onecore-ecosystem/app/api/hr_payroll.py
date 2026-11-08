@@ -204,6 +204,8 @@ class RuleSetIn(BaseModel):
     def validate_rule_structure(self):
         if self.effective_to and self.effective_to < self.effective_from:
             raise ValueError("Effective end must not precede effective start")
+        if self.overtime_multiplier is not None and self.standard_monthly_hours is None:
+            raise ValueError("Standard monthly hours are required when an overtime multiplier is configured")
         previous = Decimal("0")
         for index, band in enumerate(self.paye_bands):
             if not {"lower_bound", "upper_bound", "rate"}.issubset(band):
@@ -275,7 +277,7 @@ class PaidIn(BaseModel):
 
 
 def employee_out(x):
-    return {"id": x.id, "termination_date": x.termination_date.date().isoformat() if x.termination_date else None, "branch_id": x.branch_id, "employee_number": x.employee_number,
+    return {"id": x.id, "default_shift_id": x.default_shift_id, "termination_date": x.termination_date.date().isoformat() if x.termination_date else None, "branch_id": x.branch_id, "employee_number": x.employee_number,
             "first_name": x.first_name, "last_name": x.last_name, "email": x.email,
             "phone": x.phone, "department": x.department, "job_title": x.job_title,
             "employment_type": x.employment_type, "employment_status": x.employment_status,
