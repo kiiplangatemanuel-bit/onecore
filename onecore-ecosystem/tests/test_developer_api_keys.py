@@ -240,7 +240,7 @@ def test_production_api_key_reads_only_its_authorized_organization():
         )
         db.add(org)
         db.flush()
-        developer = _user(db, org, "production-dev@example.com")
+        developer = _user(db, org, "production-admin@example.com", role="org_admin")
         db.commit()
         created = create_developer_api_key(
             DeveloperApiKeyCreate(
@@ -254,4 +254,22 @@ def test_production_api_key_reads_only_its_authorized_organization():
         assert response["organization"]["id"] == org.id
         assert response["organization"]["name"] == "Production Tenant"
         assert response["api_key"]["data_mode"] == "live"
+    engine.dispose()
+
+
+def test_developer_role_cannot_issue_production_api_keys():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="Tenant", slug="tenant")
+        db.add(org)
+        db.flush()
+        developer = _user(db, org, "developer-only@example.com", role="developer")
+        with pytest.raises(HTTPException) as denied:
+            create_developer_api_key(
+                DeveloperApiKeyCreate(
+                    organization_id=org.id, name="Production credential",
+                    environment="production", scopes=["organization:read"],
+                ), developer, db,
+            )
+        assert denied.value.status_code == 403
     engine.dispose()
