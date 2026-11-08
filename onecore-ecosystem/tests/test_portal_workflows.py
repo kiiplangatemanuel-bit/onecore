@@ -254,3 +254,26 @@ def test_portal_records_reject_nested_credential_material():
         assert denied.value.status_code == 422
         assert db.query(PortalWorkflowRecord).count() == 0
     engine.dispose()
+
+
+def test_confidential_case_status_requires_valid_reviewer_transition_order():
+    engine = _db()
+    with Session(engine) as db:
+        owner = User(email="owner@example.com", full_name="Owner", password_hash="unused")
+        reviewer = User(email="security@example.com", full_name="Security", password_hash="unused",
+                        platform_role="security_admin")
+        db.add_all([owner, reviewer])
+        db.commit()
+        report = create_portal_record(
+            "trust", "security_report",
+            PortalRecordCreate(payload={"title": "Disclosure", "description": "Details", "severity": "high"}),
+            owner, db,
+        )
+        report = update_portal_record("trust", report["id"], PortalRecordUpdate(status="acknowledged"), reviewer, db)
+        assert report["status"] == "acknowledged"
+        with pytest.raises(HTTPException) as skipped:
+            update_portal_record("trust", report["id"], PortalRecordUpdate(status="resolved"), reviewer, db)
+        assert skipped.value.status_code == 422
+        report = update_portal_record("trust", report["id"], PortalRecordUpdate(status="investigating"), reviewer, db)
+        assert report["status"] == "investigating"
+    engine.dispose()
