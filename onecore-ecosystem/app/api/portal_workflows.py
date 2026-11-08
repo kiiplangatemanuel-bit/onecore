@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -115,6 +116,8 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 def _can_read(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if row.owner_user_id == user.id:
         return True
+    if row.visibility != "organization":
+        return False
     if (row.portal_key, row.record_type) in PERSONAL_TYPES or row.portal_key == "trust" or row.portal_key == "careers":
         return False
     if row.organization_id is None:
@@ -213,7 +216,10 @@ def list_portal_records(
             org_ids = [organization_id]
         if not org_ids:
             return []
-        query = query.filter(PortalWorkflowRecord.organization_id.in_(org_ids))
+        query = query.filter(or_(
+            PortalWorkflowRecord.owner_user_id == user.id,
+            and_(PortalWorkflowRecord.organization_id.in_(org_ids), PortalWorkflowRecord.visibility == "organization"),
+        ))
     rows = query.order_by(PortalWorkflowRecord.updated_at.desc()).limit(limit).all()
     return [_out(row) for row in rows]
 
@@ -229,6 +235,8 @@ def create_portal_record(
     personal = (portal, record_type) in PERSONAL_TYPES or portal in {"trust", "careers"}
     if personal and payload.organization_id is not None:
         raise HTTPException(422, "This record is personal and cannot be attached to an organization")
+    if personal and payload.visibility != "private":
+        raise HTTPException(422, "Personal portal records must remain private")
     if not personal and payload.organization_id is None:
         raise HTTPException(422, "An organization is required for this portal workflow")
     if payload.organization_id is not None:
