@@ -27,6 +27,7 @@ from app.api.healthcare_hospital import router as healthcare_hospital_router
 from app.api.pharmacy_lab import router as pharmacy_lab_router
 from app.api.procurement_workflows import router as procurement_workflows_router
 from app.api.school_advanced import router as school_advanced_router
+from app.api.ai_routes import router as ai_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,6 +74,7 @@ app.include_router(healthcare_hospital_router)
 app.include_router(pharmacy_lab_router)
 app.include_router(procurement_workflows_router)
 app.include_router(school_advanced_router)
+app.include_router(ai_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():

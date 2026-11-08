@@ -53,6 +53,7 @@ The application starts with adapters disabled. No real payment, tax, health, mes
 - `/api/v1/modules` — 75-category catalogue and enabled modules
 - `/api/v1/records/{module_key}` — tenant-scoped generic records (starter data plane)
 - `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)
+- `/api/v1/ai` — tenant-scoped OneCore AI chat, document analysis, conversations and usage
 - `/api/v1/operations` — audit events and operational overview
 - `/health` — liveness/readiness information
 
@@ -65,7 +66,7 @@ The application starts with adapters disabled. No real payment, tax, health, mes
 - These are technical controls, not regulatory certification. MFA/step-up, managed key rotation, retention/data-subject workflows, penetration testing, clinical/legal governance and live provider UAT remain production requirements.
 
 ## Architecture and extension points
-See `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, `docs/MODULE_DELIVERY.md`, and `docs/SPEC_TRACEABILITY.md`.
+See `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, `docs/MODULE_DELIVERY.md`, `docs/ONECORE_AI.md`, and `docs/SPEC_TRACEABILITY.md`.
 
 ## Production checklist (minimum)
 - Configure PostgreSQL, Redis/queue, object storage, TLS, reverse proxy and managed secrets.

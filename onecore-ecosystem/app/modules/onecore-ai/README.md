@@ -1,19 +1,19 @@
 # OneCore AI
 
-Master specification category: **16**
+Master specification category 16.
 
-## Source scope
-Individual/business/institution/enterprise access; standalone/integrated use; hybrid billing; multi-provider gateway, routing/failover, private deployment, policies, usage/cost controls; chat, documents, summarization, data/spreadsheet analysis, visualization, BI, coding/SQL, voice/STT/TTS, image generation/understanding, file/PDF analysis, reports, forecasting, predictive insights, anomaly detection, automation, support, knowledge, extraction, decision support, search, agents and tool/API calls; English, Kiswahili, French, Arabic and extensible African languages; permission/tenant-aware governance, human approval, logs and retention.
+## Implemented in this slice
+- Authenticated organization-scoped AI gateway using configured OpenAI-compatible chat-completions providers.
+- Primary and fallback provider routing; provider keys remain backend-only environment secrets.
+- Persistent tenant-scoped conversations, message history and token usage in the shared SQL database.
+- Chat tasks: general assistance, summarization, explanation, analysis, drafting and coding help.
+- In-memory PDF (up to 30 pages), XLSX (up to 5 sheets / 1,000 rows each), CSV, TXT and Markdown extraction with upload, archive and extracted-text limits.
+- Language selection for English, Kiswahili, French, Arabic, Somali, Amharic, Hausa, Yoruba, Zulu and Portuguese prompts.
+- Usage counters, audit events, owner-only conversation access and role-gated create/read/delete operations.
+- Capability discovery so the UI does not advertise unsupported capabilities as active.
 
-## Implementation status
-Scaffold only. This folder reserves the domain boundary; it is not a claim of production implementation.
+## Not yet implemented
+Speech-to-text/text-to-speech, image generation/understanding, database-connected agents/tool execution, workflow automation, predictive forecasting, private deployments, human-approval action execution, cost-based hybrid billing, retention schedules and provider-specific usage/cost reconciliation. These require separate provider adapters, storage/queue/approval workflows and operational validation. No generated action is executed by chat.
 
-## Required implementation
-- Define domain entities, constraints, indexes and migrations.
-- Add domain services and versioned API routes.
-- Enforce tenant, branch and role authorization at the service layer.
-- Add validation, approval workflows, audit events and idempotency where needed.
-- Build responsive user/admin workflows and accessible states.
-- Add unit, integration, security and end-to-end tests.
-- Add monitoring, retention, backup/restore and operational documentation.
-- Complete sandbox/UAT and release approval for external dependencies.
+## Configuration
+Set INTEGRATION_AI_ENABLED=true, AI_BASE_URL, AI_API_KEY and AI_MODEL. Optional fallback: INTEGRATION_AI_FALLBACK_ENABLED=true, AI_FALLBACK_BASE_URL, AI_FALLBACK_API_KEY and AI_FALLBACK_MODEL. Use the deployment secret manager for keys; never commit them.
