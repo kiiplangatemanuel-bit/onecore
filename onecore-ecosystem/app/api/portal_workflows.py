@@ -114,11 +114,18 @@ def _resource_out(row, include_secret=False):
 
 @router.get("/{portal}/content")
 def list_public_content(portal: str, content_type: str | None = None,
-                        limit: int = Query(default=50, ge=1, le=100)):
+                        limit: int = Query(default=50, ge=1, le=100),
+                        db: Session = Depends(get_db)):
     """Anonymous, published-only content. No private records are queried here."""
     _validate_portal(portal)
-    query = PortalPublicContent.query  # marker removed below; SQLAlchemy session is injected
-    raise HTTPException(500, "Database session dependency is required")
+    query = db.query(PortalPublicContent).filter_by(portal_key=portal, status="published")
+    if content_type:
+        query = query.filter_by(content_type=content_type)
+    rows = query.order_by(PortalPublicContent.published_at.desc(), PortalPublicContent.id.desc()).limit(limit).all()
+    return [{"id": row.id, "portal": row.portal_key, "content_type": row.content_type,
+        "slug": row.slug, "title": row.title, "summary": row.summary, "body": row.body,
+        "metadata": row.metadata_json or {},
+        "published_at": row.published_at.isoformat() if row.published_at else None} for row in rows]
 
 @router.get("/{portal}/content/{slug}")
 def get_public_content(portal: str, slug: str, db: Session = Depends(get_db)):
