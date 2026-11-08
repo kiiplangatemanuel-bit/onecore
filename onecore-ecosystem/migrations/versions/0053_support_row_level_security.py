@@ -89,6 +89,14 @@ def upgrade():
                 )
             )
             OR (
+                organization_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                      AND m.organization_id = support_tickets.organization_id
+                      AND m.is_active = true AND m.role = 'org_admin'
+                )
+            )
+            OR (
                 guest_token_hash IS NOT NULL
                 AND guest_token_hash = NULLIF(current_setting('app.support_guest_token_hash', true), '')
             )
