@@ -78,7 +78,7 @@ GRANT UPDATE ON TABLE public.developer_webhook_deliveries TO onecore_webhook_wor
 
 Set `WEBHOOK_WORKER_DATABASE_URL` to a connection URI using this login. Do not grant table ownership, `BYPASSRLS`, schema creation, or broad write privileges. The API runtime role remains separate and uses the normal OneCore user-identity RLS context.
 
-## Status alert delivery outbox (migration 0061)
+## Status alert delivery outbox (migration 0060)
 
 Public Status incidents enqueue idempotent email deliveries for matching active Status alert subscriptions in the same transaction as the incident publication/update. The worker retries transient delivery failures with bounded exponential backoff (maximum eight attempts). Run `python -m app.workers.status_alert_delivery` as a private worker process; do not expose it through the API.
 
