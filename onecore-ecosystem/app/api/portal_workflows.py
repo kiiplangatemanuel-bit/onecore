@@ -13,7 +13,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, User
+from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, StatusAlertDelivery, User
 from app.core.security import current_user
 
 router = APIRouter(prefix="/api/v1/portals", tags=["public portals"])
@@ -171,6 +171,41 @@ def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if (row.portal_key, row.record_type) in MANAGER_ONLY:
         return membership.role in {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
     return membership.role in {"org_admin", "manager"}
+
+
+def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, event_key: str) -> None:
+    """Enqueue one idempotent email per active subscriber in the same DB transaction."""
+    payload = incident.payload or {}
+    service = str(payload.get("service") or "OneCore").strip()
+    title = str(payload.get("title") or "Service incident").strip()
+    severity = str(payload.get("severity") or "information").strip()
+    summary = str(payload.get("summary") or "").strip()
+    subscriptions = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="status", record_type="alert_subscription", status="active"
+    ).all()
+    for subscription in subscriptions:
+        preferences = subscription.payload or {}
+        subscribed_service = str(preferences.get("service") or "").strip().casefold()
+        if subscribed_service not in {"*", "all", service.casefold()}:
+            continue
+        recipient = db.query(User).filter_by(id=subscription.owner_user_id, is_active=True).first()
+        if recipient is None or not recipient.email:
+            continue
+        db.add(StatusAlertDelivery(
+            user_id=recipient.id,
+            incident_record_id=incident.id,
+            recipient_email=recipient.email,
+            event_key=f"status-incident-{incident.id}-{event_key}",
+            subject=f"OneCore Status: {title}"[:240],
+            body=(
+                f"Service: {service}\\nSeverity: {severity}\\n"
+                f"Incident: {title}\\n\\n{summary}\\n\\n"
+                "You received this message because you subscribed to OneCore Status alerts."
+            ),
+            status="pending",
+            attempts=0,
+            next_attempt_at=datetime.now(timezone.utc),
+        ))
 
 
 def _out(row: PortalWorkflowRecord) -> dict:
@@ -414,6 +449,10 @@ def update_portal_record(
         row.status = payload.status
     row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, row, f"portal.{portal}.{row.record_type}.updated")
+    if portal == "status" and row.record_type == "incident" and row.organization_id is None:
+        _queue_status_alert_deliveries(
+            db, row, f"updated-{int(row.updated_at.timestamp() * 1_000_000)}"
+        )
     if portal == "developers" and row.record_type in {"application", "sandbox_environment"}:
         from app.api.developer_webhooks import queue_organization_webhook_event
         event_type = "application.updated" if row.record_type == "application" else "sandbox.updated"
@@ -446,6 +485,8 @@ def publish_public_portal_content(
     db.add(row)
     db.flush()
     _audit(db, user, row, f"portal.{portal}.{record_type}.published")
+    if portal == "status" and record_type == "incident":
+        _queue_status_alert_deliveries(db, row, "published")
     db.commit()
     db.refresh(row)
     return _out(row)
