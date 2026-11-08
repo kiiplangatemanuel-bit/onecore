@@ -14,6 +14,8 @@ def upgrade():
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("workflow_record_id", sa.Integer(), sa.ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("endpoint_url", sa.String(2048), nullable=False),
+        sa.Column("events", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("secret_encrypted", sa.Text(), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
