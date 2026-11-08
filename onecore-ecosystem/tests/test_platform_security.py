@@ -103,6 +103,7 @@ def test_production_requires_supabase_managed_postgresql():
         secret_key="s" * 48,
         database_url="postgresql+psycopg://user:pass@db.example/onecore",
         cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com,https://docs.example.com",
         trusted_hosts="api.example.com",
         force_https=True,
     )
