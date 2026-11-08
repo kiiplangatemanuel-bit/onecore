@@ -146,3 +146,32 @@ def test_support_attachment_migration_follows_support_rls_and_quarantines_metada
     assert "support_attachment_select" in source
     assert "support_attachment_insert" in source
     assert "support_attachment_update" in source
+
+
+def test_support_attachments_remain_quarantined_until_security_review():
+    from fastapi import HTTPException
+    from app.api.support import _attachment_download
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[
+        User.__table__, Organization.__table__, SupportTicket.__table__,
+        SupportMessage.__table__, SupportAttachment.__table__, AuditEvent.__table__,
+    ])
+    with Session(engine) as db:
+        ticket = SupportTicket(
+            ticket_number="OCS-QUARANTINE1", subject="Attachment review", category="technical",
+            contact_name="Owner", contact_email="owner@example.com",
+        )
+        db.add(ticket)
+        db.flush()
+        pending = SupportAttachment(
+            ticket_id=ticket.id, file_name="evidence.pdf", object_key="support/test/object",
+            content_type="application/pdf", size_bytes=128, status="pending_scan",
+        )
+        db.add(pending)
+        db.commit()
+        with pytest.raises(HTTPException) as denied:
+            _attachment_download(pending)
+        assert denied.value.status_code == 409
+        assert "security review" in denied.value.detail
+    engine.dispose()
