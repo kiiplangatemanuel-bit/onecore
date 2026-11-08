@@ -4,12 +4,16 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 
 ## Implemented
 - Tenant- and branch-scoped employee profiles with unique employee numbers, monthly base salary, recurring allowance/benefit components, pension contribution, scheduled daily minutes, optional employer-configured overtime multiplier and employment status.
-- Leave requests with employee/branch ownership checks, decision audit events and requester-versus-approver separation.\n- Daily attendance submissions with timezone-aware clock timestamps, break and scheduled-minute validation, derived worked/overtime minutes, tenant/branch scope, idempotent retries, one record per employee/day, and independent HR approval/rejection.
+- Leave requests with employee/branch ownership checks, decision audit events and requester-versus-approver separation.
+- Daily attendance submissions with timezone-aware clock timestamps, break and scheduled-minute validation, derived worked/overtime minutes, tenant/branch scope, idempotent retries, one record per employee/day, and independent HR approval/rejection.
 - Versioned statutory rule sets with effective dates, progressive PAYE bands, personal relief, pension deduction limit, NSSF contribution tiers, SHIF rate and employee/employer Housing Levy rates.
 - Rule-set submission and independent approval. Activation is blocked when an active rule set overlaps the proposed effective date range.
 - Official HTTPS source references are required for KRA, NSSF and SHA. The API validates the official host names and evidence metadata; it does not scrape or independently certify the contents. An authorized reviewer must check the source publications and dates before activation. No statutory rates are shipped as defaults.
 - Monthly payroll runs use only an approved rule set covering the entire month and active employees in the selected tenant/branch/currency.
-- Gross pay includes configured recurring allowances and benefits. Base salary, recurring components and employee pension are prorated by eligible calendar days for hires/terminations during the month.\n- Approved attendance overtime minutes are included in payroll only when the employee has an explicit overtime multiplier configured. Hourly pay is derived from monthly base salary and the employee's scheduled daily minutes using a documented 26-day payroll divisor; the multiplier is employer policy, not a statutory rate.\n- Approved unpaid leave is prorated into a gross-pay deduction for the days overlapping the payroll month. One-off earnings and deductions require a reason, effective date, idempotency key and independent HR approval; approved items are applied once to the payroll month, included in the immutable payslip snapshot and released back to approved status if an unpaid payroll run is reversed. Earnings are included in taxable gross pay; deductions reduce net pay after statutory deductions. A separate optional liability account is required before posting a run that includes one-off deductions. Pending/rejected leave and unapproved attendance do not affect payroll. The calculation snapshot records overtime minutes/earnings and unpaid-leave days/deductions.\n- One-off earnings and deductions require a reason, effective date, idempotency key and independent HR approval. Approved items in the payroll month are applied exactly once, with earnings included in taxable gross pay and deductions applied after statutory deductions. The immutable payslip snapshot records each adjustment and the aggregate amounts.
+- Gross pay includes configured recurring allowances and benefits. Base salary, recurring components and employee pension are prorated by eligible calendar days for hires/terminations during the month.
+- Approved attendance overtime minutes are included in payroll only when the employee has an explicit overtime multiplier configured. Hourly pay is derived from monthly base salary and the employee's scheduled daily minutes using a documented 26-day payroll divisor; the multiplier is employer policy, not a statutory rate.
+- Approved unpaid leave is prorated into a gross-pay deduction for the days overlapping the payroll month. One-off earnings and deductions require a reason, effective date, idempotency key and independent HR approval; approved items are applied once to the payroll month, included in the immutable payslip snapshot and released back to approved status if an unpaid payroll run is reversed. Earnings are included in taxable gross pay; deductions reduce net pay after statutory deductions. A separate optional liability account is required before posting a run that includes one-off deductions. Pending/rejected leave and unapproved attendance do not affect payroll. The calculation snapshot records overtime minutes/earnings and unpaid-leave days/deductions.
+- One-off earnings and deductions require a reason, effective date, idempotency key and independent HR approval. Approved items in the payroll month are applied exactly once, with earnings included in taxable gross pay and deductions applied after statutory deductions. The immutable payslip snapshot records each adjustment and the aggregate amounts.
 - PAYE is progressive over the configured bands after the configured deductible pension amount and personal relief. NSSF is calculated by configured tiers. SHIF and Housing Levy use configured rates.
 - Draft payroll calculation snapshots and individual payslip snapshots are persisted. Submitted runs require a different user to approve; the approver cannot also record payment. Payment references are confirmations only and do not initiate transfers.
 - Idempotency key on payroll run creation; database uniqueness for employee numbers, rule versions, payroll idempotency keys and one payslip per employee per run.
@@ -24,7 +28,16 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - `POST /api/v1/hr/employees/{employee_id}/employment-status`
 - `POST /api/v1/hr/employees/{employee_id}/leave`
 - `GET /api/v1/hr/leave-requests`
-- `POST /api/v1/hr/leave-requests/{request_id}/decision`\n- `GET /api/v1/hr/attendance`\n- `POST /api/v1/hr/attendance`\n- `POST /api/v1/hr/attendance/{attendance_id}/decision`\n- `GET /api/v1/hr/payroll-adjustments`\n- `POST /api/v1/hr/employees/{employee_id}/payroll-adjustments`\n- `POST /api/v1/hr/payroll-adjustments/{adjustment_id}/decision`\n- `GET /api/v1/hr/payroll-adjustments`\n- `POST /api/v1/hr/employees/{employee_id}/payroll-adjustments`\n- `POST /api/v1/hr/payroll-adjustments/{adjustment_id}/decision`
+- `POST /api/v1/hr/leave-requests/{request_id}/decision`
+- `GET /api/v1/hr/attendance`
+- `POST /api/v1/hr/attendance`
+- `POST /api/v1/hr/attendance/{attendance_id}/decision`
+- `GET /api/v1/hr/payroll-adjustments`
+- `POST /api/v1/hr/employees/{employee_id}/payroll-adjustments`
+- `POST /api/v1/hr/payroll-adjustments/{adjustment_id}/decision`
+- `GET /api/v1/hr/payroll-adjustments`
+- `POST /api/v1/hr/employees/{employee_id}/payroll-adjustments`
+- `POST /api/v1/hr/payroll-adjustments/{adjustment_id}/decision`
 - `GET/POST /api/v1/payroll/rule-sets`
 - `POST /api/v1/payroll/rule-sets/{rule_set_id}/submit`
 - `POST /api/v1/payroll/rule-sets/{rule_set_id}/approve`
