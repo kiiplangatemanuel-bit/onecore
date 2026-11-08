@@ -330,3 +330,6 @@ The Accounting workspace now includes a POS ledger-mapping form, integration sta
 Receivable invoices may optionally link to a confirmed CRM sales order. The API verifies organization, contact, branch, currency and remaining uninvoiced order value; payable invoices cannot carry a CRM order link. When a linked receivable invoice becomes fully paid, the payment transaction appends an idempotent `invoice_paid` campaign attribution event linked to the exact accounting invoice and CRM sales order. Repeated payment requests and repeated event processing cannot create duplicate campaign revenue. The Finance workspace can create linked customer invoices from CRM order snapshots and record payments.
 
 This does not initiate bank or M-Pesa transfers. Historical invoice backfill and credit-note/refund attribution remain follow-up work.
+
+
+Draft receivable invoices created from CRM sales orders can be cancelled before posting. Cancellation also closes any pending/approved invoice approval request, and cancelled drafts no longer consume the sales order's uninvoiced balance. Posted or partially paid invoices cannot use the draft-cancellation path; corrections must use the credit-note/refund controls.
