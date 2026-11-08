@@ -9,7 +9,9 @@ function ErrorLine({value}){return value?<div className="alert error" role="aler
 
 export function FinancePortal(){
  const [accounts,setAccounts]=useState([]),[trial,setTrial]=useState(null),[journals,setJournals]=useState([]),[invoices,setInvoices]=useState([]),[periods,setPeriods]=useState([]),[cash,setCash]=useState(null),[aging,setAging]=useState(null),[crmOrders,setCrmOrders]=useState([]),[selectedOrder,setSelectedOrder]=useState(null);
- const [tab,setTab]=useState("overview"),[start,setStart]=useState(new Date(new Date().getFullYear(),0,1).toISOString().slice(0,10)),[end,setEnd]=useState(today()),[cashIds,setCashIds]=useState([]),[error,setError]=useState(""),[busy,setBusy]=useState(false);\n const [invoiceForm,setInvoiceForm]=useState({crm_sales_order_id:"",invoice_number:"",issue_date:today(),due_date:today(),control_account_id:"",revenue_account_id:"",tax_account_id:""});\n const [paymentForm,setPaymentForm]=useState({invoice_id:"",payment_account_id:"",amount:"",payment_date:today(),reference:"",idempotency_key:""});
+ const [tab,setTab]=useState("overview"),[start,setStart]=useState(new Date(new Date().getFullYear(),0,1).toISOString().slice(0,10)),[end,setEnd]=useState(today()),[cashIds,setCashIds]=useState([]),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+ const [invoiceForm,setInvoiceForm]=useState({crm_sales_order_id:"",invoice_number:"",issue_date:today(),due_date:today(),control_account_id:"",revenue_account_id:"",tax_account_id:""});
+ const [paymentForm,setPaymentForm]=useState({invoice_id:"",payment_account_id:"",amount:"",payment_date:today(),reference:"",idempotency_key:""});
  const load=useCallback(async()=>{setBusy(true);setError("");const results=await Promise.allSettled([
   api("/api/v1/accounting/accounts"),api("/api/v1/accounting/trial-balance"),api("/api/v1/accounting/journals?limit=100"),api("/api/v1/accounting/invoices?limit=100"),api("/api/v1/accounting/fiscal-periods"),api("/api/v1/accounting/aging?invoice_type=receivable"),api("/api/v1/accounting/aging?invoice_type=payable"),api("/api/v1/crm/orders")
  ]);const [a,t,j,i,p,ar,ap,orders]=results;const failures=[];
@@ -19,7 +21,8 @@ export function FinancePortal(){
  if(i.status==="fulfilled")setInvoices(i.value);else failures.push("Invoices: "+i.reason.message);
  if(p.status==="fulfilled")setPeriods(p.value);else failures.push("Fiscal periods: "+p.reason.message);
  if(ar.status==="fulfilled")setAging(ar.value);else failures.push("Receivables aging: "+ar.reason.message);
- if(ap.status==="fulfilled")setAging(old=>({...old,payables:ap.value}));else failures.push("Payables aging: "+ap.reason.message);\n if(orders.status==="fulfilled")setCrmOrders(orders.value);else failures.push("CRM sales orders: "+orders.reason.message);
+ if(ap.status==="fulfilled")setAging(old=>({...old,payables:ap.value}));else failures.push("Payables aging: "+ap.reason.message);
+ if(orders.status==="fulfilled")setCrmOrders(orders.value);else failures.push("CRM sales orders: "+orders.reason.message);
  setError(failures.join(" · "));setBusy(false);
  },[]);
  useEffect(()=>{load()},[load]);
