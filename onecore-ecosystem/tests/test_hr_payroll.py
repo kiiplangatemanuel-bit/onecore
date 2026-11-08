@@ -146,3 +146,7 @@ def test_hr_payroll_authorization_supports_maker_checker_roles():
     from app.core.authorization import ROLE_PERMISSIONS
     assert "manage" in ROLE_PERMISSIONS["org_admin"]
     assert "manage" not in ROLE_PERMISSIONS["accountant"]
+    assert "manage" in ROLE_PERMISSIONS["payroll_manager"]
+    assert "manage" in ROLE_PERMISSIONS["payroll_approver"]
+    assert "manage" in ROLE_PERMISSIONS["payroll_payment"]
+    assert "create" not in ROLE_PERMISSIONS["payroll_approver"]
