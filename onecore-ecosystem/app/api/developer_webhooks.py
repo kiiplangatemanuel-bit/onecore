@@ -120,11 +120,14 @@ def activate_webhook(
     secret = "whsec_" + secrets.token_urlsafe(36)
     if endpoint:
         endpoint.secret_encrypted = _encrypt(secret)
+        endpoint.endpoint_url = endpoint_url
+        endpoint.events = sorted(set(events))
         endpoint.active = True
         endpoint.rotated_at = _now()
     else:
         endpoint = DeveloperWebhookEndpoint(
             workflow_record_id=record.id, organization_id=record.organization_id,
+            endpoint_url=endpoint_url, events=sorted(set(events)),
             secret_encrypted=_encrypt(secret), active=True,
         )
         db.add(endpoint)
@@ -186,8 +189,7 @@ def queue_organization_webhook_event(
     ).all()
     created = 0
     for endpoint in endpoints:
-        record = db.query(PortalWorkflowRecord).filter_by(id=endpoint.workflow_record_id).first()
-        if event_type not in ((record.payload or {}).get("events") or []):
+        if event_type not in (endpoint.events or []):
             continue
         existing = db.query(DeveloperWebhookDelivery).filter_by(
             endpoint_id=endpoint.id, event_id=event_id
@@ -288,14 +290,7 @@ def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
         delivery.status = "failed"
         delivery.last_error = "Webhook endpoint is inactive or missing"
         return {"id": delivery.id, "status": delivery.status}
-    record = db.query(PortalWorkflowRecord).filter_by(
-        id=endpoint.workflow_record_id, portal_key="developers", record_type="webhook"
-    ).first()
-    if not record:
-        delivery.status = "failed"
-        delivery.last_error = "Webhook configuration is missing"
-        return {"id": delivery.id, "status": delivery.status}
-    url = str((record.payload or {}).get("endpoint_url", ""))
+    url = endpoint.endpoint_url
     _validate_endpoint(url)
     body = json.dumps(delivery.payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     timestamp = str(int(_now().timestamp()))
