@@ -61,7 +61,7 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
 
     token = secrets.token_urlsafe(36)
     user = User(
-        email=email, full_name=payload.full_name.strip(),
+        email=email, full_name=payload.full_name.strip(), phone=payload.phone.strip(),
         password_hash=hash_password(payload.password), is_active=False,
         platform_role="customer",
     )
