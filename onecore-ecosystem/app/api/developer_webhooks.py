@@ -12,7 +12,7 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, text
+from sqlalchemy import func, text, create_engine
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -97,6 +97,7 @@ class WebhookEventCreate(BaseModel):
     data: dict = Field(default_factory=dict)
 
 
+@router.post('/webhooks/activate')
 def activate_webhook(
     payload: WebhookActivate,
     user: User = Depends(current_user),
@@ -141,6 +142,7 @@ def activate_webhook(
     return {"endpoint_id": endpoint.id, "active": True, "signing_secret": secret}
 
 
+@router.post('/webhooks/{workflow_record_id}/rotate-secret')
 def rotate_webhook_secret(
     workflow_record_id: int,
     user: User = Depends(current_user),
@@ -205,22 +207,6 @@ def queue_organization_webhook_event(
         created += 1
     return {"event_id": event_id, "queued_deliveries": created}
 
-
-@router.post("/events", status_code=202)
-def enqueue_webhook_event(
-    payload: WebhookEventCreate,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    _active_developer(db, user, payload.organization_id)
-    try:
-        result = queue_organization_webhook_event(
-            db, payload.organization_id, payload.event_type, payload.data, payload.event_id
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    db.commit()
-    return result
 
 @router.get("/webhooks")
 def list_developer_webhooks(
@@ -349,5 +335,16 @@ def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
 
 
 def run_webhook_worker(batch_size: int = 25):
+    if not 1 <= batch_size <= 250:
+        raise ValueError("Webhook batch size must be between 1 and 250")
+    if settings.webhook_worker_database_url:
+        worker_engine = create_engine(settings.webhook_worker_database_url, pool_pre_ping=True)
+        try:
+            from sqlalchemy.orm import sessionmaker
+            worker_session = sessionmaker(bind=worker_engine, expire_on_commit=False)
+            with worker_session() as db:
+                return process_webhook_deliveries(db, batch_size)
+        finally:
+            worker_engine.dispose()
     with SessionLocal() as db:
         return process_webhook_deliveries(db, batch_size)
