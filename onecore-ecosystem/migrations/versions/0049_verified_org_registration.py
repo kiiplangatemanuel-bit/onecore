@@ -18,10 +18,9 @@ def upgrade():
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.UniqueConstraint("token_hash", name="uq_email_verification_token_hash"),
     )
     op.create_index("ix_email_verifications_user_id", "email_verifications", ["user_id"])
-    op.create_index("ix_email_verifications_token_hash", "email_verifications", ["token_hash"])
+    op.create_index("ix_email_verifications_token_hash", "email_verifications", ["token_hash"], unique=True)
 
 
 def downgrade():
