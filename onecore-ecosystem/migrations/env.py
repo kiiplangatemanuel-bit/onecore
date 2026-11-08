@@ -1,5 +1,5 @@
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 from app.core.config import settings
 from app.core.database import Base, normalized_database_url
 from app.core import models  # noqa: F401 - register all mapped tables
@@ -33,6 +33,20 @@ def run_migrations_online():
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        # Alembic's default version_num is VARCHAR(32), but this repository has
+        # historical revision identifiers longer than 32 characters. SQLite
+        # does not enforce VARCHAR length, while PostgreSQL does. Widen/create
+        # the version table before Alembic records any revision on PostgreSQL.
+        if connection.dialect.name == "postgresql":
+            connection.execute(text(
+                "CREATE TABLE IF NOT EXISTS alembic_version "
+                "(version_num VARCHAR(255) NOT NULL PRIMARY KEY)"
+            ))
+            connection.execute(text(
+                "ALTER TABLE alembic_version "
+                "ALTER COLUMN version_num TYPE VARCHAR(255)"
+            ))
+            connection.commit()
         context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
         with context.begin_transaction():
             context.run_migrations()
