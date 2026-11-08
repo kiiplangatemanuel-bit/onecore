@@ -1,6 +1,6 @@
 # HR and Payroll module
 
-The module is no longer scaffold-only. The first database-backed employee, leave, statutory payroll, approval, payslip and accounting bridge implementation is documented in [HR_PAYROLL.md](../../docs/HR_PAYROLL.md).
+The module is no longer scaffold-only. The first database-backed employee, leave, statutory payroll, approval, payslip and accounting bridge implementation is documented in [HR_PAYROLL.md](../../../docs/HR_PAYROLL.md).
 
 Daily attendance submission, overtime-minute calculation and independent HR approval are included from migration 0040. The current attendance slice records and reviews time; it does not yet feed overtime or unpaid-leave adjustments into payroll calculations.
 
