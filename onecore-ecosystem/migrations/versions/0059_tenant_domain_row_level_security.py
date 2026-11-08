@@ -10,6 +10,9 @@ depends_on = None
 _SPECIALIZED_TABLES = {
     "memberships",
     "audit_events",
+    "mpesa_payment_intents",
+    "mpesa_refund_intents",
+    "procurement_settlements",
     "portal_workflow_records",
     "support_tickets",
     "support_messages",
@@ -78,6 +81,7 @@ def upgrade():
         FOR SELECT USING (
             user_id = NULLIF(current_setting('app.user_id', true), '')::integer
             OR public.onecore_is_org_admin(organization_id)
+            OR organization_id = NULLIF(current_setting('app.organization_id', true), '')::integer
             OR public.onecore_is_platform_admin()
         )
     """)
@@ -118,6 +122,7 @@ def upgrade():
                       AND m.is_active = true
                 )
             )
+            OR organization_id = NULLIF(current_setting('app.organization_id', true), '')::integer
             OR public.onecore_is_platform_admin()
         )
     """)
@@ -138,6 +143,10 @@ def upgrade():
                 )
             )
             OR (
+                organization_id = NULLIF(current_setting('app.organization_id', true), '')::integer
+                AND actor_user_id IS NOT NULL
+            )
+            OR (
                 actor_user_id IS NULL AND organization_id IS NULL
                 AND NULLIF(current_setting('app.support_guest_token_hash', true), '') IS NOT NULL
             )
@@ -146,6 +155,38 @@ def upgrade():
 
     preparer = bind.dialect.identifier_preparer
     user_id = "NULLIF(current_setting('app.user_id', true), '')::integer"
+    organization_id = "NULLIF(current_setting('app.organization_id', true), '')::integer"
+    callback_hash = "NULLIF(current_setting('app.provider_callback_token_hash', true), '')"
+    for table_name in ("mpesa_payment_intents", "mpesa_refund_intents", "procurement_settlements"):
+        if table_name not in sa.inspect(bind).get_table_names():
+            continue
+        table = preparer.quote(table_name)
+        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        op.execute(f"""
+            CREATE POLICY provider_callback_tenant_scope ON {table}
+            FOR ALL
+            USING (
+                callback_token_hash = {callback_hash}
+                OR organization_id = {organization_id}
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = {table}.organization_id
+                      AND m.user_id = {user_id} AND m.is_active = true
+                )
+                OR public.onecore_is_platform_admin()
+            )
+            WITH CHECK (
+                organization_id = {organization_id}
+                OR EXISTS (
+                    SELECT 1 FROM memberships m
+                    WHERE m.organization_id = {table}.organization_id
+                      AND m.user_id = {user_id} AND m.is_active = true
+                )
+                OR public.onecore_is_platform_admin()
+            )
+        """)
+
     for table_name in _tenant_tables(bind):
         table = preparer.quote(table_name)
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
@@ -163,6 +204,7 @@ def upgrade():
                           AND m.is_active = true
                     )
                 )
+                OR {table}.organization_id = {organization_id}
                 OR public.onecore_is_platform_admin()
             )
             WITH CHECK (
@@ -190,6 +232,12 @@ def downgrade():
         op.execute(f"DROP POLICY IF EXISTS tenant_scope_access ON {table}")
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    for table_name in ("mpesa_payment_intents", "mpesa_refund_intents", "procurement_settlements"):
+        if table_name in sa.inspect(bind).get_table_names():
+            table = preparer.quote(table_name)
+            op.execute(f"DROP POLICY IF EXISTS provider_callback_tenant_scope ON {table}")
+            op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
+            op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
     for policy in ("audit_event_insert", "audit_event_select"):
         op.execute(f"DROP POLICY IF EXISTS {policy} ON audit_events")
     op.execute("ALTER TABLE audit_events NO FORCE ROW LEVEL SECURITY")
