@@ -305,6 +305,20 @@ def delete_private_resource(
     return None
 
 
+@router.get("/{portal}/public/manage")
+def list_public_content_for_admin(
+    portal: str,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    portal = _portal(portal)
+    rows = db.query(PortalResource).filter_by(
+        portal=portal, organization_id=None,
+    ).filter(PortalResource.resource_type.in_(sorted(PUBLIC_TYPES[portal]))).order_by(
+        PortalResource.updated_at.desc()
+    ).limit(MAX_PAGE_SIZE).all()
+    return [_out(row) for row in rows]
+
+
 @router.post("/{portal}/public", status_code=201)
 def create_public_draft(
     portal: str, payload: PortalResourceIn,
