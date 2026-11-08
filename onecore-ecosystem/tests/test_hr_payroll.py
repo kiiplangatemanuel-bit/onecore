@@ -2,10 +2,12 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+from types import SimpleNamespace
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.hr_payroll import (
-    LeaveIn, RuleSetIn, _calculate, _progressive_tax, _tiered_contribution,
+    LeaveIn, PayrollRunIn, RuleSetIn, _calculate, _progressive_tax, _tiered_contribution, require_payroll_action,
 )
 from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip
 from app.main import app
@@ -150,3 +152,28 @@ def test_hr_payroll_authorization_supports_maker_checker_roles():
     assert "manage" in ROLE_PERMISSIONS["payroll_approver"]
     assert "manage" in ROLE_PERMISSIONS["payroll_payment"]
     assert "create" not in ROLE_PERMISSIONS["payroll_approver"]
+
+
+
+def test_payroll_run_requires_full_calendar_month_and_unique_employee_ids():
+    payload = PayrollRunIn(period_start="2026-02-01", period_end="2026-02-28",
+                           employee_ids=[1, 2], idempotency_key="payroll-feb-2026")
+    assert payload.period_end == date(2026, 2, 28)
+    with pytest.raises(ValidationError):
+        PayrollRunIn(period_start="2026-02-01", period_end="2026-02-27",
+                     employee_ids=[1], idempotency_key="payroll-feb-2026")
+    with pytest.raises(ValidationError):
+        PayrollRunIn(period_start="2026-02-01", period_end="2026-02-28",
+                     employee_ids=[1, 1], idempotency_key="payroll-feb-2026")
+
+
+def test_payroll_actions_are_separated_by_role():
+    require_payroll_action(SimpleNamespace(role="payroll_manager"), "prepare")
+    require_payroll_action(SimpleNamespace(role="payroll_approver"), "approve")
+    require_payroll_action(SimpleNamespace(role="payroll_payment"), "pay")
+    with pytest.raises(HTTPException):
+        require_payroll_action(SimpleNamespace(role="payroll_manager"), "approve")
+    with pytest.raises(HTTPException):
+        require_payroll_action(SimpleNamespace(role="payroll_approver"), "prepare")
+    with pytest.raises(HTTPException):
+        require_payroll_action(SimpleNamespace(role="payroll_payment"), "prepare")
