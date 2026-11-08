@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from sqlalchemy import or_
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -53,9 +53,15 @@ def _ticket_out(ticket: SupportTicket, db: Session, include_messages: bool = Fal
 def _guest_ticket(db: Session, ticket_number: str, token: str) -> SupportTicket:
     if not token or len(token) < 32:
         raise HTTPException(401, "A valid support access token is required")
+    # Bind guest access only after the token hash is computed; PostgreSQL RLS uses
+    # this transaction-local value to scope the ticket and its messages.
+    token_hash = _hash_token(token)
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.support_guest_token_hash', :token_hash, true)"),
+                   {"token_hash": token_hash})
     ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
     if not ticket or not ticket.guest_token_hash or not secrets.compare_digest(
-        ticket.guest_token_hash, _hash_token(token)
+        ticket.guest_token_hash, token_hash
     ):
         raise HTTPException(404, "Support ticket not found")
     return ticket
@@ -65,14 +71,19 @@ def _user_ticket(db: Session, ticket_number: str, user: User) -> SupportTicket:
     ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
     if not ticket:
         raise HTTPException(404, "Support ticket not found")
-    if ticket.created_by_user_id == user.id:
-        return ticket
-    if ticket.organization_id:
+    membership = None
+    if ticket.organization_id is not None:
         membership = db.query(Membership).filter_by(
             user_id=user.id, organization_id=ticket.organization_id, is_active=True
         ).first()
-        if membership and membership.role == "org_admin":
-            return ticket
+        # Organization tickets are inaccessible immediately after membership revocation,
+        # including to the original creator.
+        if not membership:
+            raise HTTPException(404, "Support ticket not found")
+    if ticket.created_by_user_id == user.id:
+        return ticket
+    if membership and membership.role == "org_admin":
+        return ticket
     raise HTTPException(404, "Support ticket not found")
 
 
@@ -171,10 +182,17 @@ def list_my_tickets(
     limit: int = Query(default=50, ge=1, le=100),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
+    active_org_ids = [row.organization_id for row in db.query(Membership).filter_by(
+        user_id=user.id, is_active=True
+    ).all()]
     admin_org_ids = [row.organization_id for row in db.query(Membership).filter_by(
         user_id=user.id, role="org_admin", is_active=True
     ).all()]
-    visibility = [SupportTicket.created_by_user_id == user.id]
+    visibility = [and_(
+        SupportTicket.created_by_user_id == user.id,
+        or_(SupportTicket.organization_id.is_(None),
+            SupportTicket.organization_id.in_(active_org_ids) if active_org_ids else SupportTicket.organization_id.is_(None)),
+    )]
     if admin_org_ids:
         visibility.append(SupportTicket.organization_id.in_(admin_org_ids))
     rows = db.query(SupportTicket).filter(or_(*visibility)).order_by(
