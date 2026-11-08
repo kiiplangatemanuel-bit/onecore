@@ -200,7 +200,10 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
             and preference_service in {"*", "all", service.casefold()}
         ):
             email_opt_outs.add(preference.owner_user_id)
+    queued_users = set()
     for subscription in subscriptions:
+        if subscription.owner_user_id in queued_users:
+            continue
         preferences = subscription.payload or {}
         subscribed_service = str(preferences.get("service") or "").strip().casefold()
         if subscribed_service not in {"*", "all", service.casefold()}:
@@ -225,6 +228,7 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
             attempts=0,
             next_attempt_at=datetime.now(timezone.utc),
         ))
+        queued_users.add(recipient.id)
 
 
 def _out(row: PortalWorkflowRecord) -> dict:
