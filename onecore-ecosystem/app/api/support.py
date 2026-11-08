@@ -50,15 +50,19 @@ def _ticket_out(ticket: SupportTicket, db: Session, include_messages: bool = Fal
     return result
 
 
-def _guest_ticket(db: Session, ticket_number: str, token: str) -> SupportTicket:
-    if not token or len(token) < 32:
-        raise HTTPException(401, "A valid support access token is required")
-    # Bind guest access only after the token hash is computed; PostgreSQL RLS uses
-    # this transaction-local value to scope the ticket and its messages.
+def _set_guest_context(db: Session, token: str) -> str:
     token_hash = _hash_token(token)
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         db.execute(text("SELECT set_config('app.support_guest_token_hash', :token_hash, true)"),
                    {"token_hash": token_hash})
+    return token_hash
+
+
+def _guest_ticket(db: Session, ticket_number: str, token: str) -> SupportTicket:
+    if not token or len(token) < 32:
+        raise HTTPException(401, "A valid support access token is required")
+    # Bind guest access only after hashing the supplied token; RLS scopes the rows.
+    token_hash = _set_guest_context(db, token)
     ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
     if not ticket or not ticket.guest_token_hash or not secrets.compare_digest(
         ticket.guest_token_hash, token_hash
@@ -134,6 +138,7 @@ def create_public_ticket(payload: SupportTicketCreateIn, request: Request, db: S
     enforce_public_write_limit(request, "support-ticket-create")
     access_token = secrets.token_urlsafe(36)
     ticket = _create_ticket(payload, db, guest_token_hash=_hash_token(access_token))
+    _set_guest_context(db, access_token)
     return {**_ticket_out(ticket, db, include_messages=True), "access_token": access_token}
 
 
@@ -164,6 +169,7 @@ def reply_public_ticket(
     ticket.updated_at = datetime.now(timezone.utc)
     _audit(db, None, ticket.organization_id, "support.ticket.replied", ticket)
     db.commit()
+    _set_guest_context(db, x_support_access_token)
     return _ticket_out(ticket, db, include_messages=True)
 
 
