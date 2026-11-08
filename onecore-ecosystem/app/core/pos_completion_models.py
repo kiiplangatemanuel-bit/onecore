@@ -104,3 +104,20 @@ class POSCustomerSale(Base):
     sale_id: Mapped[int] = mapped_column(ForeignKey("pos_sales.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("uq_pos_customer_sale", "organization_id", "sale_id", unique=True),)
+
+
+class POSLoyaltyRewardPolicy(Base):
+    __tablename__ = "pos_loyalty_reward_policies"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    earn_points_per_100_units: Mapped[int] = mapped_column(default=1)
+    points_per_currency_unit: Mapped[int] = mapped_column(default=100)
+    max_redemption_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("50.00"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("uq_pos_loyalty_reward_policy_org", "organization_id", unique=True),
+    )
