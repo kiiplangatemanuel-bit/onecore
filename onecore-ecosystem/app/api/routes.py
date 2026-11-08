@@ -2412,6 +2412,7 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
             AccountingInvoice.organization_id == membership.organization_id,
             AccountingInvoice.crm_sales_order_id == crm_order.id,
             AccountingInvoice.invoice_type == "receivable",
+            AccountingInvoice.status != "cancelled",
         ).scalar() or Decimal("0.00")
         if Decimal(already_invoiced) + total > Decimal(crm_order.total):
             raise HTTPException(422, "Invoice total exceeds the remaining uninvoiced CRM sales order value")
