@@ -86,3 +86,39 @@ def test_developer_application_creation_automatically_enqueues_subscribed_webhoo
         assert delivery.payload["data"]["record_id"] == created["id"]
         assert delivery.event_id == f"evt_application_{created['id']}_created"
     engine.dispose()
+
+
+def test_webhook_test_event_is_endpoint_scoped_and_rate_limited():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="Tenant", slug="tenant")
+        db.add(org)
+        db.flush()
+        user = _developer(db, org)
+        record = _webhook(db, org, user)
+        endpoint = DeveloperWebhookEndpoint(
+            workflow_record_id=record.id, organization_id=org.id,
+            endpoint_url="https://hooks.example.com/onecore",
+            events=["organization.updated"],
+            secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
+        )
+        db.add(endpoint)
+        db.commit()
+        queued = webhooks.send_webhook_test(record.id, user, db)
+        assert queued["queued_deliveries"] == 1
+        delivery = db.query(DeveloperWebhookDelivery).one()
+        assert delivery.payload["data"]["test"] is True
+        with pytest.raises(HTTPException) as limited:
+            webhooks.send_webhook_test(record.id, user, db)
+        assert limited.value.status_code == 429
+    engine.dispose()
+
+
+def test_webhook_worker_rejects_out_of_range_batches():
+    engine = _db()
+    with Session(engine) as db:
+        with pytest.raises(ValueError):
+            webhooks.process_webhook_deliveries(db, 0)
+        with pytest.raises(ValueError):
+            webhooks.process_webhook_deliveries(db, 251)
+    engine.dispose()
