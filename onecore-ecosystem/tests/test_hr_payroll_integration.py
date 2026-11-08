@@ -166,6 +166,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
             assert slips.json()[0]["net_pay"] == "17361.28"
+            assert slips.json()[0]["snapshot"]["overtime_minutes"] == 60
+            assert slips.json()[0]["snapshot"]["overtime_earnings"] == "144.23"
 
             actor["user"], actor["role"] = users[3], "payroll_accounting"
             mapping = client.put("/api/v1/payroll/accounting-mapping", json={
