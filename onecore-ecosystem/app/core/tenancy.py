@@ -2,8 +2,9 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, Membership, Organization
-from app.core.security import current_user
+from app.core.security import current_user, set_verified_organization_context
 from app.core.host_routing import organization_for_host
+
 
 def active_membership(
     request: Request,
@@ -26,4 +27,9 @@ def active_membership(
     org = db.get(Organization, organization_id)
     if not membership or not org or not org.is_active:
         raise HTTPException(403, "No active access to this organization")
+
+    # The tenant GUC is deliberately set only after the server has verified an
+    # active membership. PostgreSQL RLS policies use this transaction-local
+    # context for tenant-scoped reads/writes made by downstream route handlers.
+    set_verified_organization_context(db, organization_id)
     return membership
