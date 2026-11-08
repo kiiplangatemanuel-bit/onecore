@@ -52,11 +52,11 @@ async function loadReceipt(saleId){
  currentReceipt=data;
  const out=$('receiptOutput');out.replaceChildren();
  const heading=document.createElement('h3');heading.textContent='Receipt #'+data.id+' · '+data.created_at;out.append(heading);
- const meta=document.createElement('p');meta.textContent='Branch '+data.branch_id+' · Shift '+data.shift_id+' · Subtotal '+data.subtotal_amount+' · Discount '+data.discount_amount+' · Tax '+data.tax_amount+' · Total '+data.currency+' '+data.total_amount;out.append(meta);
+ const meta=document.createElement('p');meta.textContent='Branch '+data.branch_id+' · Shift '+data.shift_id+' · Subtotal '+data.subtotal_amount+' · Discount '+data.discount_amount+' · Loyalty points '+data.loyalty_points_redeemed+' · Loyalty discount '+data.loyalty_discount_amount+' · Tax '+data.tax_amount+' · Total '+data.currency+' '+data.total_amount;out.append(meta);
  const table=document.createElement('table');const head=document.createElement('tr');
- ['Item','SKU','Sold','Returned','Unit price','Discount','Tax','Line total','Return qty'].forEach(v=>{const th=document.createElement('th');th.textContent=v;head.append(th);});table.append(head);
+ ['Item','SKU','Sold','Returned','Unit price','Manager discount','Loyalty discount','Tax','Line total','Return qty'].forEach(v=>{const th=document.createElement('th');th.textContent=v;head.append(th);});table.append(head);
  data.lines.forEach(line=>{const tr=document.createElement('tr');
-  [line.name,line.sku,line.quantity,line.returned_quantity,line.unit_price,line.discount_amount,line.tax_amount,line.line_total].forEach(v=>{const td=document.createElement('td');td.textContent=String(v);tr.append(td);});
+  [line.name,line.sku,line.quantity,line.returned_quantity,line.unit_price,line.discount_amount,line.loyalty_discount_amount,line.tax_amount,line.line_total].forEach(v=>{const td=document.createElement('td');td.textContent=String(v);tr.append(td);});
   const td=document.createElement('td'),input=document.createElement('input');input.type='number';input.min='0';input.max=line.returnable_quantity;input.step='0.001';input.value='0';input.dataset.saleLineId=String(line.id);input.dataset.unitPrice=String(line.unit_price);input.dataset.lineTotal=String(line.line_total);input.dataset.originalQuantity=String(line.quantity);input.dataset.returnableValue=String(line.returnable_value);input.dataset.returnableQuantity=String(line.returnable_quantity);input.className='return-qty';input.setAttribute('aria-label','Return quantity for '+line.name);td.append(input);tr.append(td);table.append(tr);
  });out.append(table);
  const tenders=document.createElement('p');tenders.textContent='Tenders: '+data.payments.map(p=>p.method+' '+p.amount+' ('+p.status+')').join(' · ');out.append(tenders);
