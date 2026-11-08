@@ -136,3 +136,36 @@ class PayrollPayslip(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("uq_payroll_payslip_run_employee", "payroll_run_id", "employee_id", unique=True),)
+
+
+
+class PayrollAccountingMapping(Base):
+    __tablename__ = "payroll_accounting_mappings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), unique=True, index=True)
+    salary_expense_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    employer_contribution_expense_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    net_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    paye_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    nssf_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    shif_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    housing_levy_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    pension_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class PayrollAccountingLink(Base):
+    __tablename__ = "payroll_accounting_links"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    payroll_run_id: Mapped[int] = mapped_column(ForeignKey("payroll_runs.id"), unique=True, index=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), unique=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    reversal_journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), unique=True, nullable=True)
+    reversed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reversal_reason: Mapped[str] = mapped_column(String(500), default="")
