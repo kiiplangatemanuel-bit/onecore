@@ -62,10 +62,14 @@ def _audit(db, membership, user, action, resource_id, detail):
     db.add(AuditEvent(organization_id=membership.organization_id, actor_user_id=user.id,
         action=action, resource_type="onecore_ai", resource_id=str(resource_id), detail=detail[:500]))
 
-def _session_query(db, org_id, user_id, session_id):
+def _session_query(db, membership, user_id, session_id):
+    org_id = membership.organization_id
     row = db.query(Record).filter_by(id=session_id, organization_id=org_id,
         module_key=MODULE, record_type="ai_session", created_by=user_id).first()
     if not row:
+        raise HTTPException(404, "AI conversation not found")
+    saved_branch = (row.data or {}).get("branch_id")
+    if saved_branch and not can_access_branch(membership, saved_branch):
         raise HTTPException(404, "AI conversation not found")
     return row
 
@@ -94,7 +98,7 @@ def list_sessions(membership=Depends(active_membership), user: User=Depends(curr
 @router.get("/sessions/{session_id}")
 def get_session(session_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"read")
-    session=_session_query(db,membership.organization_id,user.id,session_id)
+    session=_session_query(db,membership,user.id,session_id)
     rows=db.query(Record).filter_by(organization_id=membership.organization_id,module_key=MODULE,record_type="ai_message").all()
     messages=[{"id":r.id,**(r.data or {})} for r in rows if (r.data or {}).get("session_id")==session_id and (r.data or {}).get("user_id")==user.id]
     messages.sort(key=lambda x:x.get("created_at",""))
@@ -110,7 +114,10 @@ def chat(payload:ChatIn,membership=Depends(active_membership),user:User=Depends(
         raise HTTPException(503,"OneCore AI is not configured. Ask your administrator to configure an approved provider.")
     language=payload.language if payload.language in SUPPORTED_LANGUAGES else "en"
     if payload.session_id:
-        session=_session_query(db,membership.organization_id,user.id,payload.session_id)
+        session=_session_query(db,membership,user.id,payload.session_id)
+        saved_branch=(session.data or {}).get("branch_id")
+        if saved_branch and payload.branch_id and saved_branch != payload.branch_id:
+            raise HTTPException(409,"Continue this conversation in its original branch context")
     else:
         now=datetime.now(timezone.utc).isoformat()
         session=Record(organization_id=membership.organization_id,module_key=MODULE,record_type="ai_session",
@@ -164,7 +171,7 @@ def ai_usage(membership=Depends(active_membership),user:User=Depends(current_use
 
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"delete")
+    require_permission(membership,"create")
     session=_session_query(db,membership.organization_id,user.id,session_id)
     rows=db.query(Record).filter_by(organization_id=membership.organization_id,module_key=MODULE,record_type="ai_message").all()
     for row in rows:
