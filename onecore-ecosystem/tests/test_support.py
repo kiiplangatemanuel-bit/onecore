@@ -202,8 +202,13 @@ def test_clamav_configuration_requires_a_private_scanner_host():
     configured = Settings(_env_file=None, support_attachment_scanning_enabled=True,
                           clamav_host="clamav.internal")
     assert configured.clamav_host == "clamav.internal"
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None, support_attachment_scanning_enabled=True, clamav_host="")
+    private_ip = Settings(_env_file=None, support_attachment_scanning_enabled=True,
+                          clamav_host="10.20.0.15")
+    assert private_ip.clamav_host == "10.20.0.15"
+    for unsafe_host in ("", "8.8.8.8", "clamav.example.com"):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, support_attachment_scanning_enabled=True,
+                     clamav_host=unsafe_host)
 
 
 def test_production_object_storage_requires_automated_attachment_scanning():
