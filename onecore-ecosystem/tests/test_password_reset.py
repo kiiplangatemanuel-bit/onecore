@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 import app.api.auth_workflows as workflows
 from app.api.auth_workflows import confirm_password_reset, request_password_reset
 from app.core.database import Base
-from app.core.models import AuditEvent, PasswordResetToken, User
+from app.core.models import AuditEvent, PasswordResetToken, PortalAuthorizationCode, User
 from app.core.schemas import PasswordResetConfirmIn, PasswordResetRequestIn
 from app.core.security import create_access_token, current_user, verify_password
 
@@ -17,7 +17,7 @@ from app.core.security import create_access_token, current_user, verify_password
 def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        User.__table__, PasswordResetToken.__table__, AuditEvent.__table__,
+        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, AuditEvent.__table__,
     ])
     return engine
 
@@ -80,6 +80,14 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
         )
         db.add(row)
+        portal_code = PortalAuthorizationCode(
+            code_hash=hashlib.sha256(b"one-time-portal-code").hexdigest(),
+            user_id=user.id,
+            redirect_uri="https://support.example.com/callback",
+            code_challenge="c" * 43,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=90),
+        )
+        db.add(portal_code)
         db.commit()
 
         result = confirm_password_reset(
@@ -88,8 +96,10 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
         )
         db.refresh(user)
         db.refresh(row)
+        db.refresh(portal_code)
         assert result["status"] == "password_reset"
         assert row.consumed_at is not None
+        assert portal_code.consumed_at is not None
         assert user.auth_version == 1
         assert verify_password("a-new-secure-password", user.password_hash)
         with pytest.raises(HTTPException) as revoked:

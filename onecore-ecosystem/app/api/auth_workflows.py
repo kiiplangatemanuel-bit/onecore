@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.models import AuditEvent, EmailVerification, Membership, Organization, PasswordResetToken, User
+from app.core.models import AuditEvent, EmailVerification, Membership, Organization, PasswordResetToken, PortalAuthorizationCode, User
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn, PasswordResetRequestIn, PasswordResetConfirmIn
 from app.core.security import hash_password
 
@@ -231,6 +231,13 @@ def confirm_password_reset(payload: PasswordResetConfirmIn, db: Session = Depend
     user.password_hash = hash_password(payload.new_password)
     user.auth_version = int(user.auth_version or 0) + 1
     row.consumed_at = now
+    db.query(PortalAuthorizationCode).filter(
+        PortalAuthorizationCode.user_id == user.id,
+        PortalAuthorizationCode.consumed_at.is_(None),
+    ).update(
+        {PortalAuthorizationCode.consumed_at: now},
+        synchronize_session=False,
+    )
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
         PasswordResetToken.id != row.id,

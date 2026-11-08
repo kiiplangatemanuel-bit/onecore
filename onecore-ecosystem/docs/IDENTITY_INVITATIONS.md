@@ -35,7 +35,7 @@ required before this can be treated as complete branch management.
 - `POST /api/v1/auth/password-reset/confirm` accepts a token and a new password.
   It locks and consumes the token, updates the password, records an audit event
   and increments the user's authentication version. This invalidates all previously
-  issued OneCore API access tokens for that account.
+  issued OneCore API access tokens and consumes outstanding cross-portal handoff codes for that account.
 - The workspace exposes `/forgot-password` and `/reset-password` screens.
   Reset tokens are delivered in the URL fragment and removed from the address bar
   before submission, so the browser does not send them to web-server access logs.
