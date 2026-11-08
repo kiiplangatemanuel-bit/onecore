@@ -409,8 +409,8 @@ def set_support_attachment_scan_result(
     attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
     if not attachment:
         raise HTTPException(404, "Support attachment not found")
-    if attachment.status not in {"pending_scan", "available", "rejected"}:
-        raise HTTPException(409, "Attachment upload must complete before security review")
+    if attachment.status != "pending_scan":
+        raise HTTPException(409, "Only quarantined attachments can receive a security review decision")
     attachment.status = payload.status
     _audit(db, user.id, ticket.organization_id, "support.attachment.security_reviewed",
            ticket, f"attachment_id={attachment.id};status={attachment.status}")
