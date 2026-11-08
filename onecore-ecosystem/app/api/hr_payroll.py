@@ -108,6 +108,58 @@ class EmployeeIn(BaseModel):
         return values
 
 
+class HRShiftIn(BaseModel):
+    branch_id: str | None = None
+    shift_code: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=2, max_length=120)
+    start_time: time
+    end_time: time
+    break_minutes: int = Field(default=0, ge=0, le=600)
+    differential_rate: Decimal = Field(default=ZERO, ge=0, le=1, max_digits=8, decimal_places=6)
+
+    @model_validator(mode="after")
+    def valid_shift(self):
+        if self.start_time == self.end_time:
+            raise ValueError("Shift start and end times must differ")
+        return self
+
+
+class EmployeeShiftIn(BaseModel):
+    shift_id: int = Field(gt=0)
+
+
+class AttendanceIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    shift_id: int | None = Field(default=None, gt=0)
+    attendance_date: date
+    clock_in: datetime | None = None
+    clock_out: datetime | None = None
+    status: str = Field(default="present", pattern="^(present|absent|leave|off_day)$")
+    notes: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def valid_clock_times(self):
+        if self.status == "present":
+            if not self.clock_in or not self.clock_out:
+                raise ValueError("Present attendance requires clock-in and clock-out times")
+            if self.clock_in.tzinfo is None or self.clock_out.tzinfo is None:
+                raise ValueError("Attendance timestamps must include a timezone")
+            if self.clock_in.date() != self.attendance_date:
+                raise ValueError("Clock-in date must match attendance date")
+            if self.clock_out <= self.clock_in:
+                raise ValueError("Clock-out must be after clock-in")
+            if (self.clock_out-self.clock_in).total_seconds() > 24*60*60:
+                raise ValueError("A single attendance record cannot exceed 24 hours")
+        elif self.clock_in or self.clock_out:
+            raise ValueError("Non-present attendance cannot include clock timestamps")
+        return self
+
+
+class AttendanceDecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
+
+
 class LeaveIn(BaseModel):
     leave_type: str = Field(pattern="^(annual|sick|maternity|paternity|compassionate|unpaid|other)$")
     start_date: date
@@ -356,6 +408,123 @@ def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
     audit(db,user,membership.organization_id,"hr.employee.status_changed","hr_employee",row.id,payload.reason)
     db.commit()
     return employee_out(row)
+
+
+def _shift_out(x):
+    return {"id":x.id,"branch_id":x.branch_id,"shift_code":x.shift_code,"name":x.name,
+            "start_time":x.start_time.isoformat(),"end_time":x.end_time.isoformat(),
+            "break_minutes":x.break_minutes,"differential_rate":str(x.differential_rate),"is_active":x.is_active}
+
+
+def _attendance_out(x):
+    return {"id":x.id,"employee_id":x.employee_id,"branch_id":x.branch_id,"shift_id":x.shift_id,
+        "attendance_date":x.attendance_date.isoformat(),"clock_in":x.clock_in.isoformat() if x.clock_in else None,
+        "clock_out":x.clock_out.isoformat() if x.clock_out else None,"scheduled_minutes":x.scheduled_minutes,
+        "worked_minutes":x.worked_minutes,"overtime_minutes":x.overtime_minutes,
+        "differential_minutes":x.differential_minutes,"differential_rate":str(x.differential_rate),
+        "status":x.status,"approval_status":x.approval_status,"notes":x.notes,
+        "approved_by":x.approved_by,"approved_at":x.approved_at.isoformat() if x.approved_at else None}
+
+
+@router.get("/hr/shifts")
+def list_hr_shifts(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read"); require_hr_read(membership)
+    q=db.query(HRShift).filter_by(organization_id=membership.organization_id,is_active=True)
+    q=scoped(q,HRShift,membership)
+    return [_shift_out(x) for x in q.order_by(HRShift.shift_code).all()]
+
+
+@router.post("/hr/shifts",status_code=201)
+def create_hr_shift(payload:HRShiftIn,membership=Depends(active_membership),
+                    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_hr_write(membership); branch_or_404(db,membership,payload.branch_id)
+    row=HRShift(organization_id=membership.organization_id,branch_id=payload.branch_id,
+        shift_code=payload.shift_code.strip().upper(),name=payload.name.strip(),
+        start_time=payload.start_time,end_time=payload.end_time,break_minutes=payload.break_minutes,
+        differential_rate=payload.differential_rate,created_by=user.id)
+    db.add(row)
+    try:
+        db.flush(); audit(db,user,membership.organization_id,"hr.shift.created","hr_shift",row.id); db.commit()
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"Shift code already exists in this organization")
+    db.refresh(row); return _shift_out(row)
+
+
+@router.post("/hr/employees/{employee_id}/default-shift")
+def assign_employee_shift(employee_id:int,payload:EmployeeShiftIn,membership=Depends(active_membership),
+                          user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_hr_write(membership)
+    employee=db.query(HREmployee).filter_by(id=employee_id,organization_id=membership.organization_id).first()
+    shift=db.query(HRShift).filter_by(id=payload.shift_id,organization_id=membership.organization_id,is_active=True).first()
+    if not employee or not can_access_branch(membership,employee.branch_id): raise HTTPException(404,"Employee not found")
+    if not shift or not can_access_branch(membership,shift.branch_id) or (shift.branch_id and shift.branch_id!=employee.branch_id):
+        raise HTTPException(404,"Shift not found for employee branch")
+    employee.default_shift_id=shift.id
+    audit(db,user,membership.organization_id,"hr.employee.shift_assigned","hr_employee",employee.id,f"Shift {shift.shift_code}")
+    db.commit()
+    return {"employee_id":employee.id,"default_shift_id":shift.id}
+
+
+@router.get("/hr/attendance")
+def list_hr_attendance(start_date:date|None=None,end_date:date|None=None,employee_id:int|None=None,
+                       approval_status:str|None=None,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read"); require_hr_read(membership)
+    if start_date and end_date and end_date<start_date: raise HTTPException(422,"End date must not precede start date")
+    if approval_status and approval_status not in {"pending","approved","rejected"}: raise HTTPException(422,"Invalid attendance approval status")
+    q=db.query(HRAttendance).filter_by(organization_id=membership.organization_id)
+    q=scoped(q,HRAttendance,membership)
+    if start_date:q=q.filter(HRAttendance.attendance_date>=start_date)
+    if end_date:q=q.filter(HRAttendance.attendance_date<=end_date)
+    if employee_id:q=q.filter(HRAttendance.employee_id==employee_id)
+    if approval_status:q=q.filter(HRAttendance.approval_status==approval_status)
+    return [_attendance_out(x) for x in q.order_by(HRAttendance.attendance_date.desc(),HRAttendance.employee_id).limit(1000).all()]
+
+
+@router.post("/hr/attendance",status_code=201)
+def create_hr_attendance(payload:AttendanceIn,membership=Depends(active_membership),
+                         user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_hr_write(membership)
+    employee=db.query(HREmployee).filter_by(id=payload.employee_id,organization_id=membership.organization_id).first()
+    if not employee or not can_access_branch(membership,employee.branch_id): raise HTTPException(404,"Employee not found")
+    shift_id=payload.shift_id or employee.default_shift_id
+    if not shift_id: raise HTTPException(422,"Assign a shift before recording attendance")
+    shift=db.query(HRShift).filter_by(id=shift_id,organization_id=membership.organization_id,is_active=True).first()
+    if not shift or not can_access_branch(membership,shift.branch_id) or (shift.branch_id and shift.branch_id!=employee.branch_id):
+        raise HTTPException(404,"Shift not found for employee branch")
+    scheduled=(datetime.combine(payload.attendance_date,shift.end_time)-datetime.combine(payload.attendance_date,shift.start_time)).total_seconds()/60
+    if scheduled<=0: scheduled+=24*60
+    scheduled_minutes=max(0,int(scheduled)-shift.break_minutes)
+    worked_minutes=int((payload.clock_out-payload.clock_in).total_seconds()/60) if payload.status=="present" else 0
+    overtime_minutes=max(0,worked_minutes-scheduled_minutes)
+    differential_minutes=worked_minutes if shift.differential_rate>0 else 0
+    row=HRAttendance(organization_id=membership.organization_id,branch_id=employee.branch_id,
+        employee_id=employee.id,shift_id=shift.id,attendance_date=payload.attendance_date,
+        clock_in=payload.clock_in,clock_out=payload.clock_out,scheduled_minutes=scheduled_minutes,
+        worked_minutes=worked_minutes,overtime_minutes=overtime_minutes,
+        differential_minutes=differential_minutes,differential_rate=shift.differential_rate,
+        status=payload.status,approval_status="pending",notes=payload.notes,created_by=user.id)
+    db.add(row)
+    try:
+        db.flush(); audit(db,user,membership.organization_id,"hr.attendance.recorded","hr_attendance",row.id,
+            f"worked={worked_minutes}; overtime={overtime_minutes}; differential_minutes={differential_minutes}")
+        db.commit()
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"Attendance already exists for this employee and date")
+    db.refresh(row); return _attendance_out(row)
+
+
+@router.post("/hr/attendance/{attendance_id}/decision")
+def decide_hr_attendance(attendance_id:int,payload:AttendanceDecisionIn,membership=Depends(active_membership),
+                         user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_hr_write(membership)
+    row=db.query(HRAttendance).filter_by(id=attendance_id,organization_id=membership.organization_id).first()
+    if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Attendance record not found")
+    if row.approval_status!="pending": raise HTTPException(409,"Attendance record has already been reviewed")
+    if row.created_by==user.id: raise HTTPException(409,"Attendance recorder cannot approve their own record")
+    row.approval_status=payload.decision; row.approved_by=user.id; row.approved_at=datetime.now(timezone.utc)
+    audit(db,user,membership.organization_id,"hr.attendance."+payload.decision,"hr_attendance",row.id,payload.note)
+    db.commit()
+    return _attendance_out(row)
 
 
 @router.post("/hr/employees/{employee_id}/leave", status_code=201)
