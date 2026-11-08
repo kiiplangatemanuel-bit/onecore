@@ -163,7 +163,7 @@ async def platform_security_middleware(request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
     public_write_request = request.method == "POST" and request.url.path in {
-        "/api/v1/auth/register-organization", "/api/v1/support/public/tickets"
+        "/api/v1/auth/register-organization", "/api/v1/auth/verify-email", "/api/v1/support/public/tickets"
     }
     response = None
     if settings.force_https and request.url.scheme != "https":
