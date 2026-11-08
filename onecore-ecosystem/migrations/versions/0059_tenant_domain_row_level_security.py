@@ -83,7 +83,7 @@ def upgrade():
     op.execute("""
         CREATE POLICY membership_insert ON memberships
         FOR INSERT WITH CHECK (
-            public.onecore_is_org_admin(organization_id)
+            (public.onecore_is_org_admin(organization_id) AND role <> 'org_admin')
             OR public.onecore_is_platform_admin()
         )
     """)
@@ -91,7 +91,7 @@ def upgrade():
         CREATE POLICY membership_update ON memberships
         FOR UPDATE
         USING (public.onecore_is_org_admin(organization_id) OR public.onecore_is_platform_admin())
-        WITH CHECK (public.onecore_is_org_admin(organization_id) OR public.onecore_is_platform_admin())
+        WITH CHECK ((public.onecore_is_org_admin(organization_id) AND role <> 'org_admin') OR public.onecore_is_platform_admin())
     """)
     op.execute("""
         CREATE POLICY membership_delete ON memberships
