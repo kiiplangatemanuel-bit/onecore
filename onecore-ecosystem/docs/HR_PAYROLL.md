@@ -67,4 +67,15 @@ The current `main` HR domain is the canonical implementation. It uses `app/core/
 | Legacy payment batches and bank reconciliation | Not transplanted: the old implementation depends on the duplicate payroll tables and generic Record storage. A provider-backed disbursement/reconciliation workflow must be designed against the current PayrollRun/PayrollPayslip model before implementation |
 | Inherited Healthcare, Pharmacy/Lab, SACCO, School and CRM files | Excluded from HR integration; they must be delivered and reviewed through their own module branches |
 
-This clean integration branch intentionally contains only this reconciliation documentation. It does not claim that the legacy payment-batch workflow has been ported. The legacy PR should be closed as superseded once this reconciliation is reviewed; its branch remains available for reference.
+This payment-batch implementation is a new, focused change against the canonical payroll domain. It does not copy the legacy generic-record payment tables or claim to initiate bank transfers. External payment references are supplied after funds have been sent through an independently operated bank/provider channel.
+
+
+## Payroll payment batches and bank reconciliation (migration 0042)
+
+- Create a payment batch from approved, positive-net payroll runs that have posted accrual journals and no settlement/reversal. Currency must be consistent. Each payroll run can be reserved by only one batch.
+- Batch creation is idempotent by organization and caller-supplied key. The batch captures run IDs, branch, currency and net amount; item amounts are not recalculated from employee records.
+- Batch submission and approval are separate actions. The approver must differ from both creator and submitter. Only the payroll payment role can record settlements, and the payment authorizer must differ from creator, submitter, approver and the accounting journal poster.
+- Settlement supports partial batches. Each run receives its own external payment reference and balanced settlement journal. The API records confirmation only; it does not initiate a bank, M-Pesa or other provider transfer.
+- Import bank statement lines as structured rows from a bank export. Exact reference, amount and currency matches are automatic; ambiguous or unmatched lines remain visible as exceptions. A finance reviewer can manually resolve an exception only when amount and currency exactly match a paid batch item, with a required audit note.
+- A statement line and a payroll batch item can each be reconciled only once. Duplicate statement fingerprints are rejected. Cross-organization data is not visible or matchable.
+- API paths: `GET/POST /api/v1/payroll/payment-batches`, `POST /api/v1/payroll/payment-batches/{id}/submit`, `POST /api/v1/payroll/payment-batches/{id}/cancel`, `POST /api/v1/payroll/payment-batches/{id}/approve`, `POST /api/v1/payroll/payment-batches/{id}/settlements`, `POST /api/v1/payroll/bank-statements/import`, `GET /api/v1/payroll/bank-statements`, and `POST /api/v1/payroll/bank-statements/{id}/resolve`.
