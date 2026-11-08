@@ -9,6 +9,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import settings
+# Importing installs the transaction-start listener that assumes the configured
+# least-privilege PostgreSQL role for every ORM transaction in production.
+from app.core import runtime_role as _runtime_role  # noqa: F401
 
 
 def normalized_database_url(value: str):
