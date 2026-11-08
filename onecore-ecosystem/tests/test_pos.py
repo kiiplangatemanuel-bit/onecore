@@ -175,7 +175,7 @@ def test_loyalty_redemption_rejects_points_above_sale_cap_and_subcent_values():
     prepared = [(None, Decimal("10.00"), Decimal("10.00"), Decimal("0.00"),
                  Decimal("0.00"), Decimal("0.00"), Decimal("10.00"), Decimal("0.00"))]
     with pytest.raises(HTTPException) as cap:
-        apply_loyalty_redemption(prepared, 100, 100, Decimal("10.00"))
+        apply_loyalty_redemption(prepared, 101, 100, Decimal("10.00"))
     assert cap.value.status_code == 422
     with pytest.raises(HTTPException) as subcent:
         apply_loyalty_redemption(prepared, 1, 1000, Decimal("50.00"))
