@@ -507,7 +507,7 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     gross=sum((dec(x["gross_pay"]) for x in snapshots),ZERO)
     deductions=sum((dec(x["total_deductions"]) for x in snapshots),ZERO)
     net=sum((dec(x["net_pay"]) for x in snapshots),ZERO)
-    employer=sum((dec(x["nssf_employer"])+dec(x["housing_levy_employer"]) for x in snapshots),ZERO)
+    employer=sum((dec(x["gross_pay"])+dec(x["nssf_employer"])+dec(x["housing_levy_employer"]) for x in snapshots),ZERO)
     row=PayrollRun(organization_id=membership.organization_id,branch_id=payload.branch_id,rule_set_id=rules.id,
         period_start=start,period_end=end,status="draft",currency=rules.currency,employee_count=len(snapshots),
         gross_total=rounded(gross),deductions_total=rounded(deductions),net_total=rounded(net),
