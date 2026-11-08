@@ -55,7 +55,7 @@ app.add_middleware(CORSMiddleware,
                    allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
                    allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token"])
+                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token", "X-Support-Access-Token"])
 app.state.login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=settings.login_rate_limit_window_seconds,
