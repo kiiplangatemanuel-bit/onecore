@@ -1,7 +1,7 @@
 """POS checkout validation and offline replay helpers."""
 import hashlib
 import json
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from fastapi import HTTPException
 
 
@@ -43,6 +43,9 @@ def canonical_request_hash(payload) -> str:
     }
     if getattr(payload,"customer_id",None) is not None:
         body["customer_id"] = payload.customer_id
+    loyalty_points_redeemed = int(getattr(payload, "loyalty_points_redeemed", 0) or 0)
+    if loyalty_points_redeemed:
+        body["loyalty_points_redeemed"] = loyalty_points_redeemed
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -69,3 +72,66 @@ def validate_return_refund_total(total: Decimal, refunds) -> None:
     refunded = sum((money(Decimal(str(item.amount))) for item in refunds), Decimal("0.00"))
     if money(total) != refunded:
         raise HTTPException(422, "Refund allocations must equal the return value")
+
+
+def apply_loyalty_redemption(prepared, points: int, points_per_currency_unit: int,
+                            max_redemption_percent: Decimal):
+    """Apply a pre-tax points discount proportionally and recalculate each line's tax.
+
+    Prepared line tuples are (line, unit_price, subtotal, manager_discount,
+    tax_rate, tax, line_total, loyalty_discount). The last tuple item is
+    replaced with the allocated loyalty discount for a redemption.
+    """
+    if points <= 0:
+        return prepared, Decimal("0.00"), money(sum((item[5] for item in prepared), Decimal("0.00"))), money(sum((item[6] for item in prepared), Decimal("0.00")))
+    if points_per_currency_unit <= 0:
+        raise HTTPException(409, "Loyalty conversion policy is invalid")
+    loyalty_discount = money(Decimal(points) / Decimal(points_per_currency_unit))
+    discountable_base = money(sum(
+        (Decimal(item[2]) - Decimal(item[3]) for item in prepared), Decimal("0.00")
+    ))
+    maximum = money(discountable_base * Decimal(max_redemption_percent) / Decimal("100"))
+    if loyalty_discount <= 0:
+        raise HTTPException(422, "The selected loyalty points are worth less than one cent")
+    if loyalty_discount > maximum:
+        raise HTTPException(422, "Loyalty redemption exceeds the configured per-sale percentage limit")
+    shares = []
+    for item in prepared:
+        taxable_base = money(Decimal(item[2]) - Decimal(item[3]))
+        raw = loyalty_discount * taxable_base / discountable_base
+        share = (raw * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
+        shares.append(min(money(share), taxable_base))
+    remaining = money(loyalty_discount - sum(shares, Decimal("0.00")))
+    for index in range(len(shares) - 1, -1, -1):
+        taxable_base = money(Decimal(prepared[index][2]) - Decimal(prepared[index][3]))
+        capacity = money(taxable_base - shares[index])
+        extra = min(remaining, capacity)
+        shares[index] = money(shares[index] + extra)
+        remaining = money(remaining - extra)
+        if remaining <= 0:
+            break
+    if remaining > 0:
+        raise HTTPException(422, "Loyalty discount cannot be allocated to the selected sale lines")
+    adjusted = []
+    for item, share in zip(prepared, shares):
+        line, unit_price, subtotal, discount, tax_rate, tax, line_total, _ = item
+        new_taxable = money(Decimal(subtotal) - Decimal(discount) - share)
+        new_tax = money(new_taxable * Decimal(tax_rate) / Decimal("100"))
+        new_total = money(new_taxable + new_tax)
+        adjusted.append((line, unit_price, subtotal, discount, tax_rate, new_tax, new_total, share))
+    return (
+        adjusted,
+        loyalty_discount,
+        money(sum((item[5] for item in adjusted), Decimal("0.00"))),
+        money(sum((item[6] for item in adjusted), Decimal("0.00"))),
+    )
+
+
+def calculate_loyalty_return_adjustments(points_redeemed: int, points_earned: int,
+                                         cumulative_refunds: Decimal, sale_total: Decimal,
+                                         already_restored: int = 0, already_reversed: int = 0):
+    """Return idempotent point restoration/reversal deltas for cumulative sale returns."""
+    ratio = min(Decimal("1"), Decimal(cumulative_refunds) / Decimal(sale_total)) if Decimal(sale_total) > 0 else Decimal("1")
+    target_restore = min(int(points_redeemed), int((Decimal(int(points_redeemed)) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    target_reverse = min(int(points_earned), int((Decimal(int(points_earned)) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    return max(0, target_restore - int(already_restored)), max(0, target_reverse - int(already_reversed))
