@@ -132,36 +132,41 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 
 
 def _can_read(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
-    if row.owner_user_id == user.id:
-        return True
-    if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
-        return True
-    if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
-        return True
-    if row.visibility != "organization":
-        return False
-    if (row.portal_key, row.record_type) in PERSONAL_TYPES or row.portal_key == "trust" or row.portal_key == "careers":
-        return False
     if row.organization_id is None:
+        if row.owner_user_id == user.id:
+            return True
+        if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
+            return True
+        if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
+            return True
         return False
-    return db.query(Membership.id).filter_by(
+    membership = db.query(Membership.id).filter_by(
         user_id=user.id, organization_id=row.organization_id, is_active=True
-    ).first() is not None
+    ).first()
+    if not membership:
+        return False
+    if row.visibility == "private":
+        return row.owner_user_id == user.id
+    return row.visibility == "organization"
 
 
 def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
-    if row.owner_user_id == user.id:
-        return True
-    if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
-        return True
-    if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
-        return True
-    if row.organization_id is None or row.portal_key in {"trust", "careers"}:
+    if row.organization_id is None:
+        if row.owner_user_id == user.id:
+            return True
+        if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
+            return True
+        if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
+            return True
         return False
     membership = db.query(Membership).filter_by(
         user_id=user.id, organization_id=row.organization_id, is_active=True
     ).first()
     if not membership:
+        return False
+    if row.visibility == "private":
+        return row.owner_user_id == user.id
+    if row.visibility != "organization":
         return False
     if (row.portal_key, row.record_type) in MANAGER_ONLY:
         return membership.role in {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
