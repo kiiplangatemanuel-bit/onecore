@@ -1580,3 +1580,38 @@ class EmailVerification(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PortalPublicContent(Base):
+    __tablename__ = "portal_public_content"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portal_key: Mapped[str] = mapped_column(String(32), index=True)
+    content_type: Mapped[str] = mapped_column(String(48), index=True)
+    slug: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(180))
+    summary: Mapped[str] = mapped_column(String(500), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("uq_portal_public_content_slug", "portal_key", "slug", unique=True),)
+
+
+class PortalResource(Base):
+    __tablename__ = "portal_resources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portal_key: Mapped[str] = mapped_column(String(32), index=True)
+    resource_kind: Mapped[str] = mapped_column(String(48), index=True)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    visibility: Mapped[str] = mapped_column(String(16), default="private")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_portal_resource_owner", "portal_key", "owner_user_id", "resource_kind"),
+        Index("ix_portal_resource_org", "portal_key", "organization_id", "resource_kind", "visibility"),
+    )
