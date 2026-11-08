@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import User, CRMCampaign, CRMCampaignRecipient, CRMContactConsent, CRMCampaignDelivery, CRMContact
-from app.core.security import current_user
+from app.core.security import current_user, set_crm_delivery_callback_context, set_crm_unsubscribe_token_context, set_verified_organization_context
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
 from app.services.crm_delivery import build_unsubscribe_url, send_campaign_message
@@ -121,8 +121,10 @@ def delivery_event(payload:dict,x_crm_delivery_secret:str|None=Header(None),db:S
         x_crm_delivery_secret or "",settings.crm_delivery_callback_secret): raise HTTPException(401,"Invalid callback credentials")
     pid=str(payload.get("provider_message_id") or "").strip(); state=str(payload.get("status") or "").lower()
     if not pid or state not in {"delivered","failed"}: raise HTTPException(422,"Valid provider_message_id and status required")
+    set_crm_delivery_callback_context(db)
     d=db.query(CRMCampaignDelivery).filter_by(provider_message_id=pid).order_by(CRMCampaignDelivery.id.desc()).first()
     if not d: raise HTTPException(404,"Delivery not found")
+    set_verified_organization_context(db,d.organization_id)
     r=db.query(CRMCampaignRecipient).filter_by(id=d.recipient_id,organization_id=d.organization_id).first()
     if not r: raise HTTPException(404,"Recipient not found")
     if d.status=="delivered": return {"accepted":True,"duplicate":True}
@@ -148,9 +150,11 @@ def campaign_report(campaign_id:int,membership=Depends(active_membership),db:Ses
 @router.get("/unsubscribe/{token}",response_class=HTMLResponse)
 def unsubscribe_confirmation(token:str,db:Session=Depends(get_db)):
     digest=hashlib.sha256(token.encode()).hexdigest()
-    exists=db.query(CRMCampaignDelivery.id).filter_by(unsubscribe_token_hash=digest).first()
+    set_crm_unsubscribe_token_context(db,digest)
+    exists=db.query(CRMCampaignDelivery).filter_by(unsubscribe_token_hash=digest).first()
     if not exists:
         raise HTTPException(404,"Unsubscribe link is invalid")
+    set_verified_organization_context(db,exists.organization_id)
     # GET is deliberately read-only: mail security scanners must not change consent.
     return HTMLResponse(
         "<!doctype html><html lang='en'><meta charset='utf-8'>"
@@ -165,8 +169,11 @@ def unsubscribe_confirmation(token:str,db:Session=Depends(get_db)):
 
 @router.post("/unsubscribe/{token}")
 def unsubscribe(token:str,db:Session=Depends(get_db)):
-    d=db.query(CRMCampaignDelivery).filter_by(unsubscribe_token_hash=hashlib.sha256(token.encode()).hexdigest()).first()
+    digest=hashlib.sha256(token.encode()).hexdigest()
+    set_crm_unsubscribe_token_context(db,digest)
+    d=db.query(CRMCampaignDelivery).filter_by(unsubscribe_token_hash=digest).first()
     if not d: raise HTTPException(404,"Unsubscribe link is invalid")
+    set_verified_organization_context(db,d.organization_id)
     r=db.query(CRMCampaignRecipient).filter_by(id=d.recipient_id,organization_id=d.organization_id).first()
     c=db.query(CRMCampaign).filter_by(id=r.campaign_id,organization_id=r.organization_id).first() if r else None
     if not r or not c: raise HTTPException(404,"Subscription not found")
