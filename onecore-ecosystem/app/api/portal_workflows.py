@@ -199,8 +199,8 @@ def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, 
             event_key=f"status-incident-{incident.id}-{event_key}",
             subject=f"OneCore Status: {title}"[:240],
             body=(
-                f"Service: {service}\\nSeverity: {severity}\\n"
-                f"Incident: {title}\\n\\n{summary}\\n\\n"
+                f"Service: {service}\nSeverity: {severity}\n"
+                f"Incident: {title}\n\n{summary}\n\n"
                 "You received this message because you subscribed to OneCore Status alerts."
             ),
             status="pending",
