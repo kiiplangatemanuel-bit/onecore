@@ -31,6 +31,15 @@ def upgrade():
     op.create_index("ix_status_alert_deliveries_incident_record_id", "status_alert_deliveries", ["incident_record_id"])
     op.create_index("ix_status_alert_deliveries_status", "status_alert_deliveries", ["status"])
     op.create_index("ix_status_alert_deliveries_next_attempt_at", "status_alert_deliveries", ["next_attempt_at"])
+    op.execute("""
+        CREATE POLICY status_alert_fanout_subscription_select ON portal_workflow_records
+        FOR SELECT USING (
+            portal_key = 'status'
+            AND record_type = 'alert_subscription'
+            AND status = 'active'
+            AND public.onecore_is_platform_admin()
+        )
+    """)
     op.execute("ALTER TABLE status_alert_deliveries ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE status_alert_deliveries FORCE ROW LEVEL SECURITY")
     op.execute("""
@@ -60,4 +69,5 @@ def upgrade():
 
 
 def downgrade():
+    op.execute("DROP POLICY IF EXISTS status_alert_fanout_subscription_select ON portal_workflow_records")
     op.drop_table("status_alert_deliveries")
