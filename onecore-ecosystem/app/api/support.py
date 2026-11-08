@@ -281,7 +281,7 @@ def _scan_attachment_object(storage, object_key: str) -> tuple[str, str | None]:
 def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, db: Session) -> dict:
     attachment = db.query(SupportAttachment).filter_by(
         id=attachment_id, ticket_id=ticket.id
-    ).first()
+    ).with_for_update().first()
     if not attachment:
         raise HTTPException(404, "Support attachment not found")
     if attachment.status != "pending":
