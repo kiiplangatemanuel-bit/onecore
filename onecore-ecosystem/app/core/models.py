@@ -25,6 +25,7 @@ class Organization(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     industry: Mapped[str] = mapped_column(String(100), default="general")
     country: Mapped[str] = mapped_column(String(2), default="KE")
     currency: Mapped[str] = mapped_column(String(3), default="KES")
