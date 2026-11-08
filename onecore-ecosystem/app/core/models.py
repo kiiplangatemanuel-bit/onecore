@@ -1539,3 +1539,33 @@ class HealthcareEvent(Base):
         Index("ix_health_event_org_idempotency", "organization_id", "idempotency_key", unique=True),
         Index("ix_health_event_patient_time", "organization_id", "patient_id", "occurred_at"),
     )
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(180))
+    category: Mapped[str] = mapped_column(String(40), default="general")
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(320), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    assigned_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    guest_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(180))
+    body: Mapped[str] = mapped_column(Text)
+    is_staff: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_support_message_ticket_created", "ticket_id", "created_at"),)
