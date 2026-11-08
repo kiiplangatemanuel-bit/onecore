@@ -9,3 +9,10 @@ export const getActiveOrganization=()=>sessionStorage.getItem(ORG_KEY);
 export async function api(path,options={}){const headers=new Headers(options.headers||{});const token=getToken();if(token)headers.set("Authorization",`Bearer ${token}`);const org=getActiveOrganization();if(org&&!headers.has("X-Organization-ID"))headers.set("X-Organization-ID",org);if(options.body&&!(options.body instanceof FormData)&&!headers.has("Content-Type"))headers.set("Content-Type","application/json");let response;try{response=await fetch(`${API_BASE}${path.startsWith("/")?path:`/${path}`}`,{...options,headers})}catch{throw new Error(`Cannot reach OneCore API at ${API_BASE}. Check VITE_API_BASE_URL and backend CORS settings.`)}const type=response.headers.get("content-type")||"";const payload=type.includes("application/json")?await response.json():await response.text();if(!response.ok){const message=typeof payload==="object"?(payload.detail||payload.message||response.statusText):(payload||response.statusText);throw new Error(typeof message==="string"?message:JSON.stringify(message))}return payload}
 export async function login(email,password){const body=new URLSearchParams({username:email,password});const result=await api("/api/v1/auth/login",{method:"POST",body,headers:{"Content-Type":"application/x-www-form-urlencoded"}});if(result.mfa_required)return result;if(!result.access_token)throw new Error("The API did not return an access token.");setToken(result.access_token);return api("/api/v1/auth/me")}
 export async function completeMfaLogin(challengeToken,code){const result=await api("/api/v1/auth/mfa/challenge",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,code})});if(!result.access_token)throw new Error("The API did not return an access token.");setToken(result.access_token);return api("/api/v1/auth/me")}
+
+export async function loginWithSupabase(accessToken){
+ const result=await api("/api/v1/auth/supabase-session",{method:"POST",body:JSON.stringify({access_token:accessToken})});
+ if(!result.access_token)throw new Error("OneCore did not return an authenticated session.");
+ setToken(result.access_token);
+ return api("/api/v1/auth/me");
+}
