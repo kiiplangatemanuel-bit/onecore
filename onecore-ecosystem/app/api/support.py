@@ -209,6 +209,9 @@ def _create_attachment_upload(ticket: SupportTicket, payload: SupportAttachmentI
         size_bytes=payload.size_bytes, status="pending",
     )
     db.add(attachment)
+    db.flush()
+    _audit(db, user.id, ticket.organization_id, "support.attachment.upload_started",
+           ticket, f"attachment_id={attachment.id};size_bytes={attachment.size_bytes}")
     db.commit()
     db.refresh(attachment)
     return {
@@ -218,7 +221,7 @@ def _create_attachment_upload(ticket: SupportTicket, payload: SupportAttachmentI
     }
 
 
-def _complete_attachment(ticket: SupportTicket, attachment_id: int, db: Session) -> dict:
+def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, db: Session) -> dict:
     attachment = db.query(SupportAttachment).filter_by(
         id=attachment_id, ticket_id=ticket.id
     ).first()
@@ -238,6 +241,8 @@ def _complete_attachment(ticket: SupportTicket, attachment_id: int, db: Session)
     # Keep the object quarantined until an authorized malware-scanning/review
     # process explicitly releases it for customer downloads.
     attachment.status = "pending_scan"
+    _audit(db, user.id, ticket.organization_id, "support.attachment.upload_completed",
+           ticket, f"attachment_id={attachment.id};status=pending_scan")
     db.commit()
     return {"id": attachment.id, "status": attachment.status}
 
@@ -377,7 +382,7 @@ def complete_ticket_attachment(
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
     ticket = _user_ticket(db, ticket_number, user)
-    return _complete_attachment(ticket, attachment_id, db)
+    return _complete_attachment(ticket, attachment_id, user, db)
 
 
 @router.get("/tickets/{ticket_number}/attachments/{attachment_id}/download")
