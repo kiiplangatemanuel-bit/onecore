@@ -3,7 +3,7 @@
 Payroll calculation details are persisted as immutable JSON snapshots on approval.
 Statutory rules are tenant-owned and cannot be activated without independent review.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, time as time_type, timezone
 from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, Time, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -188,7 +188,7 @@ class HRShift(Base):
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     shift_code: Mapped[str] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(120))
-    start_time: Mapped[datetime.time] = mapped_column(Time)
+    start_time: Mapped[time_type] = mapped_column(Time)
     end_time: Mapped[datetime.time] = mapped_column(Time)
     break_minutes: Mapped[int] = mapped_column(default=0)
     differential_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), default=Decimal("0"))
@@ -205,7 +205,7 @@ class HRAttendance(Base):
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
     shift_id: Mapped[int] = mapped_column(ForeignKey("hr_shifts.id"))
-    attendance_date: Mapped[datetime.date] = mapped_column(Date, index=True)
+    attendance_date: Mapped[date] = mapped_column(Date, index=True)
     clock_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     clock_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scheduled_minutes: Mapped[int] = mapped_column(default=0)
