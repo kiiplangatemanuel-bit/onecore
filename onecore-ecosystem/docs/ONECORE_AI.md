@@ -5,7 +5,7 @@ All routes require a bearer token and an active organization context through X-O
 - GET /api/v1/ai/status — provider configuration and capability availability; no secrets are returned.
 - GET /api/v1/ai/sessions — recent conversations owned by the signed-in user.
 - GET /api/v1/ai/sessions/{id} — messages for an owned conversation.
-- POST /api/v1/ai/chat — prompt, optional session_id, language, branch_id and task.
+- POST /api/v1/ai/chat — prompt, optional session_id, language, branch_id and task.\n- POST /api/v1/ai/analyze-file — bounded PDF, XLSX, CSV, TXT and Markdown extraction, then AI analysis.
 - GET /api/v1/ai/usage — token counters for the signed-in user.
 - DELETE /api/v1/ai/sessions/{id} — owner-only conversation and message deletion.
 
@@ -13,4 +13,4 @@ The provider adapter expects an OpenAI-compatible chat-completions endpoint. Con
 
 Chat history and token usage are stored in the shared SQL database. Prompt content is sent to the configured provider. Do not submit sensitive personal, clinical, payment-card or credential data unless the organization has approved the provider and lawful processing basis. The assistant is advisory; it cannot execute database queries, payments, messages or other business actions.
 
-This API does not yet implement binary document/PDF/XLSX ingestion, voice, image generation/understanding, autonomous agents/tool calls, private model hosting, approval-executed actions, cost-based billing, automated retention or provider cost reconciliation. Capability flags report these as unavailable.
+This API does not yet implement voice, image generation/understanding, autonomous agents/tool calls, private model hosting, approval-executed actions, cost-based billing, automated retention or provider cost reconciliation. Capability flags report these as unavailable.
