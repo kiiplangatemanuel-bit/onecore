@@ -68,7 +68,7 @@ The current `main` HR domain is the canonical implementation. It uses `app/core/
 | Payroll preparation, approvals and payslips | Implemented with immutable calculation snapshots and maker-checker controls |
 | Payroll accounting accrual and reversal | Implemented with balanced journals and controlled pre-payment reversal |
 | One-off earnings and deductions | Implemented on the current canonical domain in migrations 0043–0044 with independent approval, immutable payslip snapshots and accounting liability mapping |
-| Legacy payment batches and bank reconciliation | Not transplanted: the old implementation depends on the duplicate payroll tables and generic Record storage. A provider-backed disbursement/reconciliation workflow must be designed against the current PayrollRun/PayrollPayslip model before implementation |
+| Legacy payment batches and bank reconciliation | Legacy generic-record implementation not transplanted; a new canonical payment-batch and bank-reconciliation workflow is implemented in migration 0042 against PayrollRun/PayrollPayslip |
 | Inherited Healthcare, Pharmacy/Lab, SACCO, School and CRM files | Excluded from HR integration; they must be delivered and reviewed through their own module branches |
 
 This payment-batch implementation is a new, focused change against the canonical payroll domain. It does not copy the legacy generic-record payment tables or claim to initiate bank transfers. External payment references are supplied after funds have been sent through an independently operated bank/provider channel.
