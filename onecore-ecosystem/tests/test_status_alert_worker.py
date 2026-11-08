@@ -9,9 +9,8 @@ from app.core.models import StatusAlertDelivery
 from app.workers import status_alert_delivery
 
 
-def test_status_alert_worker_delivers_pending_message_once(tmp_path, monkeypatch):
-    database = tmp_path / "worker.db"
-    url = f"sqlite:///{database}"
+def test_status_alert_worker_delivers_pending_message(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 'worker.db'}"
     engine = create_engine(url)
     Base.metadata.create_all(engine, tables=[StatusAlertDelivery.__table__])
     with Session(engine) as db:
@@ -39,8 +38,7 @@ def test_status_alert_worker_delivers_pending_message_once(tmp_path, monkeypatch
 
 
 def test_status_alert_worker_retries_failures_with_bounded_backoff(tmp_path, monkeypatch):
-    database = tmp_path / "retry.db"
-    url = f"sqlite:///{database}"
+    url = f"sqlite:///{tmp_path / 'retry.db'}"
     engine = create_engine(url)
     Base.metadata.create_all(engine, tables=[StatusAlertDelivery.__table__])
     with Session(engine) as db:
@@ -53,7 +51,8 @@ def test_status_alert_worker_retries_failures_with_bounded_backoff(tmp_path, mon
     engine.dispose()
 
     monkeypatch.setattr(settings, "status_alert_worker_database_url", url)
-    monkeypatch.setattr(status_alert_delivery, "_send_email", lambda item: (_ for _ in ()).throw(TimeoutError()))
+    monkeypatch.setattr(status_alert_delivery, "_send_email",
+                        lambda item: (_ for _ in ()).throw(TimeoutError()))
     assert status_alert_delivery.run_status_alert_worker() == 1
 
     engine = create_engine(url)
@@ -61,6 +60,6 @@ def test_status_alert_worker_retries_failures_with_bounded_backoff(tmp_path, mon
         delivery = db.query(StatusAlertDelivery).one()
         assert delivery.status == "pending"
         assert delivery.attempts == 1
-        assert delivery.next_attempt_at > datetime.now(timezone.utc)
+        assert delivery.next_attempt_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
         assert delivery.last_error == "TimeoutError"
     engine.dispose()
