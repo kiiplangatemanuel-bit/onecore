@@ -118,3 +118,25 @@ def test_supabase_database_url_takes_precedence_over_local_database_url():
         supabase_db_url="postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres",
     )
     assert settings.database_connection_url.startswith("postgresql://")
+
+
+
+def test_supabase_connection_url_uses_psycopg_and_enforces_tls():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres"
+    )
+    assert url.drivername == "postgresql+psycopg"
+    assert url.query["sslmode"] == "require"
+
+
+def test_supabase_transaction_pooler_url_is_normalized():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres.project:secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+    )
+    assert url.drivername == "postgresql+psycopg"
+    assert url.port == 6543
+    assert url.query["sslmode"] == "require"
