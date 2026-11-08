@@ -21,7 +21,7 @@ def test_organization_creation_sets_authenticated_owner():
 
 
 def test_membership_policy_allows_owner_admin_but_blocks_peer_escalation():
-    source = (ROOT / "migrations" / "versions" / "0060_organization_owner_membership_bootstrap.py").read_text()
+    source = (ROOT / "migrations" / "versions" / "0061_organization_owner_membership_bootstrap.py").read_text()
     assert "public.onecore_is_org_owner(organization_id)" in source
     assert "role = 'org_admin'" in source
     assert "role <> 'org_admin'" in source
