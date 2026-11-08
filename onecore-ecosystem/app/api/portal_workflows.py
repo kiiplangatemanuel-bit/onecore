@@ -74,16 +74,18 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 
 
 def _visible_resource(db: Session, user: User, resource: PortalResource) -> Membership | None:
-    if resource.owner_user_id == user.id:
-        return None
-    if resource.organization_id is None:
+    # Organization membership is checked even for the original creator. Removing
+    # membership must revoke access to every tenant-owned record immediately.
+    if resource.organization_id is not None:
+        membership = _membership(db, user, resource.organization_id)
+        if resource.resource_type in SENSITIVE_TYPES and membership.role not in {
+            "org_admin", "security_admin", "compliance_officer"
+        } and resource.owner_user_id != user.id:
+            raise HTTPException(404, "Portal resource not found")
+        return membership
+    if resource.owner_user_id != user.id:
         raise HTTPException(404, "Portal resource not found")
-    membership = _membership(db, user, resource.organization_id)
-    if resource.resource_type in SENSITIVE_TYPES and membership.role not in {
-        "org_admin", "security_admin", "compliance_officer"
-    }:
-        raise HTTPException(404, "Portal resource not found")
-    return membership
+    return None
 
 
 def _out(row: PortalResource) -> dict:
