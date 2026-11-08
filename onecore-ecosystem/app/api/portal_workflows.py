@@ -24,13 +24,13 @@ router = APIRouter(prefix="/api/v1/portals", tags=["public-portals"])
 PORTALS = {
     "support": {"help_article", "faq", "announcement"},
     "status": {"incident", "maintenance", "component", "alert_subscription", "notification_preference"},
-    "developers": {"api_application", "api_key", "webhook", "sandbox"},
+    "developers": {"api_reference", "integration_guide", "api_application", "api_key", "webhook", "sandbox"},
     "docs": {"guide", "module_guide", "role_instruction", "bookmark"},
     "community": {"post", "comment", "group_membership", "profile"},
-    "trust": {"security_report", "security_case", "authorized_document"},
+    "trust": {"security_policy", "compliance", "disclosure", "security_report", "security_case", "authorized_document"},
     "events": {"event", "event_registration", "booking", "event_material"},
     "careers": {"vacancy", "applicant_profile", "job_application"},
-    "partners": {"programme", "partner_profile", "referral", "lead", "agreement", "partner_resource"},
+    "partners": {"programme", "opportunity", "partner_profile", "referral", "lead", "agreement", "partner_resource"},
 }
 ORG_SHARED_KINDS = {
     "alert_subscription", "notification_preference", "api_application", "webhook",
@@ -145,12 +145,19 @@ def publish_portal_content(payload: PublicContentIn, user: User = Depends(curren
     if user.platform_role not in {"root_superadmin", "platform_admin"}:
         raise HTTPException(403, "Platform administrator access is required")
     _validate_portal(payload.portal)
-    if payload.content_type not in PORTALS[payload.portal] - ORG_SHARED_KINDS:
-        # The public content taxonomy is intentionally separate from private workspace kinds.
-        allowed_public = {"help_article", "faq", "announcement", "incident", "maintenance",
-            "component", "guide", "post", "event", "vacancy", "programme"}
-        if payload.content_type not in allowed_public:
-            raise HTTPException(422, "Unsupported public content type for this portal")
+    public_types = {
+        "support": {"help_article", "faq", "announcement"},
+        "status": {"incident", "maintenance", "component", "announcement"},
+        "developers": {"api_reference", "integration_guide"},
+        "docs": {"guide", "announcement"},
+        "community": {"post", "announcement"},
+        "trust": {"security_policy", "compliance", "disclosure"},
+        "events": {"event", "announcement"},
+        "careers": {"vacancy", "announcement"},
+        "partners": {"programme", "opportunity", "announcement"},
+    }
+    if payload.content_type not in public_types[payload.portal]:
+        raise HTTPException(422, "Unsupported public content type for this portal")
     _validate_data(payload.metadata)
     row = db.query(PortalPublicContent).filter_by(
         portal_key=payload.portal, slug=payload.slug
