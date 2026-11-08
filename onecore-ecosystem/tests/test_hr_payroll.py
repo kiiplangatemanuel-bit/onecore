@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -101,7 +101,7 @@ def test_statutory_rule_sets_require_official_evidence_and_valid_bands():
 def test_payroll_calculation_uses_versioned_configured_rates_and_cent_rounding():
     employee = HREmployee(
         id=7, organization_id=1, employee_number="EMP-007",
-        first_name="Ada", last_name="Learner", base_salary=Decimal("20000.00"),
+        first_name="Ada", last_name="Learner", hire_date=datetime(2026, 1, 1, tzinfo=timezone.utc), base_salary=Decimal("20000.00"),
         recurring_allowances={"transport": "1000.00"}, recurring_benefits={"housing": "500.00"},
         pension_contribution=Decimal("1000.00"),
     )
@@ -120,8 +120,10 @@ def test_payroll_calculation_uses_versioned_configured_rates_and_cent_rounding()
         "housing_levy_employee_rate": "0.015",
         "housing_levy_employer_rate": "0.015",
     }
-    result = _calculate(employee, rules)
+    result = _calculate(employee, rules, date(2026, 1, 1), date(2026, 1, 31))
     assert result["gross_pay"] == "21500.00"
+    assert result["proration_days"] == 31
+    assert result["period_days"] == 31
     assert result["taxable_pay"] == "20500.00"
     assert result["nssf_employee"] == "120.00"
     assert result["nssf_employer"] == "120.00"
