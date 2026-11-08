@@ -844,6 +844,22 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
     return {"id": order.id, "order_number": order.order_number, "status": order.status}
 
 
+@router.get("/procurement/orders/{order_id}/lines")
+def list_purchase_order_lines(order_id: int, membership=Depends(active_membership),
+                              db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id).first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Purchase order not found")
+    rows = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).order_by(ProcurementPurchaseOrderLine.id).all()
+    return [{"line_id": x.id, "product_id": x.product_id,
+             "quantity": str(x.quantity_ordered), "quantity_received": str(x.quantity_received),
+             "unit_cost": str(x.unit_cost)} for x in rows]
+
+
 @router.get("/procurement/orders/{order_id}/versions")
 def list_purchase_order_versions(order_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
     require_permission(membership, "read")
@@ -879,6 +895,12 @@ def amend_purchase_order(order_id: int, payload: PurchaseOrderAmendmentIn,
     ids = [x.line_id for x in payload.lines if x.line_id is not None]
     if len(ids) != len(set(ids)) or any(x not in by_id for x in ids):
         raise HTTPException(422, "Amendment line IDs must be unique and belong to this purchase order")
+    receipt_rows = db.query(ProcurementGoodsReceiptLine.purchase_order_line_id,
+        func.coalesce(func.sum(ProcurementGoodsReceiptLine.quantity_received), 0)).filter(
+        ProcurementGoodsReceiptLine.organization_id == membership.organization_id,
+        ProcurementGoodsReceiptLine.purchase_order_line_id.in_(list(by_id) or [-1])
+    ).group_by(ProcurementGoodsReceiptLine.purchase_order_line_id).all()
+    received_or_pending = {k: Decimal(str(v)) for k, v in receipt_rows}
     invoice_rows = db.query(ProcurementSupplierInvoiceLine.purchase_order_line_id,
         func.coalesce(func.sum(ProcurementSupplierInvoiceLine.quantity), 0)).filter(
         ProcurementSupplierInvoiceLine.organization_id == membership.organization_id,
@@ -887,7 +909,7 @@ def amend_purchase_order(order_id: int, payload: PurchaseOrderAmendmentIn,
     invoiced = {k: Decimal(str(v)) for k, v in invoice_rows}
     requested = {x.line_id: x for x in payload.lines if x.line_id is not None}
     for line_id, old in by_id.items():
-        committed = max(Decimal(old.quantity_received), invoiced.get(line_id, Decimal("0")))
+        committed = max(Decimal(old.quantity_received), received_or_pending.get(line_id, Decimal("0")), invoiced.get(line_id, Decimal("0")))
         new = requested.get(line_id)
         if committed > 0 and (new is None or new.product_id != old.product_id or new.quantity < committed):
             raise HTTPException(409, f"Line {line_id} is locked by received/invoiced quantity {committed}")
