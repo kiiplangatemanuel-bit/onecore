@@ -34,3 +34,11 @@ def test_org_admin_cannot_grant_or_escalate_another_org_admin():
     source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
     assert "role <> 'org_admin'" in source
     assert "OR public.onecore_is_platform_admin()" in source
+
+
+def test_audit_event_rls_preserves_authenticated_and_guest_support_writes():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert '"audit_events"' in source
+    assert "CREATE POLICY audit_event_select" in source
+    assert "CREATE POLICY audit_event_insert" in source
+    assert "app.support_guest_token_hash" in source
