@@ -22,9 +22,11 @@ The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and
 
 The API and CRM scheduler both receive the same database URL. Set `SUPABASE_DB_URL` in the project `.env` file or provide `ONECORE_DATABASE_URL` as the explicit Compose override. Compose uses the override first, then `SUPABASE_DB_URL`, and falls back to local SQLite only for development.
 
-## Frontend security boundary
+## Supabase Auth and frontend security boundary
 
-Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The browser uses OneCore's authenticated API and tenant context. Never add `SUPABASE_DB_URL`, a database password or a Supabase service-role key to frontend environment variables, source code or browser storage.
+Set backend `SUPABASE_URL` to the project URL. The API validates Supabase Auth access tokens using the project's JWKS endpoint for asymmetric signing, or `SUPABASE_JWT_SECRET` for legacy HS256 signing. The JWT secret is server-only. Verified identities are linked to an existing OneCore account by exact email or provisioned as a new OneCore identity with no organization membership. Organization registration after Supabase email verification is completed through the authenticated onboarding endpoint.
+
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (or publishable key) in each Vercel app to use Supabase Auth sign-in/sign-up. These are public browser settings and must be paired with strict Supabase Auth settings. The frontend must use the OneCore API for business data. Never add `SUPABASE_DB_URL`, a database password, `SUPABASE_JWT_SECRET` or a Supabase service-role key to frontend variables, source code or browser storage.
 
 ## Release verification
 
