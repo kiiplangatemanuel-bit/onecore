@@ -2,7 +2,8 @@ import React,{useCallback,useEffect,useState} from "react";
 import {api} from "./api";
 
 const money=(value,currency="KES")=>new Intl.NumberFormat("en-KE",{style:"currency",currency,maximumFractionDigits:2}).format(Number(value||0));
-const today=()=>new Date().toISOString().slice(0,10);\nconst withLocalOffset=value=>{const offset=-new Date(value).getTimezoneOffset(),sign=offset>=0?"+":"-",hours=String(Math.floor(Math.abs(offset)/60)).padStart(2,"0"),minutes=String(Math.abs(offset)%60).padStart(2,"0");return value+sign+hours+":"+minutes};
+const today=()=>new Date().toISOString().slice(0,10);
+const withLocalOffset=value=>{const offset=-new Date(value).getTimezoneOffset(),sign=offset>=0?"+":"-",hours=String(Math.floor(Math.abs(offset)/60)).padStart(2,"0"),minutes=String(Math.abs(offset)%60).padStart(2,"0");return value+sign+hours+":"+minutes};
 function Panel({title,children,action}){return <section className="panel"><div className="panel-head"><h3>{title}</h3>{action}</div>{children}</section>}
 function Metric({label,value,detail}){return <div className="portal-metric"><span>{label}</span><strong>{value??"—"}</strong>{detail&&<small>{detail}</small>}</div>}
 function ErrorLine({value}){return value?<div className="alert error" role="alert">{value}</div>:null}
