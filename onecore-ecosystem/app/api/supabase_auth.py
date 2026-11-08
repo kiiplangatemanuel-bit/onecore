@@ -8,6 +8,7 @@ import secrets
 import uuid
 
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.models import AuditEvent, User
+from app.core.models import AuditEvent, User, UserMFAFactor
 from app.core.security import create_access_token, hash_password
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -98,6 +99,24 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
             )
             db.add(user)
             action = "auth.supabase.user_provisioned"
+    # A Supabase password session must not bypass a OneCore MFA factor.
+    # Supabase validates the JWT at /auth/v1/user above; after that verification,
+    # inspect its signed AAL claim and bind it to the verified subject.
+    mfa_factor = db.query(UserMFAFactor).filter(
+        UserMFAFactor.user_id == user.id,
+        UserMFAFactor.enabled_at.isnot(None),
+    ).first()
+    if mfa_factor:
+        try:
+            claims = jwt.decode(
+                payload.access_token, options={"verify_signature": False, "verify_exp": False},
+                algorithms=["HS256", "ES256", "RS256"],
+            )
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(401, "Supabase MFA assurance could not be verified") from exc
+        if str(claims.get("sub", "")) != supabase_id or claims.get("aal") != "aal2":
+            raise HTTPException(403, "This OneCore account requires multi-factor authentication")
+
     try:
         db.flush()
         db.add(AuditEvent(
