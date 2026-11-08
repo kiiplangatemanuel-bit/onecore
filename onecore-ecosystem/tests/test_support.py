@@ -175,3 +175,21 @@ def test_support_attachments_remain_quarantined_until_security_review():
         assert denied.value.status_code == 409
         assert "security review" in denied.value.detail
     engine.dispose()
+
+
+def test_clamav_scan_response_parser_requires_explicit_verdict():
+    from app.api.support import _parse_clamav_response
+    assert _parse_clamav_response('stream: OK\\0') == ('clean', None)
+    assert _parse_clamav_response('stream: Eicar-Test-Signature FOUND\\0') == ('infected', 'Eicar-Test-Signature')
+    with pytest.raises(RuntimeError):
+        _parse_clamav_response('stream: ERROR\\0')
+
+
+def test_support_attachment_scan_evidence_migration_follows_webhooks():
+    from pathlib import Path
+    migration = Path(__file__).parents[1] / 'migrations' / 'versions' / '0058_support_attachment_scan_evidence.py'
+    source = migration.read_text()
+    assert 'revision = "0058_support_attachment_scan_evidence"' in source
+    assert 'down_revision = "0057_developer_webhooks"' in source
+    for column in ('scan_engine', 'scan_result', 'scan_signature', 'scanned_at'):
+        assert column in source
