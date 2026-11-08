@@ -193,3 +193,30 @@ def test_support_attachment_scan_evidence_migration_follows_webhooks():
     assert 'down_revision = "0057_developer_webhooks"' in source
     for column in ('scan_engine', 'scan_result', 'scan_signature', 'scanned_at'):
         assert column in source
+
+
+
+def test_clamav_configuration_requires_a_private_scanner_host():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    configured = Settings(_env_file=None, support_attachment_scanning_enabled=True,
+                          clamav_host="clamav.internal")
+    assert configured.clamav_host == "clamav.internal"
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, support_attachment_scanning_enabled=True, clamav_host="")
+
+
+def test_production_object_storage_requires_automated_attachment_scanning():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="SUPPORT_ATTACHMENT_SCANNING_ENABLED"):
+        Settings(
+            _env_file=None, app_env="production", debug=False,
+            secret_key="a" * 48, database_url="postgresql://user:pass@db.project.supabase.co/app",
+            cors_origins="https://app.example.com", trusted_hosts="api.example.com",
+            force_https=True, portal_redirect_origins="https://support.example.com",
+            integration_object_storage_enabled=True,
+            support_attachment_scanning_enabled=False,
+        )
