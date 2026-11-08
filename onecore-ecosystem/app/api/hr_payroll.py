@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, HRAttendanceRecord, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
 from app.core.models import AuditEvent, Branch, Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingFiscalPeriod
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -897,3 +897,137 @@ def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversal
     db.commit()
     return {"payroll_run_id":run.id,"original_journal_id":original.id,
             "reversal_journal_id":journal.id,"status":"reversed"}
+
+
+class AttendanceIn(BaseModel):
+    employee_id: int = Field(gt=0)
+    work_date: date
+    clock_in: datetime
+    clock_out: datetime
+    break_minutes: int = Field(default=0, ge=0, le=720)
+    scheduled_minutes: int = Field(default=480, gt=0, le=1440)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    @model_validator(mode="after")
+    def validate_shift(self):
+        if self.clock_in.tzinfo is None or self.clock_out.tzinfo is None:
+            raise ValueError("Clock timestamps must include an explicit timezone")
+        if self.clock_out <= self.clock_in:
+            raise ValueError("Clock-out must be after clock-in")
+        if self.work_date != self.clock_in.date() or self.work_date != self.clock_out.date():
+            raise ValueError("Attendance clock timestamps must fall on the work date")
+        elapsed = int((self.clock_out - self.clock_in).total_seconds() // 60)
+        if self.break_minutes >= elapsed:
+            raise ValueError("Break duration must be shorter than the shift")
+        return self
+
+
+class AttendanceDecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    note: str = Field(default="", max_length=500)
+
+
+def attendance_out(row):
+    return {
+        "id": row.id, "employee_id": row.employee_id, "branch_id": row.branch_id,
+        "work_date": row.work_date.date().isoformat(),
+        "clock_in": row.clock_in.isoformat(), "clock_out": row.clock_out.isoformat(),
+        "break_minutes": row.break_minutes, "scheduled_minutes": row.scheduled_minutes,
+        "worked_minutes": row.worked_minutes, "overtime_minutes": row.overtime_minutes,
+        "status": row.status, "submitted_by": row.submitted_by,
+        "approved_by": row.approved_by, "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+        "decision_note": row.decision_note,
+    }
+
+
+@router.get("/hr/attendance")
+def list_attendance(start_date: date | None = None, end_date: date | None = None,
+                    status: str | None = None, employee_id: int | None = None,
+                    membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    require_hr_read(membership)
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "End date cannot precede start date")
+    if status and status not in {"pending_approval", "approved", "rejected"}:
+        raise HTTPException(422, "Invalid attendance status")
+    q = db.query(HRAttendanceRecord).filter_by(organization_id=membership.organization_id)
+    q = scoped(q, HRAttendanceRecord, membership)
+    if start_date:
+        q = q.filter(HRAttendanceRecord.work_date >= datetime.combine(start_date, time.min, tzinfo=timezone.utc))
+    if end_date:
+        q = q.filter(HRAttendanceRecord.work_date <= datetime.combine(end_date, time.max, tzinfo=timezone.utc))
+    if status:
+        q = q.filter(HRAttendanceRecord.status == status)
+    if employee_id:
+        q = q.filter(HRAttendanceRecord.employee_id == employee_id)
+    return [attendance_out(x) for x in q.order_by(HRAttendanceRecord.work_date.desc()).limit(500).all()]
+
+
+@router.post("/hr/attendance", status_code=201)
+def submit_attendance(payload: AttendanceIn, membership=Depends(active_membership),
+                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_hr_write(membership)
+    employee = db.query(HREmployee).filter_by(
+        id=payload.employee_id, organization_id=membership.organization_id, employment_status="active"
+    ).first()
+    if not employee or not can_access_branch(membership, employee.branch_id):
+        raise HTTPException(404, "Active employee not found")
+    if payload.work_date < employee.hire_date.date() or (employee.termination_date and payload.work_date > employee.termination_date.date()):
+        raise HTTPException(422, "Attendance date is outside the employee's employment period")
+    existing = db.query(HRAttendanceRecord).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if existing:
+        same = (existing.employee_id == employee.id and existing.work_date.date() == payload.work_date
+                and existing.clock_in == payload.clock_in and existing.clock_out == payload.clock_out
+                and existing.break_minutes == payload.break_minutes
+                and existing.scheduled_minutes == payload.scheduled_minutes)
+        if not same or existing.submitted_by != user.id:
+            raise HTTPException(409, "Attendance idempotency key belongs to a different submission")
+        return attendance_out(existing)
+    elapsed = int((payload.clock_out - payload.clock_in).total_seconds() // 60)
+    worked = elapsed - payload.break_minutes
+    row = HRAttendanceRecord(
+        organization_id=membership.organization_id, branch_id=employee.branch_id,
+        employee_id=employee.id,
+        work_date=datetime.combine(payload.work_date, time.min, tzinfo=timezone.utc),
+        clock_in=payload.clock_in, clock_out=payload.clock_out,
+        break_minutes=payload.break_minutes, scheduled_minutes=payload.scheduled_minutes,
+        worked_minutes=worked, overtime_minutes=max(0, worked - payload.scheduled_minutes),
+        status="pending_approval", idempotency_key=payload.idempotency_key,
+        submitted_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        audit(db, user, membership.organization_id, "hr.attendance.submitted", "hr_attendance", row.id)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Attendance already exists for this employee and work date")
+    db.refresh(row)
+    return attendance_out(row)
+
+
+@router.post("/hr/attendance/{attendance_id}/decision")
+def decide_attendance(attendance_id: int, payload: AttendanceDecisionIn,
+                      membership=Depends(active_membership), user: User=Depends(current_user),
+                      db: Session=Depends(get_db)):
+    require_hr_write(membership)
+    row = db.query(HRAttendanceRecord).filter_by(
+        id=attendance_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or not can_access_branch(membership, row.branch_id):
+        raise HTTPException(404, "Attendance record not found")
+    if row.status != "pending_approval":
+        raise HTTPException(409, "Attendance has already been decided")
+    if row.submitted_by == user.id:
+        raise HTTPException(409, "Attendance submitter cannot approve their own record")
+    row.status = payload.decision
+    row.decision_note = payload.note
+    if payload.decision == "approved":
+        row.approved_by = user.id
+        row.approved_at = datetime.now(timezone.utc)
+    audit(db, user, membership.organization_id, "hr.attendance." + payload.decision,
+          "hr_attendance", row.id, payload.note)
+    db.commit()
+    return attendance_out(row)
