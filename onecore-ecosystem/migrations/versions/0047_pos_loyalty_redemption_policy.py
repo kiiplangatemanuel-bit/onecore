@@ -43,6 +43,8 @@ def upgrade():
 def downgrade():
     op.drop_index("uq_pos_loyalty_reward_policy_org", table_name="pos_loyalty_reward_policies")
     op.drop_table("pos_loyalty_reward_policies")
-    op.drop_column("pos_sale_lines", "loyalty_discount_amount")
-    op.drop_column("pos_sales", "loyalty_discount_amount")
-    op.drop_column("pos_sales", "loyalty_points_redeemed")
+    with op.batch_alter_table("pos_sale_lines") as batch:
+        batch.drop_column("loyalty_discount_amount")
+    with op.batch_alter_table("pos_sales") as batch:
+        batch.drop_column("loyalty_discount_amount")
+        batch.drop_column("loyalty_points_redeemed")
