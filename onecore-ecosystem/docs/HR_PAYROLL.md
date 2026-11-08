@@ -13,6 +13,10 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - PAYE is progressive over the configured bands after the configured deductible pension amount and personal relief. NSSF is calculated by configured tiers. SHIF and Housing Levy use configured rates.
 - Draft payroll calculation snapshots and individual payslip snapshots are persisted. Submitted runs require a different user to approve; the approver cannot also record payment. Payment references are confirmations only and do not initiate transfers.
 - Idempotency key on payroll run creation; database uniqueness for employee numbers, rule versions, payroll idempotency keys and one payslip per employee per run.
+- Payroll-to-accounting mapping validates expense, liability and bank account types against the tenant chart of accounts.
+- Approved payroll posts a balanced accrual journal: gross earnings and employer contributions are debited; net pay and statutory/pension liabilities are credited.
+- External payment confirmation creates a separate settlement journal debiting net payroll payable and crediting the configured bank account. It records the supplied payment reference and does not initiate a transfer.
+- Payroll accrual journals can be reversed before payment with a reason; the original run is marked cancelled and the period may be recalculated under a new idempotency key. The reversal itself is an immutable posted journal.
 - Tenant/branch permission checks and audit events for employee, leave, rule-set and payroll lifecycle actions.
 
 ## API paths
@@ -29,8 +33,11 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - `POST /api/v1/payroll/runs/{run_id}/approve`
 - `POST /api/v1/payroll/runs/{run_id}/mark-paid`
 - `GET /api/v1/payroll/runs/{run_id}/payslips`
+- `GET/PUT /api/v1/payroll/accounting-mapping`
+- `POST /api/v1/payroll/runs/{run_id}/post-to-accounting`
+- `POST /api/v1/payroll/runs/{run_id}/reverse-accounting-journal`
 
 ## Calculation and release limitations
-This slice is not yet a complete statutory payroll product or a production compliance certification. The current calculation model covers recurring monthly salary/allowances/benefits, configured pension, PAYE, NSSF, SHIF and Housing Levy. Attendance-based unpaid leave, overtime, shift differentials, one-off earnings/deductions, tax relief variants, employee self-service access, statutory return generation/filing, remittance integrations, accounting journal posting/reversal and bank/M-Pesa disbursement are follow-on implementation work. These are not represented as completed by this PR.
+This slice is not yet a complete statutory payroll product or a production compliance certification. The current calculation model covers recurring monthly salary/allowances/benefits, configured pension, PAYE, NSSF, SHIF and Housing Levy. Attendance-based unpaid leave, overtime, shift differentials, one-off earnings/deductions, additional tax relief variants, employee self-service access, statutory return generation/filing, statutory remittance integrations, payment reversals and direct bank/M-Pesa transfer integrations remain follow-on work. The accrual journal, pre-payment accrual reversal and externally confirmed net-pay settlement journal are implemented; direct money movement is not.
 
-Before production use, OneCore must run migration 0037 against a controlled database, validate rule sets against the applicable official publications and effective dates, execute payroll parallel runs/UAT, and obtain finance/HR sign-off.
+Before production use, OneCore must run migrations 0037–0039 against a controlled database, validate rule sets against the applicable official publications and effective dates, execute payroll parallel runs/UAT, and obtain finance/HR sign-off.

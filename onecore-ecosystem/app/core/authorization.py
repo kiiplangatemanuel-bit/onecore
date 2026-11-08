@@ -21,6 +21,7 @@ ROLE_PERMISSIONS = {
     "payroll_manager": {"read"},
     "payroll_approver": {"read"},
     "payroll_payment": {"read"},
+    "payroll_accounting": {"read"},
 }
 
 def require_permission(membership, action: str) -> None:
