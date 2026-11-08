@@ -36,7 +36,21 @@ PORTALS = {
 SENSITIVE_TYPES = {"security_report", "document_access_request"}
 PLATFORM_ONLY_TYPES = {"incident", "maintenance", "help_article", "faq", "guide", "module_guide", "policy", "disclosure", "event", "webinar", "vacancy", "company_page", "programme", "announcement"}
 STATUS_TRANSITIONS = {
-    "incident": {"published", "investigating", "resolved", "archived"},\n    "maintenance": {"published", "scheduled", "in_progress", "completed", "archived"},\n    "help_article": {"published", "archived"},\n    "faq": {"published", "archived"},\n    "guide": {"published", "archived"},\n    "module_guide": {"published", "archived"},\n    "policy": {"published", "archived"},\n    "disclosure": {"published", "archived"},\n    "event": {"published", "archived"},\n    "webinar": {"published", "archived"},\n    "vacancy": {"published", "closed", "archived"},\n    "company_page": {"published", "archived"},\n    "programme": {"published", "archived"},\n    "announcement": {"published", "archived"},\n    "alert_subscription": {"active", "paused", "cancelled"},
+    "incident": {"published", "investigating", "resolved", "archived"},
+    "maintenance": {"published", "scheduled", "in_progress", "completed", "archived"},
+    "help_article": {"published", "archived"},
+    "faq": {"published", "archived"},
+    "guide": {"published", "archived"},
+    "module_guide": {"published", "archived"},
+    "policy": {"published", "archived"},
+    "disclosure": {"published", "archived"},
+    "event": {"published", "archived"},
+    "webinar": {"published", "archived"},
+    "vacancy": {"published", "closed", "archived"},
+    "company_page": {"published", "archived"},
+    "programme": {"published", "archived"},
+    "announcement": {"published", "archived"},
+    "alert_subscription": {"active", "paused", "cancelled"},
     "application": {"active", "suspended", "revoked"},
     "api_key": {"active", "revoked"},
     "webhook": {"active", "disabled"},
