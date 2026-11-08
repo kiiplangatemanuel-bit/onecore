@@ -6,7 +6,8 @@ Master specification category 16.
 - Authenticated organization-scoped AI gateway using configured OpenAI-compatible chat-completions providers.
 - Primary and fallback provider routing; provider keys remain backend-only environment secrets.
 - Persistent tenant-scoped conversations, message history and token usage in the shared SQL database.
-- Chat tasks: general assistance, summarization, explanation, analysis, drafting and coding help.\n- In-memory PDF (up to 30 pages), XLSX (up to 5 sheets / 1,000 rows each), CSV, TXT and Markdown extraction with upload, archive and extracted-text limits.
+- Chat tasks: general assistance, summarization, explanation, analysis, drafting and coding help.
+- In-memory PDF (up to 30 pages), XLSX (up to 5 sheets / 1,000 rows each), CSV, TXT and Markdown extraction with upload, archive and extracted-text limits.
 - Language selection for English, Kiswahili, French, Arabic, Somali, Amharic, Hausa, Yoruba, Zulu and Portuguese prompts.
 - Usage counters, audit events, owner-only conversation access and role-gated create/read/delete operations.
 - Capability discovery so the UI does not advertise unsupported capabilities as active.
