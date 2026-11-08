@@ -39,6 +39,7 @@ ORG_SHARED_KINDS = {
     "partner_profile", "referral", "lead", "agreement", "partner_resource",
 }
 SENSITIVE_KINDS = {"api_key", "security_report", "security_case", "job_application", "agreement"}
+PUBLIC_CONTENT_TYPES = {"support": {"help_article", "faq", "announcement"}, "status": {"incident", "maintenance", "component", "announcement"}, "developers": {"api_reference", "integration_guide"}, "docs": {"guide", "announcement"}, "community": {"post", "announcement"}, "trust": {"security_policy", "compliance", "disclosure"}, "events": {"event", "announcement"}, "careers": {"vacancy", "announcement"}, "partners": {"programme", "opportunity", "announcement"}}
 FORBIDDEN_SECRET_KEYS = {
     "secret", "client_secret", "password", "private_key", "access_token",
     "refresh_token", "api_secret", "service_role_key", "database_url",
@@ -103,6 +104,7 @@ def _audit(db, user_id, org_id, action, kind, resource_id, detail=""):
 
 def _resource_out(row, include_secret=False):
     data = dict(row.data or {})
+    data.pop("secret_hash", None)
     one_time_secret = data.pop("_one_time_secret", None)
     result = {"id": row.id, "portal": row.portal_key, "kind": row.resource_kind,
         "organization_id": row.organization_id, "owner_user_id": row.owner_user_id,
@@ -145,18 +147,7 @@ def publish_portal_content(payload: PublicContentIn, user: User = Depends(curren
     if user.platform_role not in {"root_superadmin", "platform_admin"}:
         raise HTTPException(403, "Platform administrator access is required")
     _validate_portal(payload.portal)
-    public_types = {
-        "support": {"help_article", "faq", "announcement"},
-        "status": {"incident", "maintenance", "component", "announcement"},
-        "developers": {"api_reference", "integration_guide"},
-        "docs": {"guide", "announcement"},
-        "community": {"post", "announcement"},
-        "trust": {"security_policy", "compliance", "disclosure"},
-        "events": {"event", "announcement"},
-        "careers": {"vacancy", "announcement"},
-        "partners": {"programme", "opportunity", "announcement"},
-    }
-    if payload.content_type not in public_types[payload.portal]:
+    if payload.content_type not in PUBLIC_CONTENT_TYPES[payload.portal]:
         raise HTTPException(422, "Unsupported public content type for this portal")
     _validate_data(payload.metadata)
     row = db.query(PortalPublicContent).filter_by(
@@ -183,6 +174,8 @@ def update_portal_content(content_id: int, payload: PublicContentIn,
     if not row:
         raise HTTPException(404, "Content not found")
     _validate_portal(payload.portal)
+    if payload.content_type not in PUBLIC_CONTENT_TYPES[payload.portal]:
+        raise HTTPException(422, "Unsupported public content type for this portal")
     _validate_data(payload.metadata)
     row.portal_key, row.content_type, row.slug = payload.portal, payload.content_type, payload.slug
     row.title, row.summary, row.body = payload.title, payload.summary, payload.body
