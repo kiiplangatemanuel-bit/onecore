@@ -819,6 +819,7 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
     db.add(order)
     db.flush()
     initial_lines = []
+    initial_rows = []
     for line in payload.lines:
         row = ProcurementPurchaseOrderLine(
             organization_id=membership.organization_id, purchase_order_id=order.id,
@@ -826,9 +827,11 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
             quantity_received=Decimal("0"), unit_cost=line.unit_cost
         )
         db.add(row)
-        initial_lines.append({"product_id": line.product_id, "quantity_ordered": str(line.quantity),
-                              "quantity_received": "0", "unit_cost": str(line.unit_cost)})
+        initial_rows.append(row)
     db.flush()
+    initial_lines = [{"line_id": row.id, "product_id": row.product_id,
+        "quantity_ordered": str(row.quantity_ordered), "quantity_received": "0",
+        "unit_cost": str(row.unit_cost)} for row in initial_rows]
     db.add(ProcurementPurchaseOrderVersion(organization_id=membership.organization_id,
         purchase_order_id=order.id, version_number=1, change_reason="Initial purchase order",
         supporting_notes=payload.notes, snapshot={"order": {"supplier_id": order.supplier_id,
@@ -907,6 +910,7 @@ def amend_purchase_order(order_id: int, payload: PurchaseOrderAmendmentIn,
     for item in payload.lines:
         if item.line_id is not None:
             old = by_id[item.line_id]
+            old.product_id = item.product_id
             old.quantity_ordered = item.quantity
             old.unit_cost = item.unit_cost
         else:
