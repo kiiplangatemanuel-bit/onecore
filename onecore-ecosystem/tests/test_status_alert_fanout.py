@@ -11,6 +11,10 @@ class _Query:
 
     def filter_by(self, **kwargs):
         self.filters.update(kwargs)
+        self.rows = [
+            row for row in self.rows
+            if all(getattr(row, key, None) == value for key, value in kwargs.items())
+        ]
         return self
 
     def all(self):
@@ -23,15 +27,16 @@ class _Query:
 class _DB:
     bind = None
 
-    def __init__(self, subscriptions, users):
+    def __init__(self, subscriptions, users, channel_preferences=()):
         self.info = {}
         self.subscriptions = subscriptions
+        self.channel_preferences = list(channel_preferences)
         self.users = users
         self.added = []
 
     def query(self, model):
         if model is PortalWorkflowRecord:
-            return _Query(self.subscriptions)
+            return _Query(self.subscriptions + self.channel_preferences)
         if model is User:
             # The helper queries one recipient at a time; filter in a fresh query.
             return _UserQuery(self.users)
@@ -57,17 +62,23 @@ class _UserQuery(_Query):
 
 def test_public_status_incident_fanout_targets_only_matching_active_subscribers():
     subscriptions = [
-        SimpleNamespace(owner_user_id=1, payload={"service": "API"}),
-        SimpleNamespace(owner_user_id=1, payload={"service": "all"}),
-        SimpleNamespace(owner_user_id=2, payload={"service": "all"}),
-        SimpleNamespace(owner_user_id=3, payload={"service": "Payments"}),
+        SimpleNamespace(owner_user_id=1, portal_key="status", record_type="alert_subscription", status="active", payload={"service": "API"}),
+        SimpleNamespace(owner_user_id=1, portal_key="status", record_type="alert_subscription", status="active", payload={"service": "all"}),
+        SimpleNamespace(owner_user_id=2, portal_key="status", record_type="alert_subscription", status="active", payload={"service": "all"}),
+        SimpleNamespace(owner_user_id=3, portal_key="status", record_type="alert_subscription", status="active", payload={"service": "Payments"}),
+        SimpleNamespace(owner_user_id=4, portal_key="status", record_type="alert_subscription", status="active", payload={"service": "API"}),
     ]
     users = [
         SimpleNamespace(id=1, is_active=True, email="api@example.test"),
         SimpleNamespace(id=2, is_active=True, email="all@example.test"),
         SimpleNamespace(id=3, is_active=True, email="payments@example.test"),
+        SimpleNamespace(id=4, is_active=True, email="optout@example.test"),
     ]
-    db = _DB(subscriptions, users)
+    channel_preferences = [
+        SimpleNamespace(owner_user_id=4, portal_key="status", record_type="notification_preference", status="active",
+                        payload={"channel": "email", "service": "API", "enabled": False}),
+    ]
+    db = _DB(subscriptions, users, channel_preferences)
     incident = SimpleNamespace(
         id=77,
         payload={"title": "API degraded", "service": "API", "severity": "major", "summary": "Elevated errors"},
