@@ -98,6 +98,7 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
         platform_role="customer",
     )
     organization = Organization(
+        owner_user_id=user.id,
         name=payload.organization_name.strip(), slug=payload.organization_slug,
         industry=payload.industry, country=payload.country, currency=payload.currency,
         timezone=payload.timezone, is_active=True,
