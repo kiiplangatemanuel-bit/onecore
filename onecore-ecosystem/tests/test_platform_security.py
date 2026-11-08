@@ -140,3 +140,13 @@ def test_supabase_transaction_pooler_url_is_normalized():
     assert url.drivername == "postgresql+psycopg"
     assert url.port == 6543
     assert url.query["sslmode"] == "require"
+
+
+
+def test_supabase_connection_refuses_ssl_disable():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres?sslmode=disable"
+    )
+    assert url.query["sslmode"] == "require"
