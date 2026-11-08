@@ -11,6 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet, InvalidToken
+import base64
+import hashlib
+import json
+
+from app.core.config import settings
 
 from app.core.database import get_db
 from app.core.models import AuditEvent, Membership, Organization, PortalResource, User
@@ -39,7 +45,25 @@ PUBLIC_TYPES = {
     "careers": {"vacancy", "company_information"},
     "partners": {"opportunity", "programme", "public_resource"},
 }
-SENSITIVE_TYPES = {"security_report", "security_case", "authorized_document"}
+SENSITIVE_TYPES = {"security_report", "security_case", "authorized_document", "agreement"}
+ROLE_GATED_TYPES = {
+    "application": {"org_admin", "developer_admin", "developer_manager", "developer"},
+    "webhook": {"org_admin", "developer_admin", "developer_manager", "developer"},
+    "sandbox": {"org_admin", "developer_admin", "developer_manager", "developer"},
+    "usage_access": {"org_admin", "developer_admin", "developer_manager", "developer"},
+    "organization_service": {"org_admin", "branch_admin", "manager"},
+    "alert_subscription": {"org_admin", "manager"},
+    "partner_profile": {"org_admin", "partner_admin", "partner_manager"},
+    "referral": {"org_admin", "partner_admin", "partner_manager"},
+    "lead": {"org_admin", "partner_admin", "partner_manager"},
+    "agreement": {"org_admin", "partner_admin"},
+    "partner_resource": {"org_admin", "partner_admin", "partner_manager"},
+    "attendee_material": {"org_admin", "event_manager"},
+    "attendance": {"org_admin", "event_manager"},
+    "security_report": {"org_admin", "security_admin", "compliance_officer"},
+    "security_case": {"org_admin", "security_admin", "compliance_officer"},
+    "authorized_document": {"org_admin", "security_admin", "compliance_officer"},
+}
 MAX_PAGE_SIZE = 100
 
 
@@ -74,22 +98,52 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 
 
 def _visible_resource(db: Session, user: User, resource: PortalResource) -> Membership | None:
-    if resource.owner_user_id == user.id:
-        return None
-    if resource.organization_id is None:
+    # Re-check membership even for the creator: revocation must revoke tenant access.
+    if resource.organization_id is not None:
+        membership = _membership(db, user, resource.organization_id)
+        if not _role_allowed(resource, user, membership):
+            raise HTTPException(404, "Portal resource not found")
+        return membership
+    if resource.owner_user_id != user.id:
         raise HTTPException(404, "Portal resource not found")
-    membership = _membership(db, user, resource.organization_id)
-    if resource.resource_type in SENSITIVE_TYPES and membership.role not in {
-        "org_admin", "security_admin", "compliance_officer"
-    }:
-        raise HTTPException(404, "Portal resource not found")
-    return membership
+    return None
+
+
+def _role_allowed(row: PortalResource, user: User, membership: Membership | None) -> bool:
+    if row.owner_user_id == user.id:
+        return True
+    if row.organization_id is None:
+        return False
+    required = ROLE_GATED_TYPES.get(row.resource_type)
+    return not required or bool(membership and membership.role in required)
+
+
+def _fernet() -> Fernet:
+    # Derived from server-only SECRET_KEY; key rotation needs a re-encryption migration.
+    digest = hashlib.sha256((settings.secret_key + ":portal-sensitive-data:v1").encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _stored_payload(resource_type: str, data: dict) -> tuple[dict, str | None]:
+    if resource_type in SENSITIVE_TYPES:
+        token = _fernet().encrypt(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()).decode()
+        return {}, token
+    return data, None
+
+
+def _read_payload(row: PortalResource) -> dict:
+    if not row.encrypted_payload:
+        return row.data or {}
+    try:
+        return json.loads(_fernet().decrypt(row.encrypted_payload.encode()).decode())
+    except (InvalidToken, ValueError, TypeError):
+        raise HTTPException(503, "Confidential portal data could not be decrypted; contact the platform administrator")
 
 
 def _out(row: PortalResource) -> dict:
     return {
         "id": row.id, "portal": row.portal, "resource_type": row.resource_type,
-        "title": row.title, "summary": row.summary, "data": row.data,
+        "title": row.title, "summary": row.summary, "data": _read_payload(row),
         "organization_id": row.organization_id, "owner_user_id": row.owner_user_id,
         "visibility": row.visibility, "status": row.status,
         "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
@@ -155,9 +209,9 @@ def list_private_resources(
     rows = query.order_by(PortalResource.updated_at.desc()).limit(limit).all()
     result = []
     for row in rows:
-        if row.resource_type in SENSITIVE_TYPES and row.organization_id is not None:
+        if row.organization_id is not None:
             membership = next((m for m in memberships if m.organization_id == row.organization_id), None)
-            if row.owner_user_id != user.id and (not membership or membership.role not in {"org_admin", "security_admin", "compliance_officer"}):
+            if not _role_allowed(row, user, membership):
                 continue
         result.append(_out(row))
     return result
@@ -174,9 +228,10 @@ def create_private_resource(
     if payload.organization_id is not None:
         membership = _membership(db, user, payload.organization_id)
         require_permission(membership, "create")
+    stored_data, encrypted_payload = _stored_payload(payload.resource_type, payload.data)
     row = PortalResource(
         portal=portal, resource_type=payload.resource_type, title=payload.title.strip(),
-        summary=payload.summary.strip(), data=payload.data,
+        summary=payload.summary.strip(), data=stored_data, encrypted_payload=encrypted_payload,
         organization_id=payload.organization_id, owner_user_id=user.id,
         visibility="private", status="submitted" if portal in {"trust", "careers"} else "active",
     )
@@ -218,6 +273,8 @@ def update_private_resource(
     if row.status in {"closed", "resolved", "withdrawn", "rejected"}:
         raise HTTPException(409, "This portal record is closed and cannot be changed")
     changes = payload.model_dump(exclude_unset=True)
+    if changes.get("data") is not None:
+        row.data, row.encrypted_payload = _stored_payload(row.resource_type, changes.pop("data"))
     for key, value in changes.items():
         if value is not None:
             setattr(row, key, value)
