@@ -1,15 +1,19 @@
 import hashlib
 import secrets
 import uuid
+import re
+from pathlib import Path
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from sqlalchemy import or_
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import (
-    AuditEvent, Membership, Organization, SupportMessage, SupportTicket, User,
+    AuditEvent, Membership, Organization, SupportAttachment, SupportMessage, SupportTicket, User,
 )
 from app.core.schemas import SupportMessageIn, SupportStatusIn, SupportTicketCreateIn
 from app.core.security import current_user, require_platform_admin
@@ -42,6 +46,14 @@ def _ticket_out(ticket: SupportTicket, db: Session, include_messages: bool = Fal
         "organization_id": ticket.organization_id,
         "created_at": ticket.created_at.isoformat(), "updated_at": ticket.updated_at.isoformat(),
     }
+    attachments = db.query(SupportAttachment).filter_by(ticket_id=ticket.id).order_by(
+        SupportAttachment.created_at.asc(), SupportAttachment.id.asc()
+    ).all()
+    result["attachments"] = [{
+        "id": item.id, "file_name": item.file_name, "content_type": item.content_type,
+        "size_bytes": item.size_bytes, "status": item.status,
+        "created_at": item.created_at.isoformat(),
+    } for item in attachments]
     if include_messages:
         messages = db.query(SupportMessage).filter_by(ticket_id=ticket.id).order_by(
             SupportMessage.created_at.asc(), SupportMessage.id.asc()
@@ -50,12 +62,22 @@ def _ticket_out(ticket: SupportTicket, db: Session, include_messages: bool = Fal
     return result
 
 
+def _set_guest_context(db: Session, token: str) -> str:
+    token_hash = _hash_token(token)
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.support_guest_token_hash', :token_hash, true)"),
+                   {"token_hash": token_hash})
+    return token_hash
+
+
 def _guest_ticket(db: Session, ticket_number: str, token: str) -> SupportTicket:
     if not token or len(token) < 32:
         raise HTTPException(401, "A valid support access token is required")
+    # Bind guest access only after hashing the supplied token; RLS scopes the rows.
+    token_hash = _set_guest_context(db, token)
     ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
     if not ticket or not ticket.guest_token_hash or not secrets.compare_digest(
-        ticket.guest_token_hash, _hash_token(token)
+        ticket.guest_token_hash, token_hash
     ):
         raise HTTPException(404, "Support ticket not found")
     return ticket
@@ -65,14 +87,19 @@ def _user_ticket(db: Session, ticket_number: str, user: User) -> SupportTicket:
     ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
     if not ticket:
         raise HTTPException(404, "Support ticket not found")
-    if ticket.created_by_user_id == user.id:
-        return ticket
-    if ticket.organization_id:
+    membership = None
+    if ticket.organization_id is not None:
         membership = db.query(Membership).filter_by(
             user_id=user.id, organization_id=ticket.organization_id, is_active=True
         ).first()
-        if membership and membership.role == "org_admin":
-            return ticket
+        # Organization tickets are inaccessible immediately after membership revocation,
+        # including to the original creator.
+        if not membership:
+            raise HTTPException(404, "Support ticket not found")
+    if ticket.created_by_user_id == user.id:
+        return ticket
+    if membership and membership.role == "org_admin":
+        return ticket
     raise HTTPException(404, "Support ticket not found")
 
 
@@ -114,15 +141,143 @@ def _create_ticket(payload: SupportTicketCreateIn, db: Session,
     ))
     _audit(db, user.id if user else None, ticket.organization_id, "support.ticket.created", ticket)
     db.commit()
+    # The guest transaction-local context is cleared by COMMIT. Reapply the
+    # already-hashed credential before refreshing the new row under PostgreSQL RLS.
+    if guest_token_hash and db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.support_guest_token_hash', :token_hash, true)"),
+                   {"token_hash": guest_token_hash})
     db.refresh(ticket)
     return ticket
+
+
+
+class SupportAttachmentIntent(BaseModel):
+    file_name: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=3, max_length=120)
+    size_bytes: int = Field(gt=0, le=10 * 1024 * 1024)
+
+
+class SupportAttachmentScanResult(BaseModel):
+    status: str = Field(pattern=r"^(available|rejected)$")
+
+
+_ALLOWED_ATTACHMENT_TYPES = {
+    "application/pdf", "image/jpeg", "image/png", "text/plain", "text/csv",
+}
+
+
+def _storage_client():
+    if not settings.integration_object_storage_enabled or not settings.s3_bucket:
+        raise HTTPException(503, "Support file storage is not configured")
+    if not settings.s3_access_key_id or not settings.s3_secret_access_key:
+        raise HTTPException(503, "Support file storage credentials are not configured")
+    try:
+        import boto3
+        return boto3.client(
+            "s3", endpoint_url=settings.s3_endpoint_url or None,
+            aws_access_key_id=settings.s3_access_key_id,
+            aws_secret_access_key=settings.s3_secret_access_key,
+            region_name=settings.s3_region or "us-east-1",
+        )
+    except Exception as exc:
+        raise HTTPException(503, "Support file storage is unavailable") from exc
+
+
+def _safe_attachment_name(value: str) -> str:
+    name = Path(value.replace("\\", "/")).name.strip()
+    name = re.sub(r"[^A-Za-z0-9._ -]", "_", name)
+    if not name or name in {".", ".."}:
+        raise HTTPException(422, "Invalid attachment filename")
+    return name[:255]
+
+
+def _create_attachment_upload(ticket: SupportTicket, payload: SupportAttachmentIntent,
+                              user: User, db: Session) -> dict:
+    content_type = payload.content_type.lower().strip()
+    if content_type not in _ALLOWED_ATTACHMENT_TYPES:
+        raise HTTPException(422, "Unsupported attachment type")
+    file_name = _safe_attachment_name(payload.file_name)
+    storage = _storage_client()
+    object_key = f"support/{ticket.ticket_number}/{uuid.uuid4().hex}"
+    try:
+        upload_url = storage.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": settings.s3_bucket, "Key": object_key, "ContentType": content_type,
+                    "ContentLength": payload.size_bytes},
+            ExpiresIn=300,
+        )
+    except Exception as exc:
+        raise HTTPException(503, "Could not prepare a secure attachment upload") from exc
+    attachment = SupportAttachment(
+        ticket_id=ticket.id, uploaded_by_user_id=user.id, file_name=file_name,
+        object_key=object_key, content_type=content_type,
+        size_bytes=payload.size_bytes, status="pending",
+    )
+    db.add(attachment)
+    db.flush()
+    _audit(db, user.id, ticket.organization_id, "support.attachment.upload_started",
+           ticket, f"attachment_id={attachment.id};size_bytes={attachment.size_bytes}")
+    db.commit()
+    db.refresh(attachment)
+    return {
+        "id": attachment.id, "upload_url": upload_url,
+        "method": "PUT", "required_headers": {"Content-Type": content_type},
+        "expires_in": 300,
+    }
+
+
+def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, db: Session) -> dict:
+    attachment = db.query(SupportAttachment).filter_by(
+        id=attachment_id, ticket_id=ticket.id
+    ).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    if attachment.status != "pending":
+        return {"id": attachment.id, "status": attachment.status}
+    storage = _storage_client()
+    try:
+        remote = storage.head_object(Bucket=settings.s3_bucket, Key=attachment.object_key)
+    except Exception as exc:
+        raise HTTPException(409, "Attachment upload is not present in storage") from exc
+    if int(remote.get("ContentLength", -1)) != attachment.size_bytes:
+        raise HTTPException(422, "Uploaded attachment size does not match the declared size")
+    if remote.get("ContentType", "").lower() != attachment.content_type:
+        raise HTTPException(422, "Uploaded attachment content type does not match")
+    # Keep the object quarantined until an authorized malware-scanning/review
+    # process explicitly releases it for customer downloads.
+    attachment.status = "pending_scan"
+    _audit(db, user.id, ticket.organization_id, "support.attachment.upload_completed",
+           ticket, f"attachment_id={attachment.id};status=pending_scan")
+    db.commit()
+    return {"id": attachment.id, "status": attachment.status}
+
+
+def _attachment_download(attachment: SupportAttachment) -> dict:
+    if attachment.status != "available":
+        raise HTTPException(409, "Attachment is not available for download until its security review is complete")
+    storage = _storage_client()
+    try:
+        url = storage.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": settings.s3_bucket, "Key": attachment.object_key,
+                "ResponseContentDisposition": f'attachment; filename="{attachment.file_name}"',
+                "ResponseContentType": "application/octet-stream",
+            },
+            ExpiresIn=120,
+        )
+    except Exception as exc:
+        raise HTTPException(503, "Could not prepare a secure attachment download") from exc
+    return {"download_url": url, "expires_in": 120}
 
 
 @router.post("/public/tickets", status_code=201)
 def create_public_ticket(payload: SupportTicketCreateIn, request: Request, db: Session = Depends(get_db)):
     enforce_public_write_limit(request, "support-ticket-create")
     access_token = secrets.token_urlsafe(36)
+    _set_guest_context(db, access_token)
     ticket = _create_ticket(payload, db, guest_token_hash=_hash_token(access_token))
+    _set_guest_context(db, access_token)
     return {**_ticket_out(ticket, db, include_messages=True), "access_token": access_token}
 
 
@@ -153,6 +308,7 @@ def reply_public_ticket(
     ticket.updated_at = datetime.now(timezone.utc)
     _audit(db, None, ticket.organization_id, "support.ticket.replied", ticket)
     db.commit()
+    _set_guest_context(db, x_support_access_token)
     return _ticket_out(ticket, db, include_messages=True)
 
 
@@ -171,10 +327,17 @@ def list_my_tickets(
     limit: int = Query(default=50, ge=1, le=100),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
+    active_org_ids = [row.organization_id for row in db.query(Membership).filter_by(
+        user_id=user.id, is_active=True
+    ).all()]
     admin_org_ids = [row.organization_id for row in db.query(Membership).filter_by(
         user_id=user.id, role="org_admin", is_active=True
     ).all()]
-    visibility = [SupportTicket.created_by_user_id == user.id]
+    visibility = [and_(
+        SupportTicket.created_by_user_id == user.id,
+        or_(SupportTicket.organization_id.is_(None),
+            SupportTicket.organization_id.in_(active_org_ids) if active_org_ids else SupportTicket.organization_id.is_(None)),
+    )]
     if admin_org_ids:
         visibility.append(SupportTicket.organization_id.in_(admin_org_ids))
     rows = db.query(SupportTicket).filter(or_(*visibility)).order_by(
@@ -206,6 +369,72 @@ def reply_my_ticket(
     _audit(db, user.id, ticket.organization_id, "support.ticket.replied", ticket)
     db.commit()
     return _ticket_out(ticket, db, include_messages=True)
+
+
+
+@router.post("/tickets/{ticket_number}/attachments", status_code=201)
+def create_ticket_attachment(
+    ticket_number: str, payload: SupportAttachmentIntent,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    ticket = _user_ticket(db, ticket_number, user)
+    return _create_attachment_upload(ticket, payload, user, db)
+
+
+@router.post("/tickets/{ticket_number}/attachments/{attachment_id}/complete")
+def complete_ticket_attachment(
+    ticket_number: str, attachment_id: int,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    ticket = _user_ticket(db, ticket_number, user)
+    return _complete_attachment(ticket, attachment_id, user, db)
+
+
+@router.get("/tickets/{ticket_number}/attachments/{attachment_id}/download")
+def download_ticket_attachment(
+    ticket_number: str, attachment_id: int,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    ticket = _user_ticket(db, ticket_number, user)
+    attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    return _attachment_download(attachment)
+
+
+
+@router.patch("/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan")
+def set_support_attachment_scan_result(
+    ticket_number: str, attachment_id: int, payload: SupportAttachmentScanResult,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
+    if not ticket:
+        raise HTTPException(404, "Support ticket not found")
+    attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    if attachment.status != "pending_scan":
+        raise HTTPException(409, "Only quarantined attachments can receive a security review decision")
+    attachment.status = payload.status
+    _audit(db, user.id, ticket.organization_id, "support.attachment.security_reviewed",
+           ticket, f"attachment_id={attachment.id};status={attachment.status}")
+    db.commit()
+    return {"id": attachment.id, "status": attachment.status}
+
+
+@router.get("/admin/tickets/{ticket_number}/attachments/{attachment_id}/download")
+def download_support_attachment_admin(
+    ticket_number: str, attachment_id: int,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
+    if not ticket:
+        raise HTTPException(404, "Support ticket not found")
+    attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    return _attachment_download(attachment)
 
 
 @router.get("/admin/tickets")
