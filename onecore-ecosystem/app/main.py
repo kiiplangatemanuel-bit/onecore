@@ -28,6 +28,8 @@ from app.api.pharmacy_lab import router as pharmacy_lab_router
 from app.api.procurement_workflows import router as procurement_workflows_router
 from app.api.school_advanced import router as school_advanced_router
 from app.api.ai_routes import router as ai_router
+from app.api.hr_payroll import router as hr_payroll_router
+from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -75,6 +77,7 @@ app.include_router(pharmacy_lab_router)
 app.include_router(procurement_workflows_router)
 app.include_router(school_advanced_router)
 app.include_router(ai_router)
+app.include_router(hr_payroll_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
