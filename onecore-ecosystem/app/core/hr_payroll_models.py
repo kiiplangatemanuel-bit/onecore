@@ -5,7 +5,7 @@ Statutory rules are tenant-owned and cannot be activated without independent rev
 """
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -104,7 +104,13 @@ class PayrollRun(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payment_reference: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("uq_payroll_run_org_idempotency", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index("uq_payroll_run_org_idempotency", "organization_id", "idempotency_key", unique=True),
+        Index("uq_payroll_run_org_branch_period", "organization_id", "branch_id", "period_start", "period_end",
+              unique=True, sqlite_where=text("branch_id IS NOT NULL"), postgresql_where=text("branch_id IS NOT NULL")),
+        Index("uq_payroll_run_org_all_period", "organization_id", "period_start", "period_end",
+              unique=True, sqlite_where=text("branch_id IS NULL"), postgresql_where=text("branch_id IS NULL")),
+    )
 
 
 class PayrollPayslip(Base):
