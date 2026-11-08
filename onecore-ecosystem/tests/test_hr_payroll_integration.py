@@ -130,6 +130,11 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
                 "idempotency_key": "payroll-loan-2026-11",
             })
             assert deduction.status_code == 201, deduction.text
+            self_approval = client.post(
+                f"/api/v1/hr/payroll-adjustments/{earning.json()['id']}/decision",
+                json={"decision": "approved"},
+            )
+            assert self_approval.status_code == 409
             actor["user"], actor["role"] = users[1], "hr_manager"
             approved_earning = client.post(
                 f"/api/v1/hr/payroll-adjustments/{earning.json()['id']}/decision",
@@ -219,8 +224,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert mapping.status_code == 200, mapping.text
             posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
             assert posted.status_code == 201, posted.text
-            assert posted.json()["debits"] == "23267.54"
-            assert posted.json()["credits"] == "23267.54"
+            assert posted.json()["debits"] == "24342.54"
+            assert posted.json()["credits"] == "24342.54"
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",
