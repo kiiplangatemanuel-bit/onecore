@@ -61,7 +61,7 @@ export function HospitalPortal(){
     api("/api/v1/healthcare/beds?branch_id="+encodeURIComponent(current))
    ]);
    setDashboard(d);setOccupancy(o);setWards(w);setBeds(b);
-   if(!selectedWard&&w.length)setSelectedWard(String(w[0].id));
+   if(w.length&&!w.some(x=>String(x.id)===String(selectedWard)))setSelectedWard(String(w[0].id));else if(!w.length)setSelectedWard("");
   }catch(e){setError(e.message)}finally{setBusy(false)}
  },[branch,selectedWard]);
  useEffect(()=>{refresh()},[refresh]);
