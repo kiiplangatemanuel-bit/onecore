@@ -1700,6 +1700,14 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).first()
     loyalty_discount_total = Decimal("0.00")
     if loyalty_points_redeemed:
+        created_at = payload.offline_created_at
+        if created_at is None:
+            raise HTTPException(409, "Loyalty redemption requires a fresh online checkout authorization")
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        request_age = (datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)).total_seconds()
+        if request_age < -30 or request_age > 120:
+            raise HTTPException(409, "Loyalty redemption authorization expired; reconnect and retry checkout")
         if customer is None:
             raise HTTPException(422, "A customer membership is required to redeem loyalty points")
         if not loyalty_policy or not loyalty_policy.is_active:
