@@ -193,6 +193,33 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             actor["role"] = "staff"
             forbidden = client.get(f"/api/v1/payroll/runs/{run_id}/payslips")
             assert forbidden.status_code == 403
+
+            # Employee termination is audited and prevents selection in later payroll,
+            # while previously approved/paid payroll snapshots remain accessible.
+            actor["user"], actor["role"] = users[0], "hr_admin"
+            new_employee = client.post("/api/v1/hr/employees", json={
+                "branch_id": branch_id, "employee_number": "EMP-TERMINATE",
+                "first_name": "Grace", "last_name": "Exit", "hire_date": "2026-01-01",
+                "base_salary": "18000.00", "currency": "KES",
+            })
+            assert new_employee.status_code == 201, new_employee.text
+            terminated = client.post(
+                f"/api/v1/hr/employees/{new_employee.json()['id']}/employment-status",
+                json={"status": "terminated", "termination_date": "2026-11-15",
+                      "reason": "Employment contract ended"},
+            )
+            assert terminated.status_code == 200, terminated.text
+            assert terminated.json()["employment_status"] == "terminated"
+            assert terminated.json()["termination_date"] == "2026-11-15"
+
+            actor["user"], actor["role"] = users[0], "payroll_manager"
+            excluded = client.post("/api/v1/payroll/runs", json={
+                "branch_id": branch_id, "period_start": "2026-12-01",
+                "period_end": "2026-12-31",
+                "employee_ids": [new_employee.json()["id"]],
+                "idempotency_key": "payroll-terminated-employee-december",
+            })
+            assert excluded.status_code == 404
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)
