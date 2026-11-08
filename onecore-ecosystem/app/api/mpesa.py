@@ -22,7 +22,7 @@ from app.core.models import (
     AuditEvent, Organization, MpesaPaymentIntent, MpesaRefundIntent, POSPayment,
     POSSale, POSRefund, POSReturn,
 )
-from app.core.security import current_user
+from app.core.security import current_user, set_provider_callback_token_context, set_verified_organization_context
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch
 
@@ -244,9 +244,11 @@ def initiate_stk_push(sale_id: int, payment_id: int, payload: STKPushIn,
 
 def _stk_callback(db: Session, token: str, body: dict):
     digest = hashlib.sha256(token.encode()).hexdigest()
+    set_provider_callback_token_context(db, digest)
     intent = db.query(MpesaPaymentIntent).filter_by(callback_token_hash=digest).with_for_update().first()
     if not intent:
         return False
+    set_verified_organization_context(db, intent.organization_id)
     callback = (body.get("Body") or {}).get("stkCallback") or {}
     checkout_id = str(callback.get("CheckoutRequestID") or "")
     if not checkout_id:
@@ -488,9 +490,11 @@ def initiate_b2c_refund(return_id: int, refund_id: int, payload: B2CRefundIn,
 
 def _b2c_callback(db: Session, token: str, body: dict, timeout=False):
     digest = hashlib.sha256(token.encode()).hexdigest()
+    set_provider_callback_token_context(db, digest)
     intent = db.query(MpesaRefundIntent).filter_by(callback_token_hash=digest).with_for_update().first()
     if not intent:
         return False
+    set_verified_organization_context(db, intent.organization_id)
     if intent.status == "success":
         return True
     result = body.get("Result") or body

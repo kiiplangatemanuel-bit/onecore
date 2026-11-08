@@ -1,0 +1,65 @@
+from pathlib import Path
+
+
+def test_tenant_domain_rls_migration_follows_support_scan():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert 'revision = "0059_tenant_domain_row_level_security"' in source
+    assert 'down_revision = "0058_support_attachment_scan_evidence"' in source
+
+
+def test_tenant_domain_rls_uses_active_membership_for_all_tenant_tables():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert '"organization_id" in columns' in source
+    assert "ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in source
+    assert "ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in source
+    assert "m.is_active = true" in source
+    assert "public.onecore_is_platform_admin()" in source
+
+
+def test_membership_rls_supports_self_service_and_org_admin_management():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert "membership_select" in source
+    assert "public.onecore_is_org_admin(organization_id)" in source
+    assert "SECURITY DEFINER" in source
+    assert "SET search_path = pg_catalog, public" in source
+
+
+def test_tenant_rls_leaves_tables_with_dedicated_policy_chains_alone():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    for table in ("memberships", "portal_workflow_records", "support_tickets", "developer_api_keys"):
+        assert f'"{table}"' in source
+
+
+def test_org_admin_cannot_grant_or_escalate_another_org_admin():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert "role <> 'org_admin'" in source
+    assert "OR public.onecore_is_platform_admin()" in source
+
+
+def test_audit_event_rls_preserves_authenticated_and_guest_support_writes():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert '"audit_events"' in source
+    assert "CREATE POLICY audit_event_select" in source
+    assert "CREATE POLICY audit_event_insert" in source
+    assert "app.support_guest_token_hash" in source
+
+
+def test_provider_callbacks_are_token_bound_before_tenant_context_is_known():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    for table in ("mpesa_payment_intents", "mpesa_refund_intents", "procurement_settlements"):
+        assert f'"{table}"' in source
+    assert "app.provider_callback_token_hash" in source
+    assert "app.organization_id" in source
+
+
+def test_generic_tenant_policies_allow_only_explicitly_scoped_worker_transactions():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert "OR {table}.organization_id = {organization_id}" in source
+
+
+def test_crm_provider_and_unsubscribe_callbacks_are_tenant_scoped():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert '"crm_campaign_deliveries"' in source
+    assert "app.crm_delivery_provider_message_id" in source
+    assert "provider_message_id = NULLIF(current_setting" in source
+    assert "app.crm_unsubscribe_token_hash" in source

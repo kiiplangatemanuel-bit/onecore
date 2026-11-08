@@ -231,7 +231,14 @@ def _verify_rls_database_boundary(connection):
     required_tables = (
         "portal_workflow_records", "support_tickets", "support_messages",
         "support_attachments", "developer_api_keys", "developer_api_key_usages",
+        "memberships", "audit_events", "mpesa_payment_intents",
+        "mpesa_refund_intents", "procurement_settlements", "crm_campaign_deliveries",
         "developer_webhook_endpoints", "developer_webhook_deliveries",
+        "records", "branches", "inventory_products", "inventory_stock_movements",
+        "accounting_accounts", "accounting_journals", "accounting_journal_lines",
+        "crm_contacts", "crm_leads", "procurement_suppliers",
+        "procurement_purchase_orders", "pos_shifts", "pos_sales",
+        "school_classes", "school_learners", "accounting_invoices",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""
