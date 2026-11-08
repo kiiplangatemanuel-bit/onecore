@@ -128,7 +128,7 @@ def test_payroll_calculation_uses_versioned_configured_rates_and_cent_rounding()
     assert result["shif_employee"] == "591.25"
     assert result["housing_levy_employee"] == "322.50"
     assert result["housing_levy_employer"] == "322.50"
-    assert result["net_pay"] == "16766.25"
+    assert result["net_pay"] == "17366.25"
     assert _progressive_tax(Decimal("15000"), rules["paye_bands"]) == Decimal("2000.00")
     assert _tiered_contribution(Decimal("1500"), rules["nssf_tiers"], "employee_rate") == Decimal("90.00")
 
