@@ -52,7 +52,8 @@ The application starts with adapters disabled. No real payment, tax, health, mes
 - `/api/v1/organizations` — organizations and membership
 - `/api/v1/modules` — 75-category catalogue and enabled modules
 - `/api/v1/records/{module_key}` — tenant-scoped generic records (starter data plane)
-- `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)\n- `/api/v1/ai` — tenant-scoped OneCore AI chat, document analysis, conversations and usage
+- `/api/v1/integrations` — provider status/configuration metadata (never returns secrets)
+- `/api/v1/ai` — tenant-scoped OneCore AI chat, document analysis, conversations and usage
 - `/api/v1/operations` — audit events and operational overview
 - `/health` — liveness/readiness information
 
