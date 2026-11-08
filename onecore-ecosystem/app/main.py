@@ -218,6 +218,40 @@ async def platform_security_middleware(request, call_next):
 def health():
     return {"status": "ok", "service": "onecore-api"}
 
+def _verify_rls_database_boundary(connection):
+    """Reject production DB roles that bypass RLS or critical tables without forced policies."""
+    role = connection.execute(text("""
+        SELECT current_user AS role_name, r.rolsuper AS is_superuser,
+               r.rolbypassrls AS bypasses_rls
+        FROM pg_roles r WHERE r.rolname = current_user
+    """)).mappings().one_or_none()
+    if not role or role["is_superuser"] or role["bypasses_rls"]:
+        raise RuntimeError("Production database role must be a non-superuser NOBYPASSRLS role")
+
+    required_tables = (
+        "portal_workflow_records", "support_tickets", "support_messages",
+        "support_attachments", "developer_api_keys", "developer_api_key_usages",
+        "developer_webhook_endpoints", "developer_webhook_deliveries",
+    )
+    table_names = ", ".join("'" + name + "'" for name in required_tables)
+    rows = connection.execute(text(f"""
+        SELECT c.relname, c.relrowsecurity AS rls_enabled,
+               c.relforcerowsecurity AS rls_forced,
+               EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid) AS has_policy
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ({table_names})
+    """)).mappings().all()
+    verified = {row["relname"]: row for row in rows}
+    missing = [name for name in required_tables if name not in verified]
+    unsafe = [
+        name for name, row in verified.items()
+        if not row["rls_enabled"] or not row["rls_forced"] or not row["has_policy"]
+    ]
+    if missing or unsafe:
+        raise RuntimeError("Critical tenant RLS schema is incomplete or unsafe")
+
+
 @app.get("/ready")
 def readiness():
     from fastapi import HTTPException
@@ -225,8 +259,10 @@ def readiness():
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
+            if settings.app_env.strip().lower() in {"production", "prod"}:
+                _verify_rls_database_boundary(connection)
     except Exception:
-        raise HTTPException(status_code=503, detail="Service dependencies are not ready")
+        raise HTTPException(status_code=503, detail="Service dependencies or tenant-security controls are not ready")
     return {"status": "ready", "service": "onecore-api"}
 
 @app.get("/", response_class=HTMLResponse)

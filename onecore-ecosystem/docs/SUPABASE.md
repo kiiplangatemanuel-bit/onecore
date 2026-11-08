@@ -49,6 +49,8 @@ Migration 0052 enables RLS for portal workflow records, migration 0053 adds MFA 
 
 Developer API keys are stored only as SHA-256 digests, require an active organization membership on every key-authenticated request, and are revoked server-side. The `X-OneCore-API-Key` header is accepted by the developer API example endpoint; do not use API keys in browser applications. Sandbox API keys are isolated from production tenant records: the organization example endpoint returns synthetic OneCore sandbox fixture data for sandbox keys, while production keys return only their authorized organization. Issuing a production API key requires an active organization administrator; developers can issue sandbox keys and manage their own credentials. This is an API-level fixture environment, not a separate PostgreSQL database or production-equivalent data plane.
 
+In production, `/ready` also verifies that the connected API database role is neither a superuser nor `BYPASSRLS`, and that portal workflow, Support ticket/message/attachment, developer API-key/usage and webhook endpoint/delivery tables exist with RLS enabled, forced and at least one policy. A failed check returns HTTP 503 so the deployment platform does not route traffic to an unsafe or incompletely migrated API. Provision a dedicated `NOBYPASSRLS` API login and apply migrations before expecting readiness to pass. This guard is a deployment safety check, not a substitute for reviewing each policy's authorization semantics or testing cross-tenant access.
+
 SQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
 
 
