@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import and_
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -367,10 +367,10 @@ def approve_rule_set(rule_set_id:int,membership=Depends(active_membership),user:
     if not row: raise HTTPException(404,"Payroll rule set not found")
     if row.status!="pending_approval": raise HTTPException(409,"Rule set is not awaiting approval")
     if row.submitted_by==user.id or row.created_by==user.id: raise HTTPException(409,"Rule-set creator and submitter cannot approve it")
+    row_end = row.effective_to or datetime.max.replace(tzinfo=timezone.utc)
     if db.query(PayrollRuleSet).filter(PayrollRuleSet.organization_id==membership.organization_id,
-        PayrollRuleSet.status=="active",
-        ((row.effective_to.is_(None))|(PayrollRuleSet.effective_from<=row.effective_to)),
-        ((PayrollRuleSet.effective_to.is_(None))|(PayrollRuleSet.effective_to>=row.effective_from))).first():
+        PayrollRuleSet.status=="active", PayrollRuleSet.effective_from<=row_end,
+        or_(PayrollRuleSet.effective_to.is_(None), PayrollRuleSet.effective_to>=row.effective_from)).first():
         raise HTTPException(409,"An active statutory rule set already overlaps this effective date")
     row.status="active"; row.approved_by=user.id; row.approved_at=datetime.now(timezone.utc)
     audit(db,user,membership.organization_id,"payroll.rules.activated","payroll_rule_set",row.id,
