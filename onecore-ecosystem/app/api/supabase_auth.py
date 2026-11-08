@@ -49,6 +49,8 @@ def _verified_supabase_user(access_token: str) -> dict:
         identity = response.json()
     except ValueError as exc:
         raise HTTPException(503, "Supabase Auth returned an invalid identity response") from exc
+    if not isinstance(identity, dict):
+        raise HTTPException(503, "Supabase Auth returned an invalid identity response")
     try:
         identity["id"] = str(uuid.UUID(str(identity.get("id", ""))))
     except (ValueError, TypeError, AttributeError) as exc:
