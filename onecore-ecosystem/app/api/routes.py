@@ -2528,7 +2528,8 @@ def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
         "contact_id":x.contact_id,"supplier_id":x.supplier_id,"issue_date":x.issue_date.date().isoformat(),
         "due_date":x.due_date.date().isoformat(),"currency":x.currency,"subtotal":str(x.subtotal),
         "tax_total":str(x.tax_total),"total":str(x.total),"amount_paid":str(x.amount_paid),
-        "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id,\n        "crm_sales_order_id":x.crm_sales_order_id} for x in rows]
+        "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id,
+        "crm_sales_order_id":x.crm_sales_order_id} for x in rows]
 
 
 @router.post("/accounting/invoices/{invoice_id}/post")
@@ -2779,7 +2780,8 @@ def record_accounting_invoice_payment(invoice_id:int,payload:AccountingInvoicePa
     audit(db,user.id,membership.organization_id,"accounting.invoice.payment","accounting_invoice",invoice.id,
         f"{payload.amount}:{payload.reference}")
     return {"id":payment.id,"status":invoice.status,"amount_paid":str(invoice.amount_paid),
-        "balance":str(invoice.total-invoice.amount_paid),"journal_id":journal.id,\n        "crm_attribution_created":crm_attribution_created}
+        "balance":str(invoice.total-invoice.amount_paid),"journal_id":journal.id,
+        "crm_attribution_created":crm_attribution_created}
 
 
 @router.get("/accounting/aging")
