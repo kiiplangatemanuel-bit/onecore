@@ -3,6 +3,7 @@ from sqlalchemy import engine_from_config, pool
 from app.core.config import settings
 from app.core.database import Base, normalized_database_url
 from app.core import models  # noqa: F401 - register all mapped tables
+from app.core import portal_models  # noqa: F401 - register portal tables
 from app.core import inventory_models  # noqa: F401 - register extended inventory tables
 from app.core import procurement_workflow_models  # noqa: F401 - register procurement workflow tables
 from app.core import pos_completion_models  # noqa: F401 - register POS completion tables
