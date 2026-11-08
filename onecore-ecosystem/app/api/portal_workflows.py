@@ -104,6 +104,10 @@ class PortalRecordUpdate(BaseModel):
     status: str | None = Field(default=None, min_length=2, max_length=24)
 
 
+class PortalPublicContentCreate(BaseModel):
+    payload: dict[str, Any] = Field(min_length=1, max_length=80)
+
+
 def _membership(db: Session, user: User, organization_id: int) -> Membership:
     membership = db.query(Membership).filter_by(
         user_id=user.id, organization_id=organization_id, is_active=True
@@ -161,6 +165,22 @@ def _audit(db: Session, user: User, row: PortalWorkflowRecord, action: str):
 
 def _validate_payload(portal: str, record_type: str, payload: dict):
     required = REQUIRED_FIELDS.get((portal, record_type), set())
+    required = required | {
+        ("status", "incident"): {"title", "service", "severity", "summary"},
+        ("developers", "api_guide"): {"title", "body"},
+        ("developers", "example"): {"title", "language", "code"},
+        ("docs", "guide"): {"title", "slug", "body"},
+        ("community", "announcement"): {"title", "body"},
+        ("community", "public_post"): {"title", "body"},
+        ("trust", "security_policy"): {"title", "body"},
+        ("trust", "compliance_disclosure"): {"title", "body"},
+        ("events", "event"): {"title", "starts_at", "description"},
+        ("events", "announcement"): {"title", "body"},
+        ("careers", "vacancy"): {"title", "description", "location"},
+        ("careers", "company_information"): {"title", "body"},
+        ("partners", "opportunity"): {"title", "description"},
+        ("partners", "partner_information"): {"title", "body"},
+    }.get((portal, record_type), set())
     missing = sorted(key for key in required if key not in payload or payload[key] in (None, "", []))
     if missing:
         raise HTTPException(422, {"message": "Required portal fields are missing", "fields": missing})
@@ -308,6 +328,30 @@ def update_portal_record(
         row.status = payload.status
     row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, row, f"portal.{portal}.{row.record_type}.updated")
+    db.commit()
+    db.refresh(row)
+    return _out(row)
+
+
+@router.post("/admin/{portal}/public/{record_type}", status_code=201)
+def publish_public_portal_content(
+    portal: str, record_type: str, payload: PortalPublicContentCreate,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    """Publish global public content; only platform administrators may publish."""
+    if user.platform_role not in {"root_superadmin", "platform_admin"}:
+        raise HTTPException(403, "Platform administrator access is required")
+    if portal not in PORTALS or record_type not in PUBLIC_TYPES.get(portal, set()):
+        raise HTTPException(404, "Public portal resource not found")
+    _validate_payload(portal, record_type, payload.payload)
+    row = PortalWorkflowRecord(
+        portal_key=portal, record_type=record_type, organization_id=None,
+        owner_user_id=user.id, visibility="public", status="published",
+        payload=payload.payload,
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, user, row, f"portal.{portal}.{record_type}.published")
     db.commit()
     db.refresh(row)
     return _out(row)
