@@ -54,3 +54,35 @@ def test_webhook_migration_has_tenant_rls_and_idempotency():
     assert 'down_revision = "0056_developer_api_keys"' in source
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "uq_developer_webhook_endpoint_event" in source
+
+
+def test_developer_application_creation_automatically_enqueues_subscribed_webhook():
+    from app.api.portal_workflows import PortalRecordCreate, create_portal_record
+
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="Tenant", slug="tenant")
+        db.add(org)
+        db.flush()
+        user = _developer(db, org)
+        webhook_record = _webhook(db, org, user)
+        endpoint = DeveloperWebhookEndpoint(
+            workflow_record_id=webhook_record.id, organization_id=org.id,
+            secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
+        )
+        db.add(endpoint)
+        db.commit()
+        created = create_portal_record(
+            "developers", "application",
+            PortalRecordCreate(
+                organization_id=org.id, visibility="organization",
+                payload={"name": "Payroll integration"},
+            ), user, db,
+        )
+        delivery = db.query(DeveloperWebhookDelivery).filter_by(
+            endpoint_id=endpoint.id, event_type="application.created"
+        ).one()
+        assert delivery.status == "pending"
+        assert delivery.payload["data"]["record_id"] == created["id"]
+        assert delivery.event_id == f"evt_application_{created['id']}_created"
+    engine.dispose()
