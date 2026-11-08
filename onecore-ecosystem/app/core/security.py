@@ -62,10 +62,16 @@ def set_provider_callback_token_context(db: Session, token_hash: str) -> None:
         )
 
 
-def set_crm_delivery_callback_context(db: Session) -> None:
-    """Authorize the CRM delivery callback only after its shared secret is verified."""
+def set_crm_delivery_callback_context(db: Session, provider_message_id: str) -> None:
+    """Authorize one provider-message lookup after the callback secret is verified."""
+    value = str(provider_message_id).strip()
+    if not value or len(value) > 255:
+        raise ValueError("A valid provider message ID is required")
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        db.execute(text("SELECT set_config('app.crm_delivery_callback_authenticated', 'true', true)"))
+        db.execute(
+            text("SELECT set_config('app.crm_delivery_provider_message_id', :message_id, true)"),
+            {"message_id": value},
+        )
 
 
 def set_crm_unsubscribe_token_context(db: Session, token_hash: str) -> None:
