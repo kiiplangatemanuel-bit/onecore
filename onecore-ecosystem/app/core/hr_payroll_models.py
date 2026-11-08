@@ -163,7 +163,7 @@ class PayrollAccountingLink(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     payroll_run_id: Mapped[int] = mapped_column(ForeignKey("payroll_runs.id"), unique=True, index=True)
-    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), unique=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), unique=True, index=True)
     mapping_snapshot: Mapped[dict] = mapped_column(JSON)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
