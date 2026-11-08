@@ -768,11 +768,15 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
         HRLeaveRequest.leave_type=="unpaid",HRLeaveRequest.status=="approved",
         HRLeaveRequest.start_date<=end,HRLeaveRequest.end_date>=start).all()
     unpaid_by_employee={}
+    employee_by_id={x.id:x for x in employees}
     for leave_row in unpaid_rows:
         req_start,req_end=leave_row.start_date.date(),leave_row.end_date.date()
         req_days=max(1,(req_end-req_start).days+1)
-        overlap_start=max(req_start,payload.period_start)
-        overlap_end=min(req_end,payload.period_end)
+        employee=employee_by_id.get(leave_row.employee_id)
+        hired=employee.hire_date.date() if isinstance(employee.hire_date,datetime) else employee.hire_date
+        terminated=employee.termination_date.date() if isinstance(employee.termination_date,datetime) else employee.termination_date
+        overlap_start=max(req_start,payload.period_start,hired)
+        overlap_end=min(req_end,payload.period_end,terminated or payload.period_end)
         overlap_days=max(0,(overlap_end-overlap_start).days+1)
         if overlap_days:
             prorated_days=dec(leave_row.days)*Decimal(overlap_days)/Decimal(req_days)
