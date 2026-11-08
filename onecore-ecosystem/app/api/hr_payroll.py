@@ -1223,7 +1223,10 @@ def create_payroll_payment_batch(payload: PayrollPaymentBatchIn,
         ).first()
         if not link or link.reversal_journal_id or link.settlement_journal_id:
             raise HTTPException(409, "Every payroll run must have an unreversed accrual journal and no prior settlement")
-        if db.query(PayrollPaymentBatchItem).filter_by(payroll_run_id=run.id).first():
+        if db.query(PayrollPaymentBatchItem).filter(
+            PayrollPaymentBatchItem.payroll_run_id == run.id,
+            PayrollPaymentBatchItem.status != "cancelled"
+        ).first():
             raise HTTPException(409, "A payroll run is already reserved by a payment batch")
     batch = PayrollPaymentBatch(
         organization_id=membership.organization_id, currency=next(iter(currencies)),
@@ -1263,9 +1266,12 @@ def cancel_payroll_payment_batch(batch_id: int, membership=Depends(active_member
         raise HTTPException(403, "Only the batch creator or organization administrator can cancel it")
     if batch.status not in {"draft", "pending_approval"}:
         raise HTTPException(409, "Only an unapproved batch can be cancelled")
-    db.query(PayrollPaymentBatchItem).filter_by(
+    for item in db.query(PayrollPaymentBatchItem).filter_by(
         organization_id=membership.organization_id, batch_id=batch.id
-    ).delete(synchronize_session=False)
+    ).with_for_update().all():
+        if item.status != "pending":
+            raise HTTPException(409, "Only unpaid batch items can be released by cancellation")
+        item.status = "cancelled"
     batch.status = "cancelled"
     audit(db, user, membership.organization_id, "payroll.payment_batch.cancelled",
           "payroll_payment_batch", batch.id, "Unprocessed batch cancelled; payroll runs released")
