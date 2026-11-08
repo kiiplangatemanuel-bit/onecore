@@ -1000,7 +1000,7 @@ def submit_attendance(payload: AttendanceIn, membership=Depends(active_membershi
         organization_id=membership.organization_id, branch_id=employee.branch_id,
         employee_id=employee.id,
         work_date=datetime.combine(payload.work_date, time.min, tzinfo=timezone.utc),
-        clock_in=payload.clock_in, clock_out=payload.clock_out,
+        clock_in=payload.clock_in.astimezone(timezone.utc), clock_out=payload.clock_out.astimezone(timezone.utc),
         break_minutes=payload.break_minutes, scheduled_minutes=payload.scheduled_minutes,
         worked_minutes=worked, overtime_minutes=max(0, worked - payload.scheduled_minutes),
         status="pending_approval", idempotency_key=payload.idempotency_key,
