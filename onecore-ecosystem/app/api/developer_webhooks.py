@@ -312,8 +312,12 @@ def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
 
 def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
     """Worker entry point. A trusted worker sets its RLS bypass flag transaction-locally."""
+    if not 1 <= limit <= 250:
+        raise ValueError("Webhook batch size must be between 1 and 250")
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        db.execute(text("SELECT set_config('app.webhook_worker', 'true', true)"))
+        role = db.execute(text("SELECT current_user")).scalar_one()
+        if role != "onecore_webhook_worker":
+            raise RuntimeError("Webhook delivery requires the dedicated onecore_webhook_worker database role")
     rows = db.query(DeveloperWebhookDelivery).filter(
         DeveloperWebhookDelivery.status == "pending",
         DeveloperWebhookDelivery.next_attempt_at <= _now(),
@@ -321,8 +325,6 @@ def process_webhook_deliveries(db: Session, limit: int = 25) -> list[dict]:
     results = []
     for row in rows:
         try:
-            if db.bind is not None and db.bind.dialect.name == "postgresql":
-                db.execute(text("SELECT set_config('app.webhook_worker', 'true', true)"))
             results.append(_deliver_one(db, row))
         except Exception as exc:
             row.attempts += 1
