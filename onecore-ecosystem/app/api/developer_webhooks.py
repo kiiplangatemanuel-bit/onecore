@@ -12,7 +12,7 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, or_, text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -222,7 +222,7 @@ def list_developer_webhooks(
         endpoint = db.query(DeveloperWebhookEndpoint).filter_by(workflow_record_id=record.id).first()
         counts = dict(db.query(
             DeveloperWebhookDelivery.status,
-            __import__("sqlalchemy").func.count(DeveloperWebhookDelivery.id),
+            func.count(DeveloperWebhookDelivery.id),
         ).filter_by(endpoint_id=endpoint.id).group_by(DeveloperWebhookDelivery.status).all()) if endpoint else {}
         result.append({
             "workflow_record_id": record.id,
