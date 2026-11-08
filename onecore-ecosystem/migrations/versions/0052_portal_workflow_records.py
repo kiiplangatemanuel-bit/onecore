@@ -31,8 +31,209 @@ def upgrade():
     op.create_index("ix_portal_workflow_owner_portal_type", "portal_workflow_records", ["owner_user_id", "portal_key", "record_type"])
     op.create_index("ix_portal_workflow_public", "portal_workflow_records", ["portal_key", "record_type", "visibility", "status"])
 
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("ALTER TABLE portal_workflow_records ENABLE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE portal_workflow_records FORCE ROW LEVEL SECURITY")
+        op.execute("""
+            CREATE POLICY portal_workflow_select ON portal_workflow_records
+            FOR SELECT USING (
+                (visibility = 'public' AND status = 'published' AND organization_id IS NULL)
+                OR (
+                    owner_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                    AND (
+                        organization_id IS NULL
+                        OR EXISTS (
+                            SELECT 1 FROM memberships m
+                            WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                              AND m.organization_id = portal_workflow_records.organization_id
+                              AND m.is_active = true
+                        )
+                    )
+                )
+                OR (
+                    visibility = 'organization' AND organization_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM memberships m
+                        WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND m.organization_id = portal_workflow_records.organization_id
+                          AND m.is_active = true
+                    )
+                )
+                OR (
+                    portal_key = 'trust'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'security_admin')
+                          AND u.is_active = true
+                    )
+                )
+                OR (
+                    portal_key = 'careers'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'recruitment_admin')
+                          AND u.is_active = true
+                    )
+                )
+            )
+        """)
+        op.execute("""
+            CREATE POLICY portal_workflow_insert ON portal_workflow_records
+            FOR INSERT WITH CHECK (
+                (
+                    owner_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                    AND (
+                        (
+                            organization_id IS NULL
+                            AND visibility = 'private'
+                            AND portal_key IN ('status', 'trust', 'events', 'careers', 'community')
+                        )
+                        OR (
+                            organization_id IS NOT NULL
+                            AND visibility IN ('private', 'organization')
+                            AND EXISTS (
+                                SELECT 1 FROM memberships m
+                                WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                                  AND m.organization_id = portal_workflow_records.organization_id
+                                  AND m.is_active = true
+                                  AND CASE portal_key
+                                      WHEN 'developers' THEN m.role IN ('org_admin', 'developer', 'manager')
+                                      WHEN 'docs' THEN m.role IN ('org_admin', 'manager', 'school_admin', 'teacher')
+                                      WHEN 'community' THEN m.role IN ('org_admin', 'branch_admin', 'manager', 'staff', 'teacher')
+                                      WHEN 'events' THEN m.role IN ('org_admin', 'event_manager', 'manager')
+                                      WHEN 'partners' THEN m.role IN ('org_admin', 'partner_manager', 'manager')
+                                      ELSE m.role IN ('org_admin', 'manager', 'staff')
+                                  END
+                                  AND (
+                                      record_type NOT IN (
+                                          'application', 'api_key', 'webhook', 'sandbox_environment',
+                                          'organization_guide', 'group', 'attendance', 'partner_profile',
+                                          'agreement', 'partner_resource'
+                                      )
+                                      OR m.role IN ('org_admin', 'manager', 'school_admin', 'partner_manager', 'developer', 'event_manager')
+                                  )
+                            )
+                        )
+                    )
+                )
+                OR (
+                    organization_id IS NULL AND visibility = 'public' AND status = 'published'
+                    AND portal_key IN ('status', 'developers', 'docs', 'community', 'trust', 'events', 'careers', 'partners')
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'platform_admin')
+                          AND u.is_active = true
+                    )
+                )
+            )
+        """)
+        op.execute("""
+            CREATE POLICY portal_workflow_update ON portal_workflow_records
+            FOR UPDATE
+            USING (
+                (
+                    owner_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                    AND (
+                        organization_id IS NULL
+                        OR EXISTS (
+                            SELECT 1 FROM memberships m
+                            WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                              AND m.organization_id = portal_workflow_records.organization_id
+                              AND m.is_active = true
+                        )
+                    )
+                )
+                OR (
+                    portal_key = 'trust'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'security_admin')
+                          AND u.is_active = true
+                    )
+                )
+                OR (
+                    portal_key = 'careers'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'recruitment_admin')
+                          AND u.is_active = true
+                    )
+                )
+                OR (
+                    visibility = 'organization' AND organization_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM memberships m
+                        WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND m.organization_id = portal_workflow_records.organization_id
+                          AND m.is_active = true
+                          AND CASE portal_key
+                              WHEN 'developers' THEN m.role IN ('org_admin', 'manager', 'developer')
+                              WHEN 'docs' THEN m.role IN ('org_admin', 'manager', 'school_admin')
+                              WHEN 'community' THEN m.role IN ('org_admin', 'manager', 'school_admin', 'partner_manager', 'developer', 'event_manager')
+                              WHEN 'events' THEN m.role IN ('org_admin', 'manager', 'event_manager')
+                              WHEN 'partners' THEN m.role IN ('org_admin', 'manager', 'partner_manager')
+                              ELSE m.role IN ('org_admin', 'manager')
+                          END
+                    )
+                )
+            )
+            WITH CHECK (
+                (
+                    owner_user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                    AND (
+                        organization_id IS NULL
+                        OR EXISTS (
+                            SELECT 1 FROM memberships m
+                            WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                              AND m.organization_id = portal_workflow_records.organization_id
+                              AND m.is_active = true
+                        )
+                    )
+                )
+                OR (
+                    portal_key = 'trust'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'security_admin')
+                          AND u.is_active = true
+                    )
+                )
+                OR (
+                    portal_key = 'careers'
+                    AND EXISTS (
+                        SELECT 1 FROM users u
+                        WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND u.platform_role IN ('root_superadmin', 'recruitment_admin')
+                          AND u.is_active = true
+                    )
+                )
+                OR (
+                    visibility = 'organization' AND organization_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM memberships m
+                        WHERE m.user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                          AND m.organization_id = portal_workflow_records.organization_id
+                          AND m.is_active = true
+                          AND m.role IN ('org_admin', 'manager', 'school_admin', 'partner_manager', 'developer', 'event_manager')
+                    )
+                )
+            )
+        """)
+
 
 def downgrade():
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP POLICY IF EXISTS portal_workflow_update ON portal_workflow_records")
+        op.execute("DROP POLICY IF EXISTS portal_workflow_insert ON portal_workflow_records")
+        op.execute("DROP POLICY IF EXISTS portal_workflow_select ON portal_workflow_records")
+        op.execute("ALTER TABLE portal_workflow_records NO FORCE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE portal_workflow_records DISABLE ROW LEVEL SECURITY")
     op.drop_index("ix_portal_workflow_public", table_name="portal_workflow_records")
     op.drop_index("ix_portal_workflow_owner_portal_type", table_name="portal_workflow_records")
     op.drop_index("ix_portal_workflow_org_portal_type", table_name="portal_workflow_records")
