@@ -2519,7 +2519,7 @@ def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
         if invoice_type not in ("receivable","payable"): raise HTTPException(422,"Invalid invoice type")
         q=q.filter(AccountingInvoice.invoice_type==invoice_type)
     if status:
-        if status not in ("draft","posted","partially_paid","paid"): raise HTTPException(422,"Invalid invoice status")
+        if status not in ("draft","posted","partially_paid","paid","cancelled"): raise HTTPException(422,"Invalid invoice status")
         q=q.filter(AccountingInvoice.status==status)
     allowed=branch_scope_ids(membership)
     if allowed is not None:
@@ -2532,6 +2532,31 @@ def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
         "tax_total":str(x.tax_total),"total":str(x.total),"amount_paid":str(x.amount_paid),
         "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id,
         "crm_sales_order_id":x.crm_sales_order_id} for x in rows]
+
+
+@router.post("/accounting/invoices/{invoice_id}/cancel")
+def cancel_accounting_invoice(invoice_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id,organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not invoice or (invoice.branch_id and not can_access_branch(membership,invoice.branch_id)):
+        raise HTTPException(404,"Invoice not found")
+    if invoice.status != "draft":
+        raise HTTPException(409,"Only draft invoices can be cancelled")
+    approval=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id
+    ).first()
+    if approval and approval.status in ("pending","approved"):
+        approval.status="cancelled"
+        approval.decision_note="Invoice cancelled before posting"
+        approval.decided_at=datetime.now(timezone.utc)
+    invoice.status="cancelled"
+    audit(db,user.id,membership.organization_id,"accounting.invoice.cancelled",
+        "accounting_invoice",invoice.id,"draft invoice cancelled")
+    db.commit()
+    return {"id":invoice.id,"status":invoice.status}
 
 
 @router.post("/accounting/invoices/{invoice_id}/post")
