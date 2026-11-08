@@ -67,7 +67,8 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/complete" in paths
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/download" in paths
     assert "/api/v1/support/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan" in paths
-    assert any(route.path.endswith("/attachments/{attachment_id}/scan") and "POST" in route.methods for route in app.routes)
+    scan_path = "/api/v1/support/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan"
+    assert "post" in app.openapi()["paths"][scan_path]
 
 
 def test_support_organization_ticket_owner_loses_access_when_membership_is_revoked():
@@ -224,13 +225,13 @@ def test_production_object_storage_requires_automated_attachment_scanning():
 
 def test_clamav_response_parser_accepts_clean_and_detects_infected_results():
     from app.services.support_scanner import parse_clamav_response
-    assert parse_clamav_response(b"stream: OK\\x00") is False
-    assert parse_clamav_response(b"stream: Eicar-Test-Signature FOUND\\x00") is True
+    assert parse_clamav_response(b"stream: OK" + bytes([0])) is False
+    assert parse_clamav_response(b"stream: Eicar-Test-Signature FOUND" + bytes([0])) is True
 
 
 def test_clamav_response_parser_fails_closed_on_errors():
     from app.services.support_scanner import parse_clamav_response
     with pytest.raises(ValueError):
-        parse_clamav_response(b"stream: ERROR\\x00")
+        parse_clamav_response(b"stream: ERROR" + bytes([0]))
     with pytest.raises(ValueError):
         parse_clamav_response(b"unexpected response")
