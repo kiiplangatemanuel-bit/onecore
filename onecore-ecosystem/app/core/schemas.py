@@ -319,6 +319,7 @@ class AccountingInvoiceIn(BaseModel):
     invoice_type: str = Field(pattern=r"^(receivable|payable)$")
     contact_id: int | None = Field(default=None, gt=0)
     supplier_id: int | None = Field(default=None, gt=0)
+    crm_sales_order_id: int | None = Field(default=None, gt=0)
     branch_id: str | None = Field(default=None, max_length=36)
     invoice_number: str = Field(min_length=2, max_length=60, pattern=r"^[A-Za-z0-9._/-]+$")
     issue_date: date
