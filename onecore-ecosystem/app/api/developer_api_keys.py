@@ -70,7 +70,9 @@ def create_developer_api_key(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    _membership(db, user, payload.organization_id)
+    membership = _membership(db, user, payload.organization_id)
+    if payload.environment == "production" and membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator may issue production API keys")
     invalid = sorted(set(payload.scopes) - ALLOWED_SCOPES)
     if invalid:
         raise HTTPException(422, {"message": "Unsupported API key scopes", "scopes": invalid})
