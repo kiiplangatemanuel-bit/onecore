@@ -37,6 +37,10 @@ def upgrade():
         CREATE POLICY status_alert_delivery_select ON status_alert_deliveries
         FOR SELECT USING (
             user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+            OR (
+                incident_record_id = NULLIF(current_setting('app.status_alert_incident_id', true), '')::integer
+                AND public.onecore_is_platform_admin()
+            )
             OR current_user = 'onecore_status_alert_worker'
         )
     """)
