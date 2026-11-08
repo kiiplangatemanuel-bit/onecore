@@ -81,13 +81,29 @@ MANAGER_ONLY = {
     ("partners", "partner_profile"), ("partners", "agreement"), ("partners", "partner_resource"),
 }
 STATUS_TRANSITIONS = {
-    ("trust", "security_report"): {"submitted", "acknowledged", "investigating", "resolved", "closed"},
-    ("careers", "application"): {"submitted", "screening", "interview", "offer", "rejected", "withdrawn"},
-    ("events", "registration"): {"registered", "waitlisted", "cancelled", "attended"},
-    ("events", "booking"): {"booked", "cancelled", "attended"},
-    ("partners", "lead"): {"new", "qualified", "contacted", "converted", "rejected"},
-    ("partners", "referral"): {"submitted", "accepted", "rejected", "converted"},
-    ("developers", "webhook"): {"active", "disabled"},
+    ("trust", "security_report"): {
+        "submitted": {"acknowledged"}, "acknowledged": {"investigating"},
+        "investigating": {"resolved"}, "resolved": {"closed"},
+    },
+    ("careers", "application"): {
+        "submitted": {"screening", "rejected", "withdrawn"},
+        "screening": {"interview", "rejected", "withdrawn"},
+        "interview": {"offer", "rejected", "withdrawn"},
+        "offer": {"withdrawn"},
+    },
+    ("events", "registration"): {
+        "registered": {"waitlisted", "cancelled", "attended"},
+        "waitlisted": {"registered", "cancelled", "attended"},
+    },
+    ("events", "booking"): {"booked": {"cancelled", "attended"}},
+    ("partners", "lead"): {
+        "new": {"qualified", "rejected"}, "qualified": {"contacted", "rejected"},
+        "contacted": {"converted", "rejected"},
+    },
+    ("partners", "referral"): {
+        "submitted": {"accepted", "rejected"}, "accepted": {"converted", "rejected"},
+    },
+    ("developers", "webhook"): {"active": {"disabled"}},
 }
 
 
@@ -325,6 +341,8 @@ def create_portal_record(
         ("careers", "application"): "submitted",
         ("events", "registration"): "registered",
         ("events", "booking"): "booked",
+        ("partners", "lead"): "new",
+        ("partners", "referral"): "submitted",
         ("status", "alert_subscription"): "active",
         ("status", "notification_preference"): "active",
         ("developers", "webhook"): "active",
@@ -371,13 +389,13 @@ def update_portal_record(
         _validate_payload(portal, row.record_type, {**row.payload, **payload.payload})
         row.payload = {**row.payload, **payload.payload}
     if payload.status is not None:
-        allowed = STATUS_TRANSITIONS.get((portal, row.record_type), set())
-        if payload.status not in allowed:
-            raise HTTPException(422, "Unsupported status transition")
-        if row.owner_user_id != user.id and not _can_manage(row, user, db):
-            raise HTTPException(403, "Insufficient portal permissions")
         if row.record_type in {"security_report", "application"} and row.owner_user_id == user.id:
             raise HTTPException(403, "Submitted records are reviewed by authorized staff; owners cannot change case status")
+        if row.owner_user_id != user.id and not _can_manage(row, user, db):
+            raise HTTPException(403, "Insufficient portal permissions")
+        allowed = STATUS_TRANSITIONS.get((portal, row.record_type), {})
+        if payload.status not in allowed.get(row.status, set()):
+            raise HTTPException(422, "Unsupported status transition")
         row.status = payload.status
     row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, row, f"portal.{portal}.{row.record_type}.updated")
