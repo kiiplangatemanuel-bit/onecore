@@ -1680,6 +1680,10 @@ class SupportAttachment(Base):
     content_type: Mapped[str] = mapped_column(String(120))
     size_bytes: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    scan_engine: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    scan_result: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    scan_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
