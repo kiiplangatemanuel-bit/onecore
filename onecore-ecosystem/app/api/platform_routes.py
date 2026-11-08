@@ -200,7 +200,7 @@ def withdraw_notice(notice_id:int,user:User=Depends(require_platform_admin),db:S
 
 class InvitationIn(BaseModel):
     email: EmailStr
-    role: str = Field(pattern="^(org_admin|branch_admin|manager|accountant|staff|viewer)$")
+    role: str = Field(pattern="^(org_admin|branch_admin|manager|accountant|staff|viewer|hr_admin|hr_manager|payroll_manager|payroll_approver|payroll_payment)$")
     branch_scope: str = Field(default="*", max_length=500)
 
 class AcceptInvitationIn(BaseModel):
