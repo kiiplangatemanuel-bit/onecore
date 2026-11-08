@@ -146,7 +146,7 @@ def list_my_resources(
     if organization_id is not None:
         membership = _membership(db, user, organization_id)
         query = query.filter(or_(
-            PortalResource.owner_user_id == user.id,
+            (PortalResource.owner_user_id == user.id) & (PortalResource.organization_id.is_(None)),
             (PortalResource.organization_id == membership.organization_id) & (PortalResource.visibility == "organization"),
         ))
     else:
@@ -154,7 +154,7 @@ def list_my_resources(
             user_id=user.id, is_active=True
         ).all()]
         query = query.filter(or_(
-            PortalResource.owner_user_id == user.id,
+            (PortalResource.owner_user_id == user.id) & (PortalResource.organization_id.is_(None)),
             (PortalResource.organization_id.in_(org_ids) & (PortalResource.visibility == "organization")) if org_ids else False,
         ))
     if resource_type:
@@ -284,9 +284,15 @@ def read_my_resource(
         raise HTTPException(404, "Portal resource not found")
     if row.visibility == "public" and row.status == "published":
         return _out(row)
-    if row.owner_user_id == user.id:
+    if row.organization_id is None and row.owner_user_id == user.id:
         return _out(row)
     if row.organization_id is not None and row.visibility == "organization":
+        try:
+            _membership(db, user, row.organization_id)
+            return _out(row)
+        except HTTPException:
+            pass
+    elif row.organization_id is not None and row.owner_user_id == user.id:
         try:
             _membership(db, user, row.organization_id)
             return _out(row)
