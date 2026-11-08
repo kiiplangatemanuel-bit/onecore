@@ -1001,6 +1001,14 @@ def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversal
             debit=line["debit"],credit=line["credit"]))
     link.reversal_journal_id=journal.id; link.reversed_by=user.id
     link.reversed_at=datetime.now(timezone.utc); link.reversal_reason=payload.reason
+    released_adjustments = db.query(PayrollAdjustment).filter_by(
+        organization_id=membership.organization_id, payroll_run_id=run.id, status="applied"
+    ).all()
+    for adjustment in released_adjustments:
+        adjustment.status = "approved"
+        adjustment.payroll_run_id = None
+        audit(db, user, membership.organization_id, "payroll.adjustment.released",
+              "payroll_adjustment", adjustment.id, f"Released from cancelled payroll run {run.id}")
     run.status="cancelled"
     audit(db,user,membership.organization_id,"payroll.run.accounting_journal_reversed","payroll_run",run.id,
           f"Reversal journal {journal.journal_number}: {payload.reason}")
