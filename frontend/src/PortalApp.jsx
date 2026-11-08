@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { API_BASE, api, clearToken, getToken, login } from "./api";
 import { portalLink, portalUrl } from "./config/portals";
+import "./portal.css";
 
 const CATALOG = {
   support: { name:"OneCore Support", eyebrow:"CUSTOMER CARE", intro:"Find answers, contact the OneCore team and manage support access.", publicItems:["Browse help and frequently asked questions","Find product and service guidance","Contact the OneCore support team"], privateItems:["Your signed-in identity","Organization-aware support access","Secure access to connected OneCore services"] },
