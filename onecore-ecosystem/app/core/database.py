@@ -19,7 +19,8 @@ def normalized_database_url(value: str):
     host = (url.host or "").lower()
     if host.endswith(".supabase.co") or host.endswith(".pooler.supabase.com"):
         query = dict(url.query)
-        query.setdefault("sslmode", "require")
+        if query.get("sslmode", "").lower() not in {"require", "verify-ca", "verify-full"}:
+            query["sslmode"] = "require"
         url = url.set(query=query)
     return url
 
