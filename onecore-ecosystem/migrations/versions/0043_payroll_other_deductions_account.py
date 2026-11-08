@@ -2,7 +2,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0043_payroll_other_deductions_account"
+revision = "0043_payroll_other_ded_account"
 down_revision = "0042_payroll_adjustments"
 branch_labels = None
 depends_on = None
