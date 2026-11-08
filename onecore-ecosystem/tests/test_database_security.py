@@ -40,6 +40,11 @@ def _tables():
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices",
         "status_alert_deliveries",
+        "hr_employees", "hr_leave_requests", "hr_attendance_records",
+        "payroll_rule_sets", "payroll_runs", "payroll_payslips",
+        "payroll_accounting_mappings", "payroll_accounting_links",
+        "payroll_adjustments", "payroll_payment_batches",
+        "payroll_payment_batch_items", "payroll_bank_statement_lines",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
