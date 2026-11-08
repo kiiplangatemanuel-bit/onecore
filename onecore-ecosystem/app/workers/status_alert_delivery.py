@@ -52,8 +52,16 @@ def run_status_alert_worker(limit: int = BATCH_SIZE) -> int:
             rows = (
                 db.query(StatusAlertDelivery)
                 .filter(
-                    StatusAlertDelivery.status == "pending",
-                    StatusAlertDelivery.next_attempt_at <= now,
+                    or_(
+                        and_(
+                            StatusAlertDelivery.status == "pending",
+                            StatusAlertDelivery.next_attempt_at <= now,
+                        ),
+                        and_(
+                            StatusAlertDelivery.status == "sending",
+                            StatusAlertDelivery.updated_at <= now - timedelta(minutes=10),
+                        ),
+                    ),
                 )
                 .order_by(StatusAlertDelivery.next_attempt_at, StatusAlertDelivery.id)
                 .with_for_update(skip_locked=True)
