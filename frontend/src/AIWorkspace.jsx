@@ -3,7 +3,7 @@ import {api} from "./api";
 const LANGUAGES=[["en","English"],["sw","Kiswahili"],["fr","French"],["ar","Arabic"],["so","Somali"],["am","Amharic"],["ha","Hausa"],["yo","Yoruba"],["zu","Zulu"],["pt","Portuguese"]];
 const TASKS=[["chat","Ask OneCore AI"],["summarize","Summarize"],["explain","Explain"],["analyze","Analyze text / CSV"],["draft","Draft content"],["code","Coding help"]];
 export default function AIWorkspace(){
- const [status,setStatus]=useState(null),[sessions,setSessions]=useState([]),[usage,setUsage]=useState(null),[sessionId,setSessionId]=useState(null),[messages,setMessages]=useState([]),[prompt,setPrompt]=useState(""),[language,setLanguage]=useState("en"),[task,setTask]=useState("chat"),[busy,setBusy]=useState(false),[error,setError]=useState("");
+ const [status,setStatus]=useState(null),[sessions,setSessions]=useState([]),[usage,setUsage]=useState(null),[sessionId,setSessionId]=useState(null),[messages,setMessages]=useState([]),[prompt,setPrompt]=useState(""),[language,setLanguage]=useState("en"),[task,setTask]=useState("chat"),[file,setFile]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
  const refresh=useCallback(async()=>{setError("");try{const [s,h,u]=await Promise.all([api("/api/v1/ai/status"),api("/api/v1/ai/sessions"),api("/api/v1/ai/usage")]);setStatus(s);setSessions(h);setUsage(u)}catch(e){setError(e.message)}},[]);
  useEffect(()=>{refresh()},[refresh]);
  async function openSession(id){setError("");try{const r=await api("/api/v1/ai/sessions/"+id);setSessionId(id);setMessages(r.messages||[])}catch(e){setError(e.message)}}
