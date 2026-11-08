@@ -46,3 +46,8 @@ The shell includes authentication, organization selection/creation, module searc
 ## Production deployment
 
 Set the Vercel project root directory to `frontend` and configure `VITE_API_BASE_URL` to the public HTTPS backend URL. See `DEPLOYMENT.md` at the repository root for the Render + Supabase backend and Vercel frontend release procedure.
+
+
+## Optional Supabase Auth sign-in
+
+The shared login can also authenticate with Supabase Auth when both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are configured. The browser uses Supabase Auth for password verification without persisting the Supabase refresh token, then exchanges the short-lived Supabase access token with `POST /api/v1/auth/supabase-session`. The backend verifies the token with the configured Supabase Auth `/auth/v1/user` endpoint, requires a confirmed email, links or provisions a OneCore user, and returns the standard short-lived OneCore API token. Set matching backend `SUPABASE_URL` and `SUPABASE_ANON_KEY` values. Do not use the Supabase service-role key in the browser or this flow.

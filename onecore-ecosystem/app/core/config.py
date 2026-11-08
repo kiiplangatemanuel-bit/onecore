@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Supabase-managed PostgreSQL is the production system of record. Keep DATABASE_URL
     # for local development and legacy deployments; SUPABASE_DB_URL takes precedence.
     supabase_db_url: str = ""
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
     database_pool_size: int = Field(default=5, ge=1, le=30)
     database_max_overflow: int = Field(default=5, ge=0, le=50)
     database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
@@ -128,6 +130,10 @@ class Settings(BaseSettings):
             redirect_origins = [item.strip() for item in self.portal_redirect_origins.split(",") if item.strip()]
             if not redirect_origins or any(not item.startswith("https://") for item in redirect_origins):
                 raise ValueError("PORTAL_REDIRECT_ORIGINS must contain the exact HTTPS origins of the independently deployed portals")
+        if bool(self.supabase_url.strip()) != bool(self.supabase_anon_key.strip()):
+            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured together")
+        if self.supabase_url and not self.supabase_url.strip().startswith("https://"):
+            raise ValueError("SUPABASE_URL must use HTTPS")
         if bool(self.bootstrap_admin_email) != bool(self.bootstrap_admin_password):
             raise ValueError("BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must be configured together")
         if self.bootstrap_admin_password and len(self.bootstrap_admin_password) < 14:
