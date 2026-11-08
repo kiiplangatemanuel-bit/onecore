@@ -610,18 +610,20 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
         raise HTTPException(409,"Payroll settlement journal already exists")
     if dec(row.net_total)<=0:
         raise HTTPException(422,"Payroll with zero net pay cannot be marked paid")
-    mapping=db.query(PayrollAccountingMapping).filter_by(organization_id=membership.organization_id).first()
-    if not mapping:
-        raise HTTPException(409,"Payroll accounting mapping is missing")
-    bank=db.query(AccountingAccount).filter_by(id=mapping.bank_account_id,
+    mapping_snapshot=accounting_link.mapping_snapshot or {}
+    bank_account_id=mapping_snapshot.get("bank_account_id")
+    net_payable_account_id=mapping_snapshot.get("net_payable_account_id")
+    bank=db.query(AccountingAccount).filter_by(id=bank_account_id,
         organization_id=membership.organization_id,is_active=True,account_type="asset").first()
-    if not bank: raise HTTPException(409,"Configured payroll bank account is no longer active")
+    payable=db.query(AccountingAccount).filter_by(id=net_payable_account_id,
+        organization_id=membership.organization_id,is_active=True,account_type="liability").first()
+    if not bank or not payable: raise HTTPException(409,"The payroll journal bank or payable account is no longer active")
     settlement_date=datetime.now(timezone.utc).date()
     _assert_accounting_date_open(db,membership.organization_id,settlement_date)
     settlement_lines=[
-        {"account_id":mapping.net_payable_account_id,"description":"Settle net payroll payable",
+        {"account_id":net_payable_account_id,"description":"Settle net payroll payable",
          "debit":dec(row.net_total),"credit":ZERO,"branch_id":row.branch_id},
-        {"account_id":mapping.bank_account_id,"description":"Payroll bank disbursement confirmation",
+        {"account_id":bank_account_id,"description":"Payroll bank disbursement confirmation",
          "debit":ZERO,"credit":dec(row.net_total),"branch_id":row.branch_id},
     ]
     validate_journal_lines([type("Line",(),x)() for x in settlement_lines])
@@ -815,7 +817,11 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
             account_id=line["account_id"],branch_id=line["branch_id"],description=line["description"],
             debit=line["debit"],credit=line["credit"]))
     link=PayrollAccountingLink(organization_id=membership.organization_id,payroll_run_id=run.id,
-        journal_id=journal.id,created_by=user.id)
+        journal_id=journal.id,mapping_snapshot={name:getattr(mapping,name) for name in (
+            "salary_expense_account_id","employer_contribution_expense_account_id","net_payable_account_id",
+            "paye_payable_account_id","nssf_payable_account_id","shif_payable_account_id",
+            "housing_levy_payable_account_id","pension_payable_account_id","bank_account_id")},
+        created_by=user.id)
     db.add(link)
     audit(db,user,membership.organization_id,"payroll.run.posted_to_accounting","payroll_run",run.id,
           f"Accounting journal {journal.journal_number}")
