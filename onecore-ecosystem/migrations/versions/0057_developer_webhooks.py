@@ -54,7 +54,7 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_endpoint_select ON developer_webhook_endpoints
             FOR SELECT USING (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_endpoints.organization_id
@@ -66,7 +66,7 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_endpoint_insert ON developer_webhook_endpoints
             FOR INSERT WITH CHECK (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_endpoints.organization_id
@@ -78,7 +78,7 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_endpoint_update ON developer_webhook_endpoints
             FOR UPDATE USING (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_endpoints.organization_id
@@ -86,7 +86,7 @@ def upgrade():
                       AND m.is_active = true AND m.role IN ('org_admin', 'developer')
                 )
             ) WITH CHECK (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_endpoints.organization_id
@@ -98,7 +98,7 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_delivery_select ON developer_webhook_deliveries
             FOR SELECT USING (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_deliveries.organization_id
@@ -110,7 +110,7 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_delivery_insert ON developer_webhook_deliveries
             FOR INSERT WITH CHECK (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
                 OR EXISTS (
                     SELECT 1 FROM memberships m
                     WHERE m.organization_id = developer_webhook_deliveries.organization_id
@@ -122,9 +122,9 @@ def upgrade():
         op.execute("""
             CREATE POLICY developer_webhook_delivery_update ON developer_webhook_deliveries
             FOR UPDATE USING (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
             ) WITH CHECK (
-                current_setting('app.webhook_worker', true) = 'true'
+                current_user = 'onecore_webhook_worker'
             )
         """)
 
