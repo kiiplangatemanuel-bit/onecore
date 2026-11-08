@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric, Integer, BigInteger, text
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Index, Numeric, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -1632,38 +1632,15 @@ class PortalWorkflowRecord(Base):
     )
 
 
-class UserMFAFactor(Base):
-    """Encrypted TOTP seed and replay-prevention state for one account."""
-    __tablename__ = "user_mfa_factors"
+class SupportAttachment(Base):
+    """Private object-storage metadata for a support ticket attachment."""
+    __tablename__ = "support_attachments"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
-    secret_ciphertext: Mapped[str] = mapped_column(String(512))
-    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_used_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
-
-
-class MFARecoveryCode(Base):
-    """Single-use recovery code stored only as a digest."""
-    __tablename__ = "mfa_recovery_codes"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-
-
-class MFAChallenge(Base):
-    """Short-lived, single-use second-factor challenge issued after password verification."""
-    __tablename__ = "mfa_challenges"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    auth_version: Mapped[int] = mapped_column(Integer)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    object_key: Mapped[str] = mapped_column(String(512), unique=True)
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
