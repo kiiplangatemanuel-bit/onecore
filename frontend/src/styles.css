@@ -160,3 +160,14 @@
 .industry-workspace input,.industry-workspace select{min-width:0;max-width:100%}
 .industry-workspace .portal-form-grid{margin:10px 0 16px}
 @media(max-width:620px){.industry-tabs{overflow-x:auto;flex-wrap:nowrap}.industry-tabs button{white-space:nowrap}.portal-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.industry-workspace .portal-columns{grid-template-columns:1fr}}
+
+/* Procurement workspace */
+.procurement-workspace .workspace-tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 0 14px;margin:12px 0}
+.procurement-workspace .tab{white-space:nowrap;border:1px solid #d8e1eb;background:#fff;color:#34465d;border-radius:9px;padding:9px 13px}
+.procurement-workspace .tab.active{background:#10243d;color:#fff;border-color:#10243d}
+.procurement-workspace .table-wrap{width:100%;overflow-x:auto}
+.procurement-workspace table{width:100%;border-collapse:collapse;min-width:560px}
+.procurement-workspace th,.procurement-workspace td{text-align:left;padding:11px 10px;border-bottom:1px solid #e7edf4;vertical-align:top}
+.procurement-workspace th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#65758a}
+.procurement-workspace .data-preview{white-space:pre-wrap;overflow:auto;background:#f4f7fb;border:1px solid #e1e8f0;border-radius:9px;padding:12px;max-height:260px}
+.procurement-workspace .link-button{display:inline-flex;align-items:center;text-decoration:none}
