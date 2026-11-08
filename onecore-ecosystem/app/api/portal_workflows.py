@@ -81,6 +81,9 @@ MANAGER_ONLY = {
     ("partners", "partner_profile"), ("partners", "agreement"), ("partners", "partner_resource"),
 }
 STATUS_TRANSITIONS = {
+    ("status", "alert_subscription"): {
+        "active": {"disabled"}, "disabled": {"active"},
+    },
     ("trust", "security_report"): {
         "submitted": {"acknowledged"}, "acknowledged": {"investigating"},
         "investigating": {"resolved"}, "resolved": {"closed"},
@@ -352,6 +355,30 @@ def list_portal_records(
         ))
     rows = query.order_by(PortalWorkflowRecord.updated_at.desc()).limit(limit).all()
     return [_out(row) for row in rows]
+
+
+@router.get("/status/alert-deliveries")
+def list_status_alert_deliveries(
+    limit: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Return only the signed-in user's Status alert delivery history."""
+    rows = db.query(StatusAlertDelivery).filter_by(
+        user_id=user.id
+    ).order_by(StatusAlertDelivery.created_at.desc(), StatusAlertDelivery.id.desc()).limit(limit).all()
+    return [
+        {
+            "id": row.id,
+            "incident_record_id": row.incident_record_id,
+            "status": row.status,
+            "attempts": row.attempts,
+            "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+            "created_at": row.created_at.isoformat(),
+            "last_error": row.last_error,
+        }
+        for row in rows
+    ]
 
 
 @router.post("/{portal}/records/{record_type}", status_code=201)
