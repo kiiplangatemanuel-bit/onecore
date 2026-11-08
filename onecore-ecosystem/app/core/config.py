@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600)
     database_url: str = "sqlite:///./onecore.db"
     webhook_worker_database_url: str = ""
+    status_alert_worker_database_url: str = ""
     # Supabase-managed PostgreSQL is the production system of record. Keep DATABASE_URL
     # for local development and legacy deployments; SUPABASE_DB_URL takes precedence.
     supabase_db_url: str = ""
