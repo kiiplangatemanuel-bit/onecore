@@ -9,7 +9,8 @@ from app.core import pos_completion_models  # noqa: F401 - register POS completi
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 config = context.config
-database_url = str(normalized_database_url(settings.database_connection_url))\nconfig.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+database_url = str(normalized_database_url(settings.database_connection_url))
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
