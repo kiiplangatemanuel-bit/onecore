@@ -62,6 +62,21 @@ def set_provider_callback_token_context(db: Session, token_hash: str) -> None:
         )
 
 
+def set_crm_delivery_callback_context(db: Session) -> None:
+    """Authorize the CRM delivery callback only after its shared secret is verified."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.crm_delivery_callback_authenticated', 'true', true)"))
+
+
+def set_crm_unsubscribe_token_context(db: Session, token_hash: str) -> None:
+    """Allow a public unsubscribe link to resolve only its token-bound delivery row."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.crm_unsubscribe_token_hash', :token_hash, true)"),
+            {"token_hash": token_hash},
+        )
+
+
 def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired credentials",
                           headers={"WWW-Authenticate": "Bearer"})
