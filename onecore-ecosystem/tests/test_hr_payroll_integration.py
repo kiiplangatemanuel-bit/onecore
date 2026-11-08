@@ -73,7 +73,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
                 "branch_id": branch_id, "employee_number": "PAY-001",
                 "first_name": "Amina", "last_name": "Test",
                 "hire_date": "2026-11-01", "base_salary": "20000.00",
-                "currency": "KES", "pension_contribution": "1000.00",\n                "overtime_multiplier": "1.50",
+                "currency": "KES", "pension_contribution": "1000.00",
+                "overtime_multiplier": "1.50",
                 "recurring_allowances": {"transport": "1000.00"},
                 "recurring_benefits": {"housing": "500.00"},
             })
