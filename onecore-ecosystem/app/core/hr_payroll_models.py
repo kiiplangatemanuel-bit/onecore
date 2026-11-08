@@ -60,6 +60,33 @@ class HRLeaveRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class HRAttendanceRecord(Base):
+    """Daily attendance submitted for independent supervisor approval."""
+    __tablename__ = "hr_attendance_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    work_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    clock_in: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    clock_out: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    break_minutes: Mapped[int] = mapped_column(default=0)
+    scheduled_minutes: Mapped[int] = mapped_column(default=480)
+    worked_minutes: Mapped[int] = mapped_column()
+    overtime_minutes: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(String(24), default="pending_approval")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("uq_hr_attendance_org_employee_date", "organization_id", "employee_id", "work_date", unique=True),
+        Index("uq_hr_attendance_org_idempotency", "organization_id", "idempotency_key", unique=True),
+    )
+
+
 class PayrollRuleSet(Base):
     __tablename__ = "payroll_rule_sets"
     id: Mapped[int] = mapped_column(primary_key=True)
