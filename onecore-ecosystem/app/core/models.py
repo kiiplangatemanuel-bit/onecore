@@ -1748,3 +1748,7 @@ class DeveloperWebhookDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     __table_args__ = (Index("uq_developer_webhook_endpoint_event", "endpoint_id", "event_id", unique=True),)
+
+
+# Re-export the Status outbox model for existing model import conventions.
+from app.core.models_status_alerts import StatusAlertDelivery  # noqa: E402,F401
