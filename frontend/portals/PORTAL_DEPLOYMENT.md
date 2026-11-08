@@ -31,7 +31,7 @@ All nine public applications use the shared portal shell. Public sections render
 
 The shared sign-in redirect uses a backend-issued, single-use authorization code with PKCE (S256), a 90-second expiry, an exact redirect-origin allowlist, and state verification in the originating portal. The bearer token is exchanged only at the original portal and is never placed in the redirect URL. The browser stores the token in per-origin session storage. This is the OneCore API identity system; it is not Supabase Auth and does not create a shared Supabase browser session.
 
-The public/authenticated layout is implemented, but the following domain-specific private workflows are not yet delivered by this change: Status alert subscriptions and tenant-specific incidents; developer application/API-key/webhook/sandbox lifecycle; private organization documentation; community posting/groups; confidential trust case submission and case tracking; event registration and attendance; careers applicant profiles/applications; partner leads/referrals/agreements. These must not be presented as live until their backend APIs, database models, tenant/role authorization, migrations and tests are implemented. Support attachments are also not enabled by the current support API.
+The authenticated portal workflow API now persists typed records for Status alert preferences, developer application/webhook/sandbox configuration, organization guides, community posts/comments/groups/profiles, confidential Trust reports, event registrations/bookings/attendance, applicant profiles/applications, and partner profiles/referrals/leads/agreements/resources. Organization records are filtered by active membership and `organization` visibility; private records and all Trust/Careers records are owner-only. Platform administrators can publish allowlisted public content through a protected API. This is a workflow-record foundation, not the final integration layer: developer API key issuance/authentication, webhook delivery/retries/signature verification, outbound alert dispatch, event payment processing, applicant email automation, partner agreement e-signature, moderation/approval queues and public-content frontend CMS controls remain outstanding. Support attachments are also not enabled by the current support API.
 
 ## Supabase and backend
 
@@ -40,3 +40,14 @@ All portal data operations must go through the shared API and the configured Sup
 ## Deployment validation
 
 For each portal, build from its own directory, confirm the SPA fallback works on deep links, verify API CORS and health, test public browsing without a session, test sign-in and sign-out, and test that protected API operations reject anonymous or unauthorized users. The portal deployments remain independent; DNS and hosting project creation are owner-operated steps and are not performed by this repository change.
+
+
+## Authenticated portal workflow API (migration 0052)
+
+Apply `alembic upgrade head` to create `portal_workflow_records`. The shared API exposes:
+- `GET /api/v1/portals/{portal}/public/{record_type}`: allowlisted, global, public and published content only; no organization records are returned.
+- `GET /api/v1/portals/{portal}/records?record_type=...&organization_id=...: authenticated records; organization records require an active membership and `visibility=organization`, while personal/private records are owner-scoped.
+- `POST /api/v1/portals/{portal}/records/{record_type}` and `PATCH /api/v1/portals/{portal}/records/{id}`: validated record creation and limited lifecycle changes with role checks and audit events.
+- `POST /api/v1/portals/admin/{portal}/public/{record_type}`: platform-admin-only publication for the explicit public content allowlist.
+
+The frontend `PortalWorkflowWorkspace` connects the authenticated views to these APIs. The API never accepts a caller-supplied owner ID, does not permit personal Trust/Careers records to be attached to a tenant, and does not store developer secrets in JSON records. This workflow-record table is protected by application-layer authorization; it is not a substitute for PostgreSQL RLS. Do not expose direct browser database access or Supabase service-role credentials. Add database RLS with a verified per-request tenant identity context before enabling any direct Supabase client access to these tables.
