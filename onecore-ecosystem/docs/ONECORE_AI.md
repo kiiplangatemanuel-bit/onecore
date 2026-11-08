@@ -5,7 +5,8 @@ All routes require a bearer token and an active organization context through X-O
 - GET /api/v1/ai/status — provider configuration and capability availability; no secrets are returned.
 - GET /api/v1/ai/sessions — recent conversations owned by the signed-in user.
 - GET /api/v1/ai/sessions/{id} — messages for an owned conversation.
-- POST /api/v1/ai/chat — prompt, optional session_id, language, branch_id and task.\n- POST /api/v1/ai/analyze-file — bounded PDF, XLSX, CSV, TXT and Markdown extraction, then AI analysis.
+- POST /api/v1/ai/chat — prompt, optional session_id, language, branch_id and task.
+- POST /api/v1/ai/analyze-file — bounded PDF, XLSX, CSV, TXT and Markdown extraction, then AI analysis.
 - GET /api/v1/ai/usage — token counters for the signed-in user.
 - DELETE /api/v1/ai/sessions/{id} — owner-only conversation and message deletion.
 
