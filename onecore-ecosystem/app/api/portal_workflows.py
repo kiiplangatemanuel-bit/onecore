@@ -39,25 +39,7 @@ PUBLIC_TYPES = {
     "careers": {"vacancy", "company_information"},
     "partners": {"opportunity", "programme", "public_resource"},
 }
-SENSITIVE_TYPES = {"security_report", "security_case", "authorized_document", "agreement"}
-ROLE_GATED_TYPES = {
-    "application": {"org_admin", "developer_admin", "developer_manager", "developer"},
-    "webhook": {"org_admin", "developer_admin", "developer_manager", "developer"},
-    "sandbox": {"org_admin", "developer_admin", "developer_manager", "developer"},
-    "usage_access": {"org_admin", "developer_admin", "developer_manager", "developer"},
-    "organization_service": {"org_admin", "branch_admin", "manager"},
-    "alert_subscription": {"org_admin", "manager"},
-    "partner_profile": {"org_admin", "partner_admin", "partner_manager"},
-    "referral": {"org_admin", "partner_admin", "partner_manager"},
-    "lead": {"org_admin", "partner_admin", "partner_manager"},
-    "agreement": {"org_admin", "partner_admin"},
-    "partner_resource": {"org_admin", "partner_admin", "partner_manager"},
-    "attendee_material": {"org_admin", "event_manager"},
-    "attendance": {"org_admin", "event_manager"},
-    "security_report": {"org_admin", "security_admin", "compliance_officer"},
-    "security_case": {"org_admin", "security_admin", "compliance_officer"},
-    "authorized_document": {"org_admin", "security_admin", "compliance_officer"},
-}
+SENSITIVE_TYPES = {"security_report", "security_case", "authorized_document"}
 MAX_PAGE_SIZE = 100
 
 
@@ -92,24 +74,16 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 
 
 def _visible_resource(db: Session, user: User, resource: PortalResource) -> Membership | None:
-    # Re-check membership even for the creator: revocation must revoke tenant access.
-    if resource.organization_id is not None:
-        membership = _membership(db, user, resource.organization_id)
-        if not _role_allowed(resource, user, membership):
-            raise HTTPException(404, "Portal resource not found")
-        return membership
-    if resource.owner_user_id != user.id:
+    if resource.owner_user_id == user.id:
+        return None
+    if resource.organization_id is None:
         raise HTTPException(404, "Portal resource not found")
-    return None
-
-
-def _role_allowed(row: PortalResource, user: User, membership: Membership | None) -> bool:
-    if row.owner_user_id == user.id:
-        return True
-    if row.organization_id is None:
-        return False
-    required = ROLE_GATED_TYPES.get(row.resource_type)
-    return not required or bool(membership and membership.role in required)
+    membership = _membership(db, user, resource.organization_id)
+    if resource.resource_type in SENSITIVE_TYPES and membership.role not in {
+        "org_admin", "security_admin", "compliance_officer"
+    }:
+        raise HTTPException(404, "Portal resource not found")
+    return membership
 
 
 def _out(row: PortalResource) -> dict:
@@ -181,9 +155,9 @@ def list_private_resources(
     rows = query.order_by(PortalResource.updated_at.desc()).limit(limit).all()
     result = []
     for row in rows:
-        if row.organization_id is not None:
+        if row.resource_type in SENSITIVE_TYPES and row.organization_id is not None:
             membership = next((m for m in memberships if m.organization_id == row.organization_id), None)
-            if not _role_allowed(row, user, membership):
+            if row.owner_user_id != user.id and (not membership or membership.role not in {"org_admin", "security_admin", "compliance_officer"}):
                 continue
         result.append(_out(row))
     return result

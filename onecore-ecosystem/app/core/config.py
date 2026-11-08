@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # Supabase-managed PostgreSQL is the production system of record. Keep DATABASE_URL
     # for local development and legacy deployments; SUPABASE_DB_URL takes precedence.
     supabase_db_url: str = ""
+    # Supabase Auth token verification. Prefer project JWKS; the JWT secret is
+    # supported for legacy HS256 projects and must never be exposed to the browser.
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
     database_pool_size: int = Field(default=5, ge=1, le=30)
     database_max_overflow: int = Field(default=5, ge=0, le=50)
     database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
