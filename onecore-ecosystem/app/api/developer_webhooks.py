@@ -268,6 +268,50 @@ def list_webhook_deliveries(
         } for row in rows],
     }
 
+
+@router.post("/webhooks/{workflow_record_id}/test", status_code=202)
+def send_webhook_test(
+    workflow_record_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(PortalWorkflowRecord).filter_by(
+        id=workflow_record_id, portal_key="developers", record_type="webhook"
+    ).first()
+    if not record:
+        raise HTTPException(404, "Webhook not found")
+    _active_developer(db, user, record.organization_id)
+    endpoint = db.query(DeveloperWebhookEndpoint).filter_by(
+        workflow_record_id=record.id, organization_id=record.organization_id, active=True
+    ).first()
+    if not endpoint:
+        raise HTTPException(409, "Activate this webhook before sending a test")
+    if not endpoint.events:
+        raise HTTPException(422, "Webhook has no subscribed event types")
+    recent_test = db.query(DeveloperWebhookDelivery).filter(
+        DeveloperWebhookDelivery.endpoint_id == endpoint.id,
+        DeveloperWebhookDelivery.payload["data"]["test"].as_boolean().is_(True),
+        DeveloperWebhookDelivery.created_at >= _now() - timedelta(minutes=1),
+    ).first()
+    if recent_test:
+        raise HTTPException(429, "A test event was already queued in the last minute")
+    event_id = "evt_test_" + secrets.token_urlsafe(18)
+    event_type = endpoint.events[0]
+    delivery = DeveloperWebhookDelivery(
+        endpoint_id=endpoint.id, organization_id=endpoint.organization_id,
+        event_id=event_id, event_type=event_type,
+        payload={
+            "id": event_id, "type": event_type, "created_at": _now().isoformat(),
+            "data": {"test": True, "source": "OneCore Developers portal"},
+        },
+        status="pending", attempts=0, next_attempt_at=_now(),
+    )
+    db.add(delivery)
+    db.commit()
+    return {"event_id": event_id, "queued_deliveries": 1}
+
+
+
 def _deliver_one(db: Session, delivery: DeveloperWebhookDelivery) -> dict:
     endpoint = db.query(DeveloperWebhookEndpoint).filter_by(
         id=delivery.endpoint_id, active=True
