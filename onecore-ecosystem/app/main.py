@@ -38,6 +38,7 @@ from app.api.supabase_auth import router as supabase_auth_router
 from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
+from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
