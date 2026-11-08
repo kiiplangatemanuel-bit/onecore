@@ -3,7 +3,7 @@
 Payroll calculation details are persisted as immutable JSON snapshots on approval.
 Statutory rules are tenant-owned and cannot be activated without independent review.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -214,7 +214,7 @@ class PayrollAdjustment(Base):
     employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
     adjustment_type: Mapped[str] = mapped_column(String(16))
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
-    effective_date: Mapped[datetime] = mapped_column(Date)
+    effective_date: Mapped[date] = mapped_column(Date)
     description: Mapped[str] = mapped_column(String(160))
     reason: Mapped[str] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(16), default="pending")
