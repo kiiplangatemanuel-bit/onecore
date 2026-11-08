@@ -12,6 +12,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(180), default="")
+    phone: Mapped[str] = mapped_column(String(32), default="")
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     platform_role: Mapped[str] = mapped_column(String(40), default="customer")
@@ -1539,3 +1540,43 @@ class HealthcareEvent(Base):
         Index("ix_health_event_org_idempotency", "organization_id", "idempotency_key", unique=True),
         Index("ix_health_event_patient_time", "organization_id", "patient_id", "occurred_at"),
     )
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(180))
+    category: Mapped[str] = mapped_column(String(40), default="general")
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(320), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(32), default="")
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    assigned_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    guest_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (Index("uq_support_ticket_guest_token_hash", "guest_token_hash", unique=True),)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(180))
+    body: Mapped[str] = mapped_column(Text)
+    is_staff: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("ix_support_message_ticket_created", "ticket_id", "created_at"),)
+
+class EmailVerification(Base):
+    __tablename__ = "email_verifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -29,6 +29,8 @@ from app.api.procurement_workflows import router as procurement_workflows_router
 from app.api.school_advanced import router as school_advanced_router
 from app.api.ai_routes import router as ai_router
 from app.api.hr_payroll import router as hr_payroll_router
+from app.api.support import router as support_router
+from app.api.auth_workflows import router as auth_workflows_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
@@ -54,11 +56,13 @@ app.add_middleware(CORSMiddleware,
                    allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
                    allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token"])
+                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token", "X-Support-Access-Token"])
 app.state.login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=settings.login_rate_limit_window_seconds,
 )
+app.state.public_write_rate_limiter = LoginRateLimiter(max_attempts=5, window_seconds=300)
+
 app.include_router(router)
 app.include_router(inventory_completion_router)
 app.include_router(pos_completion_router)
@@ -78,6 +82,8 @@ app.include_router(procurement_workflows_router)
 app.include_router(school_advanced_router)
 app.include_router(ai_router)
 app.include_router(hr_payroll_router)
+app.include_router(support_router)
+app.include_router(auth_workflows_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
@@ -156,9 +162,17 @@ async def platform_security_middleware(request, call_next):
 
     client_ip = request.client.host if request.client else "unknown"
     login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
+    public_write_request = request.method == "POST" and request.url.path in {
+        "/api/v1/auth/register-organization", "/api/v1/support/public/tickets"
+    }
     response = None
     if settings.force_https and request.url.scheme != "https":
         response = JSONResponse({"detail": "HTTPS is required", "request_id": request_id}, status_code=400)
+    elif public_write_request and not request.app.state.public_write_rate_limiter.allow(client_ip):
+        response = JSONResponse(
+            {"detail": "Too many public submissions. Try again later.", "request_id": request_id},
+            status_code=429, headers={"Retry-After": "300"},
+        )
     elif login_request and not request.app.state.login_rate_limiter.allow(client_ip):
         response = JSONResponse(
             {"detail": "Too many login attempts. Try again later.", "request_id": request_id},
