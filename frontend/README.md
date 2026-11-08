@@ -41,3 +41,8 @@ Configure the backend `CORS_ORIGINS` to the exact Vercel production origin (and 
 ## UI integration status
 
 The shell includes authentication, organization selection/creation, module search/navigation, service status, and workspaces for business operations, industry solutions, platform administration, integrations, reporting and settings. Existing FastAPI-served module interfaces are linked directly to the backend so the current POS, Accounting, CRM, Inventory, Procurement, School and Healthcare pages remain available. Other module entries are clearly identified as workspace shells until their dedicated screens and API contracts are implemented. No fabricated business metrics are presented as live data.
+
+
+## Production deployment
+
+Set the Vercel project root directory to `frontend` and configure `VITE_API_BASE_URL` to the public HTTPS backend URL. See `DEPLOYMENT.md` at the repository root for the Render + Supabase backend and Vercel frontend release procedure.

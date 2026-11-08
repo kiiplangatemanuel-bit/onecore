@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: onecore-api
+    runtime: docker
+    dockerContext: ./onecore-ecosystem
+    dockerfilePath: ./onecore-ecosystem/Dockerfile
+    healthCheckPath: /ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: FORCE_HTTPS
+        value: "true"
+      - key: TRUSTED_HOSTS
+        value: onecore-api.onrender.com
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
