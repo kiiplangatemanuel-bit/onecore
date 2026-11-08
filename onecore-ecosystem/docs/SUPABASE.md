@@ -6,7 +6,7 @@ Supabase is the managed PostgreSQL database for OneCore. FastAPI uses SQLAlchemy
 
 1. In Supabase **Project Settings → Database → Connection string**, copy the URI for the chosen connection mode.
 2. Prefer the Session pooler for a long-running Render API service when direct IPv6 connectivity is unavailable. Use the exact hostname, port and username Supabase provides. Transaction pooler (normally port 6543) is also supported.
-3. Set the backend-only Render secret `DATABASE_URL` to the copied URI and include `sslmode=require`.
+3. Set the backend-only Render secret `DATABASE_URL` to the copied URI and include `sslmode=require`. For Docker Compose deployments, set `ONECORE_DATABASE_URL` to the same URI because Compose explicitly maps that override into both the API and scheduler containers; if unset, Compose now falls back to `DATABASE_URL`.
 4. Set `APP_ENV=production`, `DEBUG=false`, a unique `SECRET_KEY` of at least 32 random characters, explicit HTTPS `CORS_ORIGINS`, explicit `TRUSTED_HOSTS` and `FORCE_HTTPS=true`.
 5. Run Alembic migrations in a release step before routing production traffic. Do not use `Base.metadata.create_all` as a production migration strategy.
 6. Never put the database URI in Vite variables, frontend source, GitHub, logs or screenshots.
