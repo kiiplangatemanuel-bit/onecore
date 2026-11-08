@@ -217,6 +217,7 @@ def upgrade():
                           AND m.is_active = true
                     )
                 )
+                OR {table}.organization_id = {organization_id}
                 OR public.onecore_is_platform_admin()
             )
         """)
