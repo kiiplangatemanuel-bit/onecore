@@ -141,6 +141,11 @@ def _create_ticket(payload: SupportTicketCreateIn, db: Session,
     ))
     _audit(db, user.id if user else None, ticket.organization_id, "support.ticket.created", ticket)
     db.commit()
+    # The guest transaction-local context is cleared by COMMIT. Reapply the
+    # already-hashed credential before refreshing the new row under PostgreSQL RLS.
+    if guest_token_hash and db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.support_guest_token_hash', :token_hash, true)"),
+                   {"token_hash": guest_token_hash})
     db.refresh(ticket)
     return ticket
 
