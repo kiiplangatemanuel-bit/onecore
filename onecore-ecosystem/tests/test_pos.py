@@ -44,6 +44,9 @@ def test_pos_contract_requires_transaction_id_and_positive_quantity():
 
 
 def test_pos_models_and_routes_are_registered():
+    assert "loyalty_points_redeemed" in POSSale.__table__.columns
+    assert "loyalty_discount_amount" in POSSale.__table__.columns
+    assert "loyalty_discount_amount" in POSSaleLine.__table__.columns
     assert POSShift.__tablename__ == "pos_shifts"
     assert POSSale.__tablename__ == "pos_sales"
     assert POSSaleLine.__tablename__ == "pos_sale_lines"
@@ -122,3 +125,83 @@ def test_offline_sale_hash_includes_customer_membership():
         branch_id=base.branch_id, customer_id=77, lines=base.lines, payments=base.payments,
     )
     assert canonical_request_hash(base) != canonical_request_hash(linked)
+
+
+
+def test_loyalty_redemption_changes_offline_hash_but_zero_preserves_legacy_hash():
+    base = sample_payload()
+    zero = POSSaleSyncIn(
+        client_transaction_id=base.client_transaction_id, shift_id=base.shift_id,
+        branch_id=base.branch_id, currency=base.currency, lines=base.lines,
+        payments=base.payments, loyalty_points_redeemed=0,
+    )
+    redeemed = POSSaleSyncIn(
+        client_transaction_id=base.client_transaction_id, shift_id=base.shift_id,
+        branch_id=base.branch_id, currency=base.currency, lines=base.lines,
+        payments=base.payments, loyalty_points_redeemed=100,
+    )
+    assert canonical_request_hash(base) == canonical_request_hash(zero)
+    assert canonical_request_hash(base) != canonical_request_hash(redeemed)
+    with pytest.raises(ValidationError):
+        POSSaleSyncIn(
+            client_transaction_id=base.client_transaction_id, shift_id=base.shift_id,
+            branch_id=base.branch_id, lines=base.lines, payments=base.payments,
+            loyalty_points_redeemed=-1,
+        )
+
+
+def test_loyalty_redemption_allocates_discount_and_recalculates_mixed_tax_lines():
+    from app.services.pos import apply_loyalty_redemption
+
+    prepared = [
+        (None, Decimal("100.00"), Decimal("100.00"), Decimal("0.00"),
+         Decimal("16.00"), Decimal("16.00"), Decimal("116.00"), Decimal("0.00")),
+        (None, Decimal("100.00"), Decimal("100.00"), Decimal("0.00"),
+         Decimal("0.00"), Decimal("0.00"), Decimal("100.00"), Decimal("0.00")),
+    ]
+    lines, discount, tax, total = apply_loyalty_redemption(
+        prepared, 100, 100, Decimal("50.00")
+    )
+    assert discount == Decimal("1.00")
+    assert sum((line[7] for line in lines), Decimal("0.00")) == Decimal("1.00")
+    assert tax == Decimal("15.92")
+    assert total == Decimal("214.92")
+    assert all(line[6] > 0 for line in lines)
+
+
+def test_loyalty_redemption_rejects_points_above_sale_cap_and_subcent_values():
+    from app.services.pos import apply_loyalty_redemption
+
+    prepared = [(None, Decimal("10.00"), Decimal("10.00"), Decimal("0.00"),
+                 Decimal("0.00"), Decimal("0.00"), Decimal("10.00"), Decimal("0.00"))]
+    with pytest.raises(HTTPException) as cap:
+        apply_loyalty_redemption(prepared, 100, 100, Decimal("10.00"))
+    assert cap.value.status_code == 422
+    with pytest.raises(HTTPException) as subcent:
+        apply_loyalty_redemption(prepared, 1, 1000, Decimal("50.00"))
+    assert subcent.value.status_code == 422
+
+
+
+def test_loyalty_points_restore_and_earned_points_reverse_proportionally_on_returns():
+    from app.services.pos import calculate_loyalty_return_adjustments
+
+    restore, reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("100.00"), sale_total=Decimal("200.00"),
+    )
+    assert (restore, reverse) == (50, 1)
+
+    retry_restore, retry_reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("100.00"), sale_total=Decimal("200.00"),
+        already_restored=50, already_reversed=1,
+    )
+    assert (retry_restore, retry_reverse) == (0, 0)
+
+    full_restore, full_reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("200.00"), sale_total=Decimal("200.00"),
+        already_restored=50, already_reversed=1,
+    )
+    assert (full_restore, full_reverse) == (50, 1)
