@@ -80,6 +80,39 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert employee.status_code == 201, employee.text
             employee_id = employee.json()["id"]
 
+            attendance = client.post("/api/v1/hr/attendance", json={
+                "employee_id": employee_id, "work_date": "2026-11-08",
+                "clock_in": "2026-11-08T08:00:00+03:00",
+                "clock_out": "2026-11-08T18:00:00+03:00",
+                "break_minutes": 60, "scheduled_minutes": 480,
+                "idempotency_key": "attendance-pay-001-20261108",
+            })
+            assert attendance.status_code == 201, attendance.text
+            attendance_id = attendance.json()["id"]
+            assert attendance.json()["worked_minutes"] == 540
+            assert attendance.json()["overtime_minutes"] == 60
+            duplicate_attendance = client.post("/api/v1/hr/attendance", json={
+                "employee_id": employee_id, "work_date": "2026-11-08",
+                "clock_in": "2026-11-08T08:00:00+03:00",
+                "clock_out": "2026-11-08T18:00:00+03:00",
+                "break_minutes": 60, "scheduled_minutes": 480,
+                "idempotency_key": "attendance-pay-001-20261108",
+            })
+            assert duplicate_attendance.status_code == 201
+            actor["user"], actor["role"] = users[1], "hr_manager"
+            attendance_approved = client.post(
+                f"/api/v1/hr/attendance/{attendance_id}/decision",
+                json={"decision": "approved", "note": "Timesheet checked"},
+            )
+            assert attendance_approved.status_code == 200, attendance_approved.text
+            assert attendance_approved.json()["status"] == "approved"
+            actor["user"], actor["role"] = users[0], "hr_admin"
+            self_approval = client.post(
+                f"/api/v1/hr/attendance/{attendance_id}/decision",
+                json={"decision": "approved"},
+            )
+            assert self_approval.status_code == 409
+
             actor["role"] = "payroll_manager"
             rule = client.post("/api/v1/payroll/rule-sets", json={
                 "effective_from": "2026-01-01", "currency": "KES",
