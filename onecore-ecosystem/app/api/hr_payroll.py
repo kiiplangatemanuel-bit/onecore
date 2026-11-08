@@ -4,6 +4,7 @@ Statutory rates are never bundled as defaults. A rule set must cite current offi
 KRA, NSSF and SHA source evidence and be approved by a different organization member.
 """
 from calendar import monthrange
+import uuid
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse
@@ -16,10 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip
-from app.core.models import AuditEvent, Branch, Organization, User
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.models import AuditEvent, Branch, Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingFiscalPeriod
 from app.core.security import current_user
 from app.core.tenancy import active_membership
+from app.services.accounting import validate_journal_lines
 
 router = APIRouter(prefix="/api/v1", tags=["HR and Payroll"])
 CENT = Decimal("0.01")
@@ -65,6 +67,7 @@ def require_payroll_action(membership, action):
         "prepare":{"org_admin","payroll_manager"},
         "approve":{"org_admin","payroll_approver"},
         "pay":{"org_admin","payroll_payment"},
+        "accounting":{"org_admin","payroll_accounting"},
     }
     if (membership.role or "").lower() not in allowed[action]:
         raise HTTPException(403,"Your role is not authorized for this payroll action")
@@ -621,3 +624,214 @@ def list_payslips(run_id:int,membership=Depends(active_membership),db:Session=De
         "pension_employee":str(x.pension_employee),"total_deductions":str(x.total_deductions),
         "net_pay":str(x.net_pay),"nssf_employer":str(x.nssf_employer),
         "housing_levy_employer":str(x.housing_levy_employer),"snapshot":x.snapshot} for x in rows]
+
+
+
+class PayrollAccountingMappingIn(BaseModel):
+    salary_expense_account_id: int = Field(gt=0)
+    employer_contribution_expense_account_id: int = Field(gt=0)
+    net_payable_account_id: int = Field(gt=0)
+    paye_payable_account_id: int = Field(gt=0)
+    nssf_payable_account_id: int = Field(gt=0)
+    shif_payable_account_id: int = Field(gt=0)
+    housing_levy_payable_account_id: int = Field(gt=0)
+    pension_payable_account_id: int = Field(gt=0)
+
+
+class PayrollJournalReversalIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
+def _payroll_mapping_out(row):
+    return {name: getattr(row, name) for name in (
+        "id", "salary_expense_account_id", "employer_contribution_expense_account_id",
+        "net_payable_account_id", "paye_payable_account_id", "nssf_payable_account_id",
+        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id"
+    )}
+
+
+def _validate_payroll_mapping(db, organization_id, payload):
+    expected = {
+        "salary_expense_account_id": "expense",
+        "employer_contribution_expense_account_id": "expense",
+        "net_payable_account_id": "liability",
+        "paye_payable_account_id": "liability",
+        "nssf_payable_account_id": "liability",
+        "shif_payable_account_id": "liability",
+        "housing_levy_payable_account_id": "liability",
+        "pension_payable_account_id": "liability",
+    }
+    ids = {getattr(payload, name) for name in expected}
+    accounts = db.query(AccountingAccount).filter(
+        AccountingAccount.organization_id == organization_id,
+        AccountingAccount.is_active == True,
+        AccountingAccount.id.in_(ids)
+    ).all()
+    by_id = {x.id: x for x in accounts}
+    if set(by_id) != ids:
+        raise HTTPException(404, "One or more mapped accounting accounts were not found in this organization")
+    for field, account_type in expected.items():
+        if by_id[getattr(payload, field)].account_type != account_type:
+            raise HTTPException(422, f"{field} must map to an active {account_type} account")
+    return by_id
+
+
+@router.get("/payroll/accounting-mapping")
+def get_payroll_accounting_mapping(membership=Depends(active_membership), db: Session=Depends(get_db)):
+    require_permission(membership, "read")
+    require_hr_read(membership)
+    row=db.query(PayrollAccountingMapping).filter_by(organization_id=membership.organization_id).first()
+    return _payroll_mapping_out(row) if row else None
+
+
+@router.put("/payroll/accounting-mapping")
+def put_payroll_accounting_mapping(payload: PayrollAccountingMappingIn,
+                                   membership=Depends(active_membership),
+                                   user: User=Depends(current_user), db: Session=Depends(get_db)):
+    require_payroll_action(membership, "accounting")
+    _validate_payroll_mapping(db, membership.organization_id, payload)
+    row=db.query(PayrollAccountingMapping).filter_by(organization_id=membership.organization_id).with_for_update().first()
+    values=payload.model_dump()
+    if row:
+        for key,value in values.items(): setattr(row,key,value)
+        row.updated_by=user.id
+    else:
+        row=PayrollAccountingMapping(organization_id=membership.organization_id,**values,
+                                     created_by=user.id,updated_by=user.id)
+        db.add(row)
+    audit(db,user,membership.organization_id,"payroll.accounting_mapping.saved","payroll_accounting_mapping",row.id if row.id else "new")
+    db.commit(); db.refresh(row)
+    return _payroll_mapping_out(row)
+
+
+def _assert_accounting_date_open(db, organization_id, entry_date):
+    start=datetime.combine(entry_date,time.min,tzinfo=timezone.utc)
+    end=datetime.combine(entry_date,time.max,tzinfo=timezone.utc)
+    closed=db.query(AccountingFiscalPeriod).filter(
+        AccountingFiscalPeriod.organization_id==organization_id,
+        AccountingFiscalPeriod.status=="closed",
+        AccountingFiscalPeriod.start_date<=end,
+        AccountingFiscalPeriod.end_date>=start
+    ).first()
+    if closed:
+        raise HTTPException(409,"The payroll accounting date falls inside a closed fiscal period")
+
+
+def _append_journal_line(lines, account_id, description, debit=ZERO, credit=ZERO, branch_id=None):
+    debit,credit=rounded(debit),rounded(credit)
+    if debit==ZERO and credit==ZERO:
+        return
+    lines.append({"account_id":account_id,"description":description,
+                  "debit":debit,"credit":credit,"branch_id":branch_id})
+
+
+@router.post("/payroll/runs/{run_id}/post-to-accounting", status_code=201)
+def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
+                               user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_payroll_action(membership,"accounting")
+    run=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
+    if not run or not can_access_branch(membership,run.branch_id):
+        raise HTTPException(404,"Payroll run not found")
+    if run.status!="approved":
+        raise HTTPException(409,"Only an approved, unpaid payroll run can be posted to accounting")
+    existing=db.query(PayrollAccountingLink).filter_by(
+        organization_id=membership.organization_id,payroll_run_id=run.id).first()
+    if existing:
+        if existing.reversal_journal_id:
+            raise HTTPException(409,"The payroll journal was reversed and cannot be posted again")
+        return {"payroll_run_id":run.id,"journal_id":existing.journal_id,"status":"already_posted"}
+    mapping=db.query(PayrollAccountingMapping).filter_by(organization_id=membership.organization_id).first()
+    if not mapping:
+        raise HTTPException(409,"Configure payroll accounting mappings before posting payroll")
+    _validate_payroll_mapping(db,membership.organization_id,mapping)
+    payslips=db.query(PayrollPayslip).filter_by(
+        organization_id=membership.organization_id,payroll_run_id=run.id).all()
+    if len(payslips)!=run.employee_count or not payslips:
+        raise HTTPException(409,"Payroll payslip snapshots are incomplete")
+    _assert_accounting_date_open(db,membership.organization_id,run.period_end.date())
+    nssf_employee=sum((dec(x.nssf_employee) for x in payslips),ZERO)
+    nssf_employer=sum((dec(x.nssf_employer) for x in payslips),ZERO)
+    paye=sum((dec(x.paye) for x in payslips),ZERO)
+    shif=sum((dec(x.shif_employee) for x in payslips),ZERO)
+    housing_employee=sum((dec(x.housing_levy_employee) for x in payslips),ZERO)
+    housing_employer=sum((dec(x.housing_levy_employer) for x in payslips),ZERO)
+    pension=sum((dec(x.pension_employee) for x in payslips),ZERO)
+    employer_contributions=rounded(nssf_employer+housing_employer)
+    lines=[]
+    _append_journal_line(lines,mapping.salary_expense_account_id,"Payroll gross earnings",debit=run.gross_total,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.employer_contribution_expense_account_id,"Employer statutory contributions",debit=employer_contributions,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.net_payable_account_id,"Net payroll payable",credit=run.net_total,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.paye_payable_account_id,"PAYE payable",credit=paye,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.nssf_payable_account_id,"Employee and employer NSSF payable",credit=nssf_employee+nssf_employer,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.shif_payable_account_id,"SHIF payable",credit=shif,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.housing_levy_payable_account_id,"Employee and employer Housing Levy payable",credit=housing_employee+housing_employer,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.pension_payable_account_id,"Employee pension payable",credit=pension,branch_id=run.branch_id)
+    validate_journal_lines([type("Line",(),x)() for x in lines])
+    journal=AccountingJournal(organization_id=membership.organization_id,branch_id=run.branch_id,
+        journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=f"PAYROLL-RUN-{run.id}",
+        memo=f"Payroll accrual for {run.period_start.date().isoformat()} to {run.period_end.date().isoformat()}",
+        status="posted",entry_date=datetime.combine(run.period_end.date(),time.min,tzinfo=timezone.utc),
+        created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+    db.add(journal); db.flush()
+    for line in lines:
+        db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=line["account_id"],branch_id=line["branch_id"],description=line["description"],
+            debit=line["debit"],credit=line["credit"]))
+    link=PayrollAccountingLink(organization_id=membership.organization_id,payroll_run_id=run.id,
+        journal_id=journal.id,created_by=user.id)
+    db.add(link)
+    audit(db,user,membership.organization_id,"payroll.run.posted_to_accounting","payroll_run",run.id,
+          f"Accounting journal {journal.journal_number}")
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409,"Payroll accounting journal was posted concurrently")
+    return {"payroll_run_id":run.id,"journal_id":journal.id,"journal_number":journal.journal_number,
+            "status":"posted","debits":str(run.gross_total+employer_contributions),
+            "credits":str(run.gross_total+employer_contributions)}
+
+
+@router.post("/payroll/runs/{run_id}/reverse-accounting-journal")
+def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversalIn,
+                                       membership=Depends(active_membership),
+                                       user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_payroll_action(membership,"accounting")
+    run=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
+    if not run or not can_access_branch(membership,run.branch_id):
+        raise HTTPException(404,"Payroll run not found")
+    if run.status!="approved":
+        raise HTTPException(409,"Only approved and unpaid payroll journals can be reversed")
+    link=db.query(PayrollAccountingLink).filter_by(
+        organization_id=membership.organization_id,payroll_run_id=run.id).with_for_update().first()
+    if not link: raise HTTPException(404,"Payroll accounting journal not found")
+    if link.reversal_journal_id: raise HTTPException(409,"Payroll accounting journal has already been reversed")
+    original=db.query(AccountingJournal).filter_by(
+        id=link.journal_id,organization_id=membership.organization_id,status="posted").first()
+    if not original: raise HTTPException(409,"Original posted payroll journal is unavailable")
+    original_lines=db.query(AccountingJournalLine).filter_by(
+        organization_id=membership.organization_id,journal_id=original.id).all()
+    if not original_lines: raise HTTPException(409,"Original payroll journal has no lines")
+    reversal_date=datetime.now(timezone.utc).date()
+    _assert_accounting_date_open(db,membership.organization_id,reversal_date)
+    reversal_lines=[{"account_id":x.account_id,"description":"Reversal: "+x.description,
+                     "debit":dec(x.credit),"credit":dec(x.debit),"branch_id":x.branch_id}
+                    for x in original_lines]
+    validate_journal_lines([type("Line",(),x)() for x in reversal_lines])
+    journal=AccountingJournal(organization_id=membership.organization_id,branch_id=run.branch_id,
+        journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=f"PAYROLL-REV-{run.id}",
+        memo="Reversal of payroll journal for run "+str(run.id)+": "+payload.reason,
+        status="posted",entry_date=datetime.combine(reversal_date,time.min,tzinfo=timezone.utc),
+        created_by=user.id,posted_by=user.id,posted_at=datetime.now(timezone.utc))
+    db.add(journal); db.flush()
+    for line in reversal_lines:
+        db.add(AccountingJournalLine(organization_id=membership.organization_id,journal_id=journal.id,
+            account_id=line["account_id"],branch_id=line["branch_id"],description=line["description"],
+            debit=line["debit"],credit=line["credit"]))
+    link.reversal_journal_id=journal.id; link.reversed_by=user.id
+    link.reversed_at=datetime.now(timezone.utc); link.reversal_reason=payload.reason
+    audit(db,user,membership.organization_id,"payroll.run.accounting_journal_reversed","payroll_run",run.id,
+          f"Reversal journal {journal.journal_number}: {payload.reason}")
+    db.commit()
+    return {"payroll_run_id":run.id,"original_journal_id":original.id,
+            "reversal_journal_id":journal.id,"status":"reversed"}
