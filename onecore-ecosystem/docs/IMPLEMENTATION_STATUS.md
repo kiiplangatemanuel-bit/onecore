@@ -961,9 +961,7 @@ CI evidence is not a production deployment or security certification.
 
 ## Account MFA / TOTP foundation (8 November 2026)
 
-Implemented in PR #102 and rebased onto the latest main branch. The new migration
-is 0053_user_mfa after 0052_portal_workflow_records. CI for the rebased head is
-pending; the earlier pre-rebase head passed run 42473367373.
+Implemented in PR #102 and rebased onto main commit cb6973f9be6ab7b1e2135e4984c943240b608fa2. The migration is 0053_user_mfa after 0052_portal_workflow_records. Rebased-head CI run 42473780009 passed.
 
 - Account-level RFC 6238 TOTP enrollment, confirmation and disablement. TOTP
   seeds are encrypted at rest with a separately configured Fernet key; no
@@ -980,6 +978,8 @@ pending; the earlier pre-rebase head passed run 42473367373.
 - Added account-security UI and a second-factor sign-in step to the main frontend.
 - Added tests and operator guidance in docs/IDENTITY_MFA.md and
   docs/IDENTITY_INVITATIONS.md.
+
+CI run [42473780009](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42473780009) passed dependency audit, migration upgrade and downgrade/re-upgrade, Python compilation, pytest, the main frontend build and all ten independent portal builds.
 
 The key must be supplied through MFA_ENCRYPTION_KEY in the deployment secret
 manager before users can enroll. Key custody/rotation, MFA policy enforcement,
