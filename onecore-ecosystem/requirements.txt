@@ -16,3 +16,4 @@ dnspython>=2.6,<3.0
 cryptography>=50.0.0,<51.0
 pypdf>=6.21.4,<7.0
 openpyxl>=3.1,<4
+boto3>=1.35,<2.0

@@ -16,7 +16,7 @@ Example format only — copy actual values from the Supabase dashboard and never
 SUPABASE_DB_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-host>:5432/postgres?sslmode=require
 ```
 
-The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.
+The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.\n\n## Support file attachments\n\nSupport attachments use private S3-compatible object storage through the backend; the browser receives only short-lived presigned PUT/GET URLs. Configure these API-service secrets when enabling attachments:\n\n- `INTEGRATION_OBJECT_STORAGE_ENABLED=true`\n- `S3_ENDPOINT_URL` — exact S3-compatible endpoint from your storage provider (Supabase Storage S3 endpoint or approved S3 service)\n- `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` — dedicated least-privilege bucket credentials\n- `S3_BUCKET` and `S3_REGION`\n\nThe API accepts PDF, PNG, JPEG, TXT and CSV files up to 10 MiB. Upload URLs expire after five minutes; download URLs expire after two minutes and force attachment download with an octet-stream response type. The bucket must remain private and must not allow anonymous reads. Configure bucket CORS to allow PUT from each exact deployed portal origin and the `Content-Type` request header. Do not put storage credentials in Vercel or browser environment variables. Uploads enter `pending_scan` quarantine and cannot be downloaded until a platform support administrator records an `available` or `rejected` review result. This is a manual release gate, not an antivirus scanner; connect an automated malware scanner and immutable scan evidence before treating file inspection as automated.
 
 ## Docker Compose
 
@@ -29,9 +29,9 @@ Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The b
 ## Release verification
 
 Use a disposable Supabase staging project to verify:
-- Alembic upgrade to head and full downgrade/re-upgrade.
+- Alembic upgrade to head and full downgrade/re-upgrade, including migrations 0054 (Support ticket/message RLS) and 0055 (private Support attachment metadata/RLS).
 - Python compilation, full pytest and Vite production build.
 - PostgreSQL row locking, uniqueness, transaction rollback, idempotency and concurrent goods-receipt/settlement operations.
 - API/worker schema parity, backup/PITR and restore rehearsal.
 
-SQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
+Migration 0052 enables RLS for portal workflow records, migration 0053 adds MFA tables, and migrations 0054–0055 enable and force RLS for Support tickets/messages and Support attachment metadata. The API binds verified OneCore identity and validated guest ticket-token hashes to transaction-local PostgreSQL settings. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. Verify the actual connected role and policies in staging before production rollout.\n\nSQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
