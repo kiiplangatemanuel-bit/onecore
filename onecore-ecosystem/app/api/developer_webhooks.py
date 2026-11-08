@@ -228,8 +228,8 @@ def list_developer_webhooks(
         result.append({
             "workflow_record_id": record.id,
             "name": (record.payload or {}).get("name", "Webhook"),
-            "endpoint_url": (record.payload or {}).get("endpoint_url", ""),
-            "events": (record.payload or {}).get("events", []),
+            "endpoint_url": endpoint.endpoint_url if endpoint else (record.payload or {}).get("endpoint_url", ""),
+            "events": endpoint.events if endpoint else (record.payload or {}).get("events", []),
             "active": bool(endpoint and endpoint.active),
             "deliveries": counts,
         })
