@@ -39,7 +39,7 @@ PUBLIC_TYPES = {
     "status": {"incident", "maintenance"},
     "developers": {"api_guide", "example"},
     "docs": {"guide", "release_note"},
-    "community": {"announcement", "discussion"},
+    "community": {"announcement", "discussion", "post"},
     "trust": {"security_policy", "compliance_disclosure", "advisory"},
     "events": {"event", "webinar", "announcement"},
     "careers": {"vacancy", "company_information"},
@@ -303,6 +303,68 @@ def delete_private_resource(
     db.delete(row)
     db.commit()
     return None
+
+
+@router.post("/{portal}/public", status_code=201)
+def create_public_draft(
+    portal: str, payload: PortalResourceIn,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    portal = _portal(portal)
+    if payload.resource_type not in PUBLIC_TYPES[portal] or payload.organization_id is not None:
+        raise HTTPException(422, "Only allow-listed global public content can be created here")
+    row = PortalResource(
+        portal=portal, resource_type=payload.resource_type, title=payload.title.strip(),
+        summary=payload.summary.strip(), data=payload.data, organization_id=None,
+        owner_user_id=user.id, visibility="private", status="draft",
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, user, row, f"portal.{portal}.{payload.resource_type}.drafted")
+    db.commit()
+    db.refresh(row)
+    return _out(row)
+
+
+@router.patch("/{portal}/public/{resource_id}")
+def update_public_draft(
+    portal: str, resource_id: int, payload: PortalResourceUpdate,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    portal = _portal(portal)
+    row = db.query(PortalResource).filter_by(
+        id=resource_id, portal=portal, organization_id=None,
+    ).first()
+    if not row or row.resource_type not in PUBLIC_TYPES[portal]:
+        raise HTTPException(404, "Public content not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for key, value in changes.items():
+        if value is not None:
+            setattr(row, key, value)
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, user, row, f"portal.{portal}.{row.resource_type}.updated")
+    db.commit()
+    db.refresh(row)
+    return _out(row)
+
+
+@router.post("/{portal}/public/{resource_id}/unpublish")
+def unpublish_public_resource(
+    portal: str, resource_id: int,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    portal = _portal(portal)
+    row = db.query(PortalResource).filter_by(
+        id=resource_id, portal=portal, organization_id=None,
+    ).first()
+    if not row or row.resource_type not in PUBLIC_TYPES[portal]:
+        raise HTTPException(404, "Public content not found")
+    row.visibility = "private"
+    row.status = "draft"
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, user, row, f"portal.{portal}.{row.resource_type}.unpublished")
+    db.commit()
+    return _out(row)
 
 
 @router.post("/{portal}/public/{resource_id}/publish")

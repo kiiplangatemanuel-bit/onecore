@@ -22,15 +22,6 @@ ROLE_PERMISSIONS = {
     "payroll_approver": {"read"},
     "payroll_payment": {"read"},
     "payroll_accounting": {"read"},
-    "developer_admin": {"read", "create", "update", "delete", "manage"},
-    "developer_manager": {"read", "create", "update", "delete"},
-    "developer": {"read", "create", "update"},
-    "security_admin": {"read", "create", "update", "delete", "manage"},
-    "compliance_officer": {"read", "create", "update"},
-    "partner_admin": {"read", "create", "update", "delete", "manage"},
-    "partner_manager": {"read", "create", "update"},
-    "event_manager": {"read", "create", "update"},
-    "recruiter": {"read", "create", "update"},
 }
 
 def require_permission(membership, action: str) -> None:

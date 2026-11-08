@@ -1610,7 +1610,6 @@ class PortalResource(Base):
     title: Mapped[str] = mapped_column(String(180))
     summary: Mapped[str] = mapped_column(String(500), default="")
     data: Mapped[dict] = mapped_column(JSON, default=dict)
-    encrypted_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     visibility: Mapped[str] = mapped_column(String(12), default="private", index=True)

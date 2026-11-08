@@ -26,6 +26,22 @@ const PRIVATE_RESOURCE_TYPES={
   trust:["security_report","security_case","authorized_document"],events:["registration","booking","attendee_material","attendance"],
   careers:["applicant_profile","application"],partners:["partner_profile","referral","lead","agreement","partner_resource"]
 };
+const PUBLIC_RESOURCE_TYPES={
+  status:["incident","maintenance"],developers:["api_guide","example"],docs:["guide","release_note"],
+  community:["announcement","discussion","post"],trust:["security_policy","compliance_disclosure","advisory"],
+  events:["event","webinar","announcement"],careers:["vacancy","company_information"],
+  partners:["opportunity","programme","public_resource"]
+};
+function PublicContentAdminPanel({portal,user,onError}) {
+  const [kind,setKind]=useState(PUBLIC_RESOURCE_TYPES[portal]?.[0]||""),[title,setTitle]=useState(""),[summary,setSummary]=useState(""),[raw,setRaw]=useState("{}"),[rows,setRows]=useState([]),[busy,setBusy]=useState(false);
+  const admin=["root_superadmin","platform_admin"].includes(user?.platform_role);
+  const load=async()=>{if(!admin)return;setBusy(true);try{const all=await api("/api/v1/portals/"+portal+"/public?limit=100");setRows(all);}catch(e){onError(e.message);}finally{setBusy(false);}};
+  useEffect(()=>{load();},[portal,user]);
+  if(!admin||!PUBLIC_RESOURCE_TYPES[portal])return null;
+  async function create(e){e.preventDefault();setBusy(true);try{await api("/api/v1/portals/"+portal+"/public",{method:"POST",body:JSON.stringify({resource_type:kind,title,summary,data:JSON.parse(raw)})});setTitle("");setSummary("");setRaw("{}");await load();}catch(e){onError(e.message);}finally{setBusy(false);}}
+  async function moderate(id,action){setBusy(true);try{await api("/api/v1/portals/"+portal+"/public/"+id+"/"+action,{method:"POST"});await load();}catch(e){onError(e.message);}finally{setBusy(false);}}
+  return <section className="portal-panel"><span className="portal-kicker">PLATFORM CONTENT ADMINISTRATION</span><h2>Manage public {portal} content</h2><form className="portal-support-form" onSubmit={create}><label>Content type<select value={kind} onChange={e=>setKind(e.target.value)}>{PUBLIC_RESOURCE_TYPES[portal].map(x=><option key={x}>{x}</option>)}</select></label><label>Title<input required minLength="2" maxLength="180" value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Summary<textarea rows="2" maxLength="500" value={summary} onChange={e=>setSummary(e.target.value)}/></label><label>Content details (JSON)<textarea rows="4" value={raw} onChange={e=>setRaw(e.target.value)}/></label><button disabled={busy}>Save public content draft</button></form><h3>Published content</h3>{rows.map(row=><div className="portal-ticket-row" key={row.id}><strong>{row.title}</strong><span>{row.resource_type} · {row.status}</span><button className="portal-quiet" onClick={()=>moderate(row.id,"unpublish")} disabled={busy}>Unpublish</button></div>)}</section>;
+}
 function PortalWorkflowPanel({portal,user,organizations,activeOrg,setActiveOrg,onError}) {
   const [rows,setRows]=useState([]),[kind,setKind]=useState(PRIVATE_RESOURCE_TYPES[portal]?.[0]||""),[title,setTitle]=useState(""),[summary,setSummary]=useState(""),[raw,setRaw]=useState("{}"),[busy,setBusy]=useState(false),[notice,setNotice]=useState("");
   const load=async()=>{setBusy(true);try{const q=activeOrg?"?organization_id="+encodeURIComponent(activeOrg):"";setRows(await api("/api/v1/portals/"+portal+"/resources"+q));}catch(e){onError(e.message);}finally{setBusy(false);}};
@@ -89,6 +105,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   {user?<section className="portal-panel portal-account"><div className="portal-panel-head"><div><span className="portal-kicker">AUTHENTICATED ACCESS</span><h2>Your OneCore identity</h2><p>{user.full_name||user.email} · {user.email}</p></div><span className="portal-role">{user.platform_role||"customer"}</span></div><div className="portal-form-grid"><label>Active organization<select value={activeOrg} onChange={e=>setActiveOrg(e.target.value)}><option value="">Personal access</option>{organizations.map(org=><option key={org.id} value={org.id}>{org.name} · {org.role}</option>)}</select></label><div><strong>Organization memberships</strong><p>{organizations.length} active organization{organizations.length===1?"":"s"} available to this identity.</p></div></div>{adminDenied&&<div className="portal-error">Your identity is authenticated, but this account does not have the platform administrator role required for this application.</div>}<p className="portal-muted">Private records are loaded only from authenticated API endpoints. The organization selector is context only; every backend endpoint must independently validate membership and permissions.</p><a className="portal-account-link" href={portalUrl("app")}>Open OneCore workspace ↗</a></section>:null}
   <PublicPortalContent portal={portal} content={content}/>
   {user&&<PortalWorkflowPanel portal={portal} user={user} organizations={organizations} activeOrg={activeOrg} setActiveOrg={setActiveOrg} onError={setError}/>}
+  {user&&<PublicContentAdminPanel portal={portal} user={user} onError={setError}/}>
   <section className="portal-notice" id="contact"><strong>Independent deployment</strong><p>This application is independently deployable. Its public URL and shared API URL are configured in this application's environment. Public browsing does not require an account.</p></section></main><footer className="portal-footer">© {new Date().getFullYear()} OneCore Technologies Ltd · One Platform. Every Organization. Anywhere.</footer></div>;
 }
 
