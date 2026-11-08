@@ -1,5 +1,5 @@
 import json, re, uuid, hashlib, secrets
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
@@ -18,7 +18,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption
+from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption, calculate_loyalty_return_adjustments
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -2027,8 +2027,13 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
         cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
             organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
         refund_ratio=min(Decimal("1"),Decimal(str(cumulative_refunds))/Decimal(str(sale.total_amount))) if Decimal(str(sale.total_amount))>0 else Decimal("1")
-        target_reversal=min(int(earned),int((Decimal(int(earned))*refund_ratio).quantize(Decimal("1"),rounding=ROUND_HALF_UP)))
-        points_to_reverse=max(0,target_reversal-int(already_reversed))
+        redeemed=int(sale.loyalty_points_redeemed or 0)
+        already_restored=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
+            organization_id=membership.organization_id,customer_id=customer_sale.customer_id,
+            sale_id=sale.id,entry_type="restore").scalar() or 0
+        points_to_restore,points_to_reverse=calculate_loyalty_return_adjustments(
+            redeemed,int(earned),Decimal(str(cumulative_refunds)),Decimal(str(sale.total_amount)),
+            int(already_restored),int(already_reversed))
         loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
         if loyalty_customer:
             loyalty_customer.lifetime_spend=max(Decimal("0"),Decimal(loyalty_customer.lifetime_spend or 0)-total)
@@ -2038,23 +2043,12 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
                     sale_id=sale.id,entry_type="reversal",points_delta=-points_to_reverse,
                     idempotency_key=f"return:{result.id}:loyalty-reversal",
                     note="Loyalty points reversed against cumulative POS refunds",created_by=user.id))
-            redeemed=int(sale.loyalty_points_redeemed or 0)
-            if redeemed:
-                already_restored=db.query(func.coalesce(func.sum(POSLoyaltyEntry.points_delta),0)).filter_by(
-                    organization_id=membership.organization_id,customer_id=customer_sale.customer_id,
-                    sale_id=sale.id,entry_type="restore").scalar() or 0
-                if Decimal(str(sale.total_amount)) > 0:
-                    restore_ratio=min(Decimal("1"),Decimal(str(cumulative_refunds))/Decimal(str(sale.total_amount)))
-                    target_restore=min(redeemed,int((Decimal(redeemed)*restore_ratio).quantize(Decimal("1"),rounding=ROUND_HALF_UP)))
-                else:
-                    target_restore=redeemed
-                points_to_restore=max(0,target_restore-int(already_restored))
-                if points_to_restore:
-                    loyalty_customer.points_balance+=points_to_restore
-                    db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
-                        sale_id=sale.id,entry_type="restore",points_delta=points_to_restore,
-                        idempotency_key=f"return:{result.id}:loyalty-restore",
-                        note="Redeemed loyalty points restored proportionally against returned sale value",created_by=user.id))
+            if points_to_restore:
+                loyalty_customer.points_balance+=points_to_restore
+                db.add(POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=loyalty_customer.id,
+                    sale_id=sale.id,entry_type="restore",points_delta=points_to_restore,
+                    idempotency_key=f"return:{result.id}:loyalty-restore",
+                    note="Redeemed loyalty points restored proportionally against returned sale value",created_by=user.id))
     from app.api.accounting_pos import post_pos_source
     accounting_link = post_pos_source(
         db, membership.organization_id, result.branch_id, "return", result.id, user.id
