@@ -203,3 +203,70 @@ class PayrollAccountingLink(Base):
     reversal_reason: Mapped[str] = mapped_column(String(500), default="")
     __table_args__ = (Index("uq_payroll_accounting_reversal_journal", "reversal_journal_id", unique=True),
                       Index("uq_payroll_accounting_settlement_journal", "settlement_journal_id", unique=True))
+
+
+
+class PayrollPaymentBatch(Base):
+    """Maker-checker controlled grouping of approved, posted payroll runs."""
+    __tablename__ = "payroll_payment_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+    item_count: Mapped[int] = mapped_column(default=0)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    submitted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("uq_payroll_payment_batch_org_idempotency", "organization_id", "idempotency_key", unique=True),
+    )
+
+
+class PayrollPaymentBatchItem(Base):
+    """Immutable amount/run association; settlement metadata is appended once."""
+    __tablename__ = "payroll_payment_batch_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("payroll_payment_batches.id"), index=True)
+    payroll_run_id: Mapped[int] = mapped_column(ForeignKey("payroll_runs.id"), unique=True, index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    payment_reference: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    settlement_journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), nullable=True, unique=True)
+    paid_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("uq_payroll_batch_item_org_reference", "organization_id", "payment_reference", unique=True),
+    )
+
+
+class PayrollBankStatementLine(Base):
+    """Imported bank evidence, independently matched to a confirmed batch item."""
+    __tablename__ = "payroll_bank_statement_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    bank_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"), index=True)
+    transaction_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str] = mapped_column(String(120))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="KES")
+    status: Mapped[str] = mapped_column(String(24), default="unmatched")
+    batch_item_id: Mapped[int | None] = mapped_column(ForeignKey("payroll_payment_batch_items.id"), nullable=True, unique=True)
+    match_note: Mapped[str] = mapped_column(String(500), default="")
+    imported_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    matched_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("uq_payroll_bank_statement_fingerprint", "organization_id", "bank_account_id",
+              "transaction_date", "reference", "amount", unique=True),
+    )
