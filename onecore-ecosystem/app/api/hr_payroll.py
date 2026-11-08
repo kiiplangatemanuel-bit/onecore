@@ -790,6 +790,7 @@ class PayrollAccountingMappingIn(BaseModel):
     housing_levy_payable_account_id: int = Field(gt=0)
     pension_payable_account_id: int = Field(gt=0)
     bank_account_id: int = Field(gt=0)
+    other_deductions_payable_account_id: int | None = Field(default=None, gt=0)
 
 
 class PayrollJournalReversalIn(BaseModel):
@@ -800,7 +801,8 @@ def _payroll_mapping_out(row):
     return {name: getattr(row, name) for name in (
         "id", "salary_expense_account_id", "employer_contribution_expense_account_id",
         "net_payable_account_id", "paye_payable_account_id", "nssf_payable_account_id",
-        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id", "bank_account_id"
+        "shif_payable_account_id", "housing_levy_payable_account_id", "pension_payable_account_id", "bank_account_id",
+        "other_deductions_payable_account_id"
     )}
 
 
@@ -815,8 +817,9 @@ def _validate_payroll_mapping(db, organization_id, payload):
         "housing_levy_payable_account_id": "liability",
         "pension_payable_account_id": "liability",
         "bank_account_id": "asset",
+        "other_deductions_payable_account_id": "liability",
     }
-    ids = {getattr(payload, name) for name in expected}
+    ids = {getattr(payload, name) for name in expected if getattr(payload, name) is not None}
     accounts = db.query(AccountingAccount).filter(
         AccountingAccount.organization_id == organization_id,
         AccountingAccount.is_active == True,
@@ -826,7 +829,7 @@ def _validate_payroll_mapping(db, organization_id, payload):
     if set(by_id) != ids:
         raise HTTPException(404, "One or more mapped accounting accounts were not found in this organization")
     for field, account_type in expected.items():
-        if by_id[getattr(payload, field)].account_type != account_type:
+        if getattr(payload, field) is not None and by_id[getattr(payload, field)].account_type != account_type:
             raise HTTPException(422, f"{field} must map to an active {account_type} account")
     return by_id
 
@@ -914,6 +917,9 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     housing_employee=sum((dec(x.housing_levy_employee) for x in payslips),ZERO)
     housing_employer=sum((dec(x.housing_levy_employer) for x in payslips),ZERO)
     pension=sum((dec(x.pension_employee) for x in payslips),ZERO)
+    other_deductions=sum((dec((x.snapshot or {}).get("one_off_deductions", 0)) for x in payslips),ZERO)
+    if other_deductions and not mapping.other_deductions_payable_account_id:
+        raise HTTPException(409,"Map an other-deductions liability account before posting payroll with one-off deductions")
     employer_contributions=rounded(nssf_employer+housing_employer)
     lines=[]
     _append_journal_line(lines,mapping.salary_expense_account_id,"Payroll gross earnings",debit=run.gross_total,branch_id=run.branch_id)
@@ -924,6 +930,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     _append_journal_line(lines,mapping.shif_payable_account_id,"SHIF payable",credit=shif,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.housing_levy_payable_account_id,"Employee and employer Housing Levy payable",credit=housing_employee+housing_employer,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.pension_payable_account_id,"Employee pension payable",credit=pension,branch_id=run.branch_id)
+    if other_deductions:
+        _append_journal_line(lines,mapping.other_deductions_payable_account_id,"Other employee deductions payable",credit=other_deductions,branch_id=run.branch_id)
     validate_journal_lines([type("Line",(),x)() for x in lines])
     journal=AccountingJournal(organization_id=membership.organization_id,branch_id=run.branch_id,
         journal_number="JRN-"+uuid.uuid4().hex[:16].upper(),reference=f"PAYROLL-RUN-{run.id}",
