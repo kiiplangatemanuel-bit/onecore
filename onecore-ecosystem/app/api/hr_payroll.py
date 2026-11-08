@@ -48,6 +48,28 @@ def scoped(query, model, membership):
     return query
 
 
+def require_hr_read(membership):
+    allowed={"org_admin","branch_admin","manager","accountant","hr_admin","hr_manager","payroll_manager","payroll_approver","payroll_payment"}
+    if (membership.role or "").lower() not in allowed:
+        raise HTTPException(403,"HR and payroll data requires an authorized HR, finance or organization role")
+
+
+def require_hr_write(membership):
+    allowed={"org_admin","branch_admin","hr_admin","hr_manager"}
+    if (membership.role or "").lower() not in allowed:
+        raise HTTPException(403,"Employee and leave administration requires an authorized HR role")
+
+
+def require_payroll_action(membership, action):
+    allowed={
+        "prepare":{"org_admin","payroll_manager"},
+        "approve":{"org_admin","payroll_approver"},
+        "pay":{"org_admin","payroll_payment"},
+    }
+    if (membership.role or "").lower() not in allowed[action]:
+        raise HTTPException(403,"Your role is not authorized for this payroll action")
+
+
 def branch_or_404(db, membership, branch_id):
     if not can_access_branch(membership, branch_id):
         raise HTTPException(404, "Branch not found")
@@ -267,6 +289,7 @@ def _calculate(employee, rules, period_start, period_end):
 def list_employees(membership=Depends(active_membership), db: Session=Depends(get_db),
                    limit: int=Query(100, ge=1, le=500)):
     require_permission(membership, "read")
+    require_hr_read(membership)
     q = db.query(HREmployee).filter_by(organization_id=membership.organization_id)
     q = scoped(q, HREmployee, membership)
     return [employee_out(x) for x in q.order_by(HREmployee.employee_number).limit(limit).all()]
@@ -276,6 +299,7 @@ def list_employees(membership=Depends(active_membership), db: Session=Depends(ge
 def create_employee(payload: EmployeeIn, membership=Depends(active_membership),
                     user: User=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "create")
+    require_hr_write(membership)
     branch_or_404(db, membership, payload.branch_id)
     row = HREmployee(organization_id=membership.organization_id, branch_id=payload.branch_id,
         employee_number=payload.employee_number, first_name=payload.first_name, last_name=payload.last_name,
@@ -316,6 +340,7 @@ def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
                              membership=Depends(active_membership), user: User=Depends(current_user),
                              db: Session=Depends(get_db)):
     require_permission(membership, "update")
+    require_hr_write(membership)
     row=db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership,row.branch_id):
         raise HTTPException(404, "Employee not found")
@@ -334,6 +359,7 @@ def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
 def request_leave(employee_id: int, payload: LeaveIn, membership=Depends(active_membership),
                   user: User=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "create")
+    require_hr_write(membership)
     employee = db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
     if not employee or not can_access_branch(membership, employee.branch_id):
         raise HTTPException(404, "Employee not found")
@@ -359,6 +385,7 @@ def request_leave(employee_id: int, payload: LeaveIn, membership=Depends(active_
 @router.get("/hr/leave-requests")
 def list_leave_requests(status: str | None=None, membership=Depends(active_membership), db: Session=Depends(get_db)):
     require_permission(membership, "read")
+    require_hr_read(membership)
     q = db.query(HRLeaveRequest).filter_by(organization_id=membership.organization_id)
     q = scoped(q, HRLeaveRequest, membership)
     if status:
@@ -374,6 +401,7 @@ def list_leave_requests(status: str | None=None, membership=Depends(active_membe
 def decide_leave(request_id: int, payload: LeaveDecisionIn, membership=Depends(active_membership),
                  user: User=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "update")
+    require_hr_write(membership)
     row = db.query(HRLeaveRequest).filter_by(id=request_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership, row.branch_id): raise HTTPException(404, "Leave request not found")
     if row.status != "pending": raise HTTPException(409, "Leave request has already been decided")
@@ -391,6 +419,7 @@ def decide_leave(request_id: int, payload: LeaveDecisionIn, membership=Depends(a
 @router.get("/payroll/rule-sets")
 def list_rule_sets(membership=Depends(active_membership), db: Session=Depends(get_db)):
     require_permission(membership, "read")
+    require_hr_read(membership)
     rows=db.query(PayrollRuleSet).filter_by(organization_id=membership.organization_id).order_by(PayrollRuleSet.version.desc()).all()
     return [{"id":x.id,"version":x.version,"effective_from":x.effective_from.date().isoformat(),
         "effective_to":x.effective_to.date().isoformat() if x.effective_to else None,
@@ -401,7 +430,7 @@ def list_rule_sets(membership=Depends(active_membership), db: Session=Depends(ge
 @router.post("/payroll/rule-sets", status_code=201)
 def create_rule_set(payload: RuleSetIn, membership=Depends(active_membership),
                     user: User=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "manage")
+    require_payroll_action(membership,"prepare")
     version=(db.query(PayrollRuleSet.version).filter_by(organization_id=membership.organization_id)
              .order_by(PayrollRuleSet.version.desc()).first())
     rules={"paye_bands":[{k:str(v) if v is not None else None for k,v in b.items()} for b in payload.paye_bands],
@@ -420,7 +449,7 @@ def create_rule_set(payload: RuleSetIn, membership=Depends(active_membership),
 
 @router.post("/payroll/rule-sets/{rule_set_id}/submit")
 def submit_rule_set(rule_set_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"prepare")
     row=db.query(PayrollRuleSet).filter_by(id=rule_set_id,organization_id=membership.organization_id).first()
     if not row: raise HTTPException(404,"Payroll rule set not found")
     if row.status!="draft": raise HTTPException(409,"Only draft rule sets can be submitted")
@@ -432,7 +461,7 @@ def submit_rule_set(rule_set_id:int,membership=Depends(active_membership),user:U
 
 @router.post("/payroll/rule-sets/{rule_set_id}/approve")
 def approve_rule_set(rule_set_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"approve")
     row=db.query(PayrollRuleSet).filter_by(id=rule_set_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Payroll rule set not found")
     if row.status!="pending_approval": raise HTTPException(409,"Rule set is not awaiting approval")
@@ -461,6 +490,7 @@ def _run_out(row):
 @router.get("/payroll/runs")
 def list_payroll_runs(membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
+    require_hr_read(membership)
     q=db.query(PayrollRun).filter_by(organization_id=membership.organization_id)
     q=scoped(q,PayrollRun,membership)
     return [_run_out(x) for x in q.order_by(PayrollRun.id.desc()).limit(200).all()]
@@ -469,7 +499,7 @@ def list_payroll_runs(membership=Depends(active_membership),db:Session=Depends(g
 @router.post("/payroll/runs",status_code=201)
 def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership),
                        user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"prepare")
     branch_or_404(db,membership,payload.branch_id)
     if payload.branch_id is None and branch_scope_ids(membership) is not None:
         raise HTTPException(422,"Select a branch for payroll when your membership has a restricted branch scope")
@@ -538,7 +568,7 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
 
 @router.post("/payroll/runs/{run_id}/submit")
 def submit_payroll_run(run_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"prepare")
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="draft": raise HTTPException(409,"Only draft payroll runs can be submitted")
@@ -551,7 +581,7 @@ def submit_payroll_run(run_id:int,membership=Depends(active_membership),user:Use
 
 @router.post("/payroll/runs/{run_id}/approve")
 def approve_payroll_run(run_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"approve")
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="pending_approval": raise HTTPException(409,"Payroll run is not awaiting approval")
@@ -566,7 +596,7 @@ def approve_payroll_run(run_id:int,membership=Depends(active_membership),user:Us
 @router.post("/payroll/runs/{run_id}/mark-paid")
 def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_membership),
                       user:User=Depends(current_user),db:Session=Depends(get_db)):
-    require_permission(membership,"manage")
+    require_payroll_action(membership,"pay")
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
@@ -581,6 +611,7 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
 @router.get("/payroll/runs/{run_id}/payslips")
 def list_payslips(run_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
     require_permission(membership,"read")
+    require_hr_read(membership)
     run=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).first()
     if not run or not can_access_branch(membership,run.branch_id): raise HTTPException(404,"Payroll run not found")
     rows=db.query(PayrollPayslip).filter_by(organization_id=membership.organization_id,payroll_run_id=run_id).order_by(PayrollPayslip.employee_number).all()
