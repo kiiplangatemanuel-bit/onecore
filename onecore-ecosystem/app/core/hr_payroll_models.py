@@ -181,6 +181,7 @@ class PayrollAccountingMapping(Base):
     housing_levy_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
     pension_payable_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
     bank_account_id: Mapped[int] = mapped_column(ForeignKey("accounting_accounts.id"))
+    other_deductions_payable_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_accounts.id"), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
