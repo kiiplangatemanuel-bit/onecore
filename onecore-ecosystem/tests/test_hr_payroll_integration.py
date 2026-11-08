@@ -114,7 +114,33 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             )
             assert self_approval.status_code == 409
 
-            actor["role"] = "payroll_manager"
+            earning = client.post(f"/api/v1/hr/employees/{employee_id}/payroll-adjustments", json={
+                "adjustment_type": "earning", "amount": "1000.00",
+                "effective_date": "2026-11-15", "description": "Approved performance bonus",
+                "reason": "Monthly performance target achieved",
+                "idempotency_key": "payroll-bonus-2026-11",
+            })
+            assert earning.status_code == 201, earning.text
+            assert earning.json()["status"] == "pending"
+            deduction = client.post(f"/api/v1/hr/employees/{employee_id}/payroll-adjustments", json={
+                "adjustment_type": "deduction", "amount": "200.00",
+                "effective_date": "2026-11-20", "description": "Staff loan recovery",
+                "reason": "Employee-authorized loan repayment",
+                "idempotency_key": "payroll-loan-2026-11",
+            })
+            assert deduction.status_code == 201, deduction.text
+            actor["user"], actor["role"] = users[1], "hr_manager"
+            approved_earning = client.post(
+                f"/api/v1/hr/payroll-adjustments/{earning.json()['id']}/decision",
+                json={"decision": "approved", "note": "Evidence reviewed"},
+            )
+            approved_deduction = client.post(
+                f"/api/v1/hr/payroll-adjustments/{deduction.json()['id']}/decision",
+                json={"decision": "approved", "note": "Authorization checked"},
+            )
+            assert approved_earning.status_code == 200, approved_earning.text
+            assert approved_deduction.status_code == 200, approved_deduction.text
+            actor["user"], actor["role"] = users[0], "payroll_manager"
             rule = client.post("/api/v1/payroll/rule-sets", json={
                 "effective_from": "2026-01-01", "currency": "KES",
                 "paye_bands": [
@@ -152,8 +178,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             })
             assert run.status_code == 201, run.text
             run_id = run.json()["id"]
-            assert run.json()["gross_total"] == "21644.23"
-            assert run.json()["employer_cost_total"] == "23267.54"
+            assert run.json()["gross_total"] == "22644.23"
+            assert run.json()["employer_cost_total"] == "24342.54"
             assert client.post(f"/api/v1/payroll/runs/{run_id}/submit").status_code == 200
 
             actor["user"], actor["role"] = users[1], "payroll_approver"
@@ -165,9 +191,16 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert slips.status_code == 200, slips.text
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
-            assert slips.json()[0]["net_pay"] == "17361.28"
+            assert slips.json()[0]["net_pay"] == "17958.78"
             assert slips.json()[0]["snapshot"]["overtime_minutes"] == 60
             assert slips.json()[0]["snapshot"]["overtime_earnings"] == "144.23"
+            assert slips.json()[0]["snapshot"]["one_off_earnings"] == "1000.00"
+            assert slips.json()[0]["snapshot"]["one_off_deductions"] == "200.00"
+            assert len(slips.json()[0]["snapshot"]["one_off_adjustments"]) == 2
+            adjustments = client.get("/api/v1/hr/payroll-adjustments")
+            assert adjustments.status_code == 200
+            assert {x["status"] for x in adjustments.json()} == {"applied"}
+            assert {x["payroll_run_id"] for x in adjustments.json()} == {run_id}
 
             actor["user"], actor["role"] = users[3], "payroll_accounting"
             mapping = client.put("/api/v1/payroll/accounting-mapping", json={
