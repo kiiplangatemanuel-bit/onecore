@@ -127,6 +127,7 @@ def test_support_attachment_metadata_constraints_and_safe_filename():
     )
     assert valid.file_name == "evidence.pdf"
     assert _safe_attachment_name("../../evidence.pdf") == "evidence.pdf"
+    assert _safe_attachment_name('evil";x.pdf') == "evil__x.pdf"
     with pytest.raises(ValidationError):
         SupportAttachmentIntent(
             file_name="large.pdf", content_type="application/pdf", size_bytes=11 * 1024 * 1024,
