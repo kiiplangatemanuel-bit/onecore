@@ -69,6 +69,7 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/public/tickets" in paths
     assert "/api/v1/support/tickets" in paths
     assert "/api/v1/support/admin/tickets" in paths
+    assert "/api/v1/support/admin/tickets/{ticket_number}" in paths
 
 
 def test_registration_schema_requires_strong_password_and_valid_slug():
