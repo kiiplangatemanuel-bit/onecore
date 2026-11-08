@@ -36,7 +36,7 @@ PORTALS = {
 SENSITIVE_TYPES = {"security_report", "document_access_request"}
 PLATFORM_ONLY_TYPES = {"incident", "maintenance", "help_article", "faq", "guide", "module_guide", "policy", "disclosure", "event", "webinar", "vacancy", "company_page", "programme", "announcement"}
 STATUS_TRANSITIONS = {
-    "alert_subscription": {"active", "paused", "cancelled"},
+    "incident": {"published", "investigating", "resolved", "archived"},\n    "maintenance": {"published", "scheduled", "in_progress", "completed", "archived"},\n    "help_article": {"published", "archived"},\n    "faq": {"published", "archived"},\n    "guide": {"published", "archived"},\n    "module_guide": {"published", "archived"},\n    "policy": {"published", "archived"},\n    "disclosure": {"published", "archived"},\n    "event": {"published", "archived"},\n    "webinar": {"published", "archived"},\n    "vacancy": {"published", "closed", "archived"},\n    "company_page": {"published", "archived"},\n    "programme": {"published", "archived"},\n    "announcement": {"published", "archived"},\n    "alert_subscription": {"active", "paused", "cancelled"},
     "application": {"active", "suspended", "revoked"},
     "api_key": {"active", "revoked"},
     "webhook": {"active", "disabled"},
@@ -64,7 +64,7 @@ class PortalItemIn(BaseModel):
     body: str = Field(default="", max_length=20000)
     data: dict = Field(default_factory=dict)
     organization_id: int | None = Field(default=None, gt=0)
-    visibility: str = Field(default="private", pattern=r"^(private|organization|public)$")
+    visibility: str | None = Field(default=None, pattern=r"^(private|organization|public)$")
 
 class PortalItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -133,7 +133,7 @@ def list_my_resources(
         membership = _membership(db, user, organization_id)
         query = query.filter(or_(
             PortalResource.owner_user_id == user.id,
-            PortalResource.organization_id == membership.organization_id,
+            (PortalResource.organization_id == membership.organization_id) & (PortalResource.visibility == "organization"),
         ))
     else:
         org_ids = [m.organization_id for m in db.query(Membership).filter_by(
@@ -141,7 +141,7 @@ def list_my_resources(
         ).all()]
         query = query.filter(or_(
             PortalResource.owner_user_id == user.id,
-            PortalResource.organization_id.in_(org_ids) if org_ids else False,
+            (PortalResource.organization_id.in_(org_ids) & (PortalResource.visibility == "organization")) if org_ids else False,
         ))
     if resource_type:
         if resource_type not in PORTALS[portal]:
@@ -166,12 +166,15 @@ def create_portal_resource(
     if org_id is not None:
         membership = _membership(db, user, org_id)
         require_permission(membership, "create")
-    if payload.resource_type in SENSITIVE_TYPES and (org_id is not None or payload.visibility != "private"):
+    visibility = payload.visibility or ("organization" if org_id is not None else "private")
+    if payload.resource_type in SENSITIVE_TYPES and (org_id is not None or visibility != "private"):
         raise HTTPException(422, "Confidential trust reports must be submitted as personal, owner-only records")
-    if payload.visibility != "private" and user.platform_role not in {"root_superadmin", "platform_admin"}:
+    if visibility == "public" and user.platform_role not in {"root_superadmin", "platform_admin"}:
         raise HTTPException(403, "Only authorized OneCore staff can publish portal resources")
-    if payload.visibility == "organization" and org_id is None:
+    if visibility == "organization" and org_id is None:
         raise HTTPException(422, "Organization visibility requires an organization membership")
+    if payload.resource_type == "api_key" and org_id is not None and membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator can create organization API keys")
     data = dict(payload.data)
     initial_status = {
         "post": "pending_review", "comment": "pending_review",
@@ -191,7 +194,7 @@ def create_portal_resource(
         data["_credential_prefix"] = one_time_secret[:15]
     row = PortalResource(
         portal=portal, resource_type=payload.resource_type,
-        visibility=payload.visibility, title=payload.title.strip(), body=payload.body.strip(),
+        visibility=visibility, title=payload.title.strip(), body=payload.body.strip(),
         data=data, status=initial_status, owner_user_id=user.id, organization_id=org_id,
     )
     db.add(row)
@@ -218,7 +221,7 @@ def update_portal_resource(
         allowed = row.owner_user_id == user.id or is_platform_admin
     elif row.organization_id is not None:
         membership = _membership(db, user, row.organization_id)
-        allowed = row.owner_user_id == user.id or (membership.role == "org_admin")
+        allowed = row.owner_user_id == user.id or (row.visibility == "organization" and membership.role == "org_admin")
     else:
         allowed = row.owner_user_id == user.id or (is_platform_admin and row.resource_type in PLATFORM_ONLY_TYPES)
     if not allowed:
@@ -269,7 +272,7 @@ def read_my_resource(
         return _out(row)
     if row.owner_user_id == user.id:
         return _out(row)
-    if row.organization_id is not None:
+    if row.organization_id is not None and row.visibility == "organization":
         try:
             _membership(db, user, row.organization_id)
             return _out(row)
