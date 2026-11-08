@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { API_BASE, api, clearToken, getToken, login } from "./api";
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
+import PublicSite from "./PublicSite.jsx";
 
 function Icon({children}) { return <span className="nav-icon" aria-hidden="true">{children}</span>; }
 function Login({onLogin}) {
@@ -18,7 +19,7 @@ function App(){
  function navigate(next){history.pushState({}, "", next);setPath(next);setNotice("");}
  function signOut(){clearToken();setUser(null);setOrgs([]);navigate("/");}
  if(checking)return <div className="loading-screen"><div className="brand-mark">O</div><p>Securing your workspace…</p></div>;
- if(!user)return <Login onLogin={setUser}/>;
+ if(!user)return path==="/login"?<Login onLogin={setUser}/>:<PublicSite/>;
  const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const moduleCount=modules.length||allModules.length;
  return <div className="app-shell">
   <aside className={collapsed?"sidebar collapsed":"sidebar"}><div className="sidebar-brand"><div className="brand-mark small">O</div>{!collapsed&&<div><strong>onecore</strong><small>WORKSPACE</small></div>}<button className="collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation">{collapsed?"»":"«"}</button></div>
@@ -34,7 +35,7 @@ function App(){
     {legacy&&meta?<><div className="page-heading"><div><p className="eyebrow">{active?.[4]||"BUSINESS WORKSPACE"}</p><h1>{meta[0]}</h1><p className="muted">{meta[1]}</p></div><a className="primary link-button" href={API_BASE+path} target="_blank" rel="noreferrer">Open full module ↗</a></div><div className="notice info">The original OneCore module interface is hosted by the backend. Open it in a new tab to use its full workflow UI. This workspace checks the related API connection.</div><div className="stat-grid compact"><Stat label="API connection" value={health==="online"?"Available":"Unavailable"} hint="Backend health endpoint" icon="⌁"/><Stat label="Module interface" value="Available" hint="Hosted by FastAPI backend" icon="▤"/><Stat label="Workspace" value={orgs[0]?.name||"Not selected"} hint="Active organization context" icon="⌂"/></div><section className="panel"><div className="panel-head"><div><h3>Module capabilities</h3><p className="muted">Open the established module UI to access its workflows.</p></div><span className="status online"><i/>Connected shell</span></div><div className="capability-list">{(active?.[3]||"OneCore module").split(",").map((x,i)=><div key={i}><span className="check">✓</span>{x.trim()}</div>)}<div><span className="check">✓</span>Tenant-scoped access is enforced by the backend API</div><div><span className="check">✓</span>API documentation available for authorized users</div></div><button className="secondary" onClick={()=>window.open(API_BASE+"/docs","_blank","noopener,noreferrer")}>Explore API endpoints ↗</button></section></>:null}
     {!legacy&&path!=="/"&&path!=="/overview"&&path!=="/organizations"?<ModuleLanding path={path} active={active} onNotice={setNotice}/>:null}
     {notice&&<div className="alert error">{notice}</div>}
-    <footer className="footer">© {new Date().getFullYear()} OneCore Technologies Ltd <span>One platform. Every organization. Anywhere.</span></footer>
+    <footer className="footer">© {new Date().getFullYear()} OneCore Technologies Ltd <span><a href="https://onecore.co.ke">Powered by OneCore Technologies Ltd</a> · One platform. Every organization. Anywhere.</span></footer>
    </div>
   </main>
  </div>;
