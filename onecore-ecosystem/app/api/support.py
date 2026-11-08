@@ -403,6 +403,37 @@ def download_ticket_attachment(
 
 
 
+@router.post("/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan")
+def scan_support_attachment(
+    ticket_number: str, attachment_id: int,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    from app.services.support_scanner import scan_s3_attachment
+
+    ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
+    if not ticket:
+        raise HTTPException(404, "Support ticket not found")
+    attachment = db.query(SupportAttachment).filter_by(id=attachment_id, ticket_id=ticket.id).first()
+    if not attachment:
+        raise HTTPException(404, "Support attachment not found")
+    if attachment.status != "pending_scan":
+        raise HTTPException(409, "Only quarantined attachments can be scanned")
+    result = scan_s3_attachment(_storage_client(), attachment)
+    attachment.status = "rejected" if result["infected"] else "available"
+    _audit(
+        db, user.id, ticket.organization_id, "support.attachment.malware_scanned",
+        ticket,
+        f"attachment_id={attachment.id};engine=ClamAV;result={result['result']};"
+        f"sha256={result['sha256']};bytes={result['bytes_scanned']}",
+    )
+    db.commit()
+    return {
+        "id": attachment.id, "status": attachment.status,
+        "scanner": "ClamAV", "result": result["result"],
+        "sha256": result["sha256"], "bytes_scanned": result["bytes_scanned"],
+    }
+
+
 @router.patch("/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan")
 def set_support_attachment_scan_result(
     ticket_number: str, attachment_id: int, payload: SupportAttachmentScanResult,
