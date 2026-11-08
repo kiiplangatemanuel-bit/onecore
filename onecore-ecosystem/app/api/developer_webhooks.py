@@ -269,6 +269,109 @@ def list_webhook_deliveries(
     }
 
 
+
+class WebhookEndpointUpdate(BaseModel):
+    endpoint_url: str = Field(min_length=12, max_length=2048)
+    events: list[str] = Field(min_length=1, max_length=20)
+
+
+@router.put("/webhooks/{workflow_record_id}")
+def update_webhook_endpoint(
+    workflow_record_id: int,
+    payload: WebhookEndpointUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(PortalWorkflowRecord).filter_by(
+        id=workflow_record_id, portal_key="developers", record_type="webhook"
+    ).first()
+    if not record:
+        raise HTTPException(404, "Webhook not found")
+    _active_developer(db, user, record.organization_id)
+    _validate_endpoint(payload.endpoint_url)
+    events = sorted(set(payload.events))
+    if not events or set(events) - ALLOWED_EVENTS:
+        raise HTTPException(422, "Webhook contains unsupported event types")
+    endpoint = db.query(DeveloperWebhookEndpoint).filter_by(workflow_record_id=record.id).first()
+    if not endpoint:
+        raise HTTPException(409, "Activate the webhook before updating its endpoint")
+    endpoint.endpoint_url = payload.endpoint_url
+    endpoint.events = events
+    record.payload = {**(record.payload or {}), "endpoint_url": payload.endpoint_url, "events": events}
+    record.updated_at = _now()
+    db.add(AuditEvent(
+        actor_user_id=user.id, organization_id=record.organization_id,
+        action="developer.webhook.updated", resource_type="developer_webhook",
+        resource_id=str(record.id), detail="Webhook destination or event subscriptions updated",
+    ))
+    db.commit()
+    return {"workflow_record_id": record.id, "endpoint_url": endpoint.endpoint_url, "events": endpoint.events}
+
+
+@router.post("/webhooks/{workflow_record_id}/deactivate")
+def deactivate_webhook_endpoint(
+    workflow_record_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(PortalWorkflowRecord).filter_by(
+        id=workflow_record_id, portal_key="developers", record_type="webhook"
+    ).first()
+    if not record:
+        raise HTTPException(404, "Webhook not found")
+    _active_developer(db, user, record.organization_id)
+    endpoint = db.query(DeveloperWebhookEndpoint).filter_by(
+        workflow_record_id=record.id, active=True
+    ).with_for_update().first()
+    if not endpoint:
+        raise HTTPException(409, "Webhook is already inactive")
+    endpoint.active = False
+    db.query(DeveloperWebhookDelivery).filter_by(
+        endpoint_id=endpoint.id, status="pending"
+    ).update({"status": "failed", "last_error": "Webhook endpoint deactivated"}, synchronize_session=False)
+    db.add(AuditEvent(
+        actor_user_id=user.id, organization_id=record.organization_id,
+        action="developer.webhook.deactivated", resource_type="developer_webhook",
+        resource_id=str(record.id), detail="Webhook endpoint deactivated",
+    ))
+    db.commit()
+    return {"workflow_record_id": record.id, "active": False}
+
+
+@router.post("/webhooks/{workflow_record_id}/deliveries/{event_id}/retry", status_code=202)
+def retry_webhook_delivery(
+    workflow_record_id: int,
+    event_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    record = db.query(PortalWorkflowRecord).filter_by(
+        id=workflow_record_id, portal_key="developers", record_type="webhook"
+    ).first()
+    if not record:
+        raise HTTPException(404, "Webhook not found")
+    _active_developer(db, user, record.organization_id)
+    endpoint = db.query(DeveloperWebhookEndpoint).filter_by(
+        workflow_record_id=record.id, active=True
+    ).first()
+    if not endpoint:
+        raise HTTPException(409, "Activate the webhook before retrying deliveries")
+    delivery = db.query(DeveloperWebhookDelivery).filter_by(
+        endpoint_id=endpoint.id, event_id=event_id
+    ).with_for_update().first()
+    if not delivery:
+        raise HTTPException(404, "Webhook delivery not found")
+    if delivery.status != "failed":
+        raise HTTPException(409, "Only failed webhook deliveries can be retried")
+    delivery.status = "pending"
+    delivery.attempts = 0
+    delivery.next_attempt_at = _now()
+    delivery.response_status = None
+    delivery.last_error = ""
+    db.commit()
+    return {"event_id": delivery.event_id, "status": "pending"}
+
+
 @router.post("/webhooks/{workflow_record_id}/test", status_code=202)
 def send_webhook_test(
     workflow_record_id: int,
