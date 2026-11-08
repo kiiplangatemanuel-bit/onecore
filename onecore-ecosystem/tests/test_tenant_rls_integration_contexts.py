@@ -15,7 +15,7 @@ def test_mpesa_and_supplier_callbacks_bind_token_then_verified_tenant():
 
 def test_crm_delivery_and_unsubscribe_callbacks_bind_verified_tenant():
     source = (ROOT / "app" / "api" / "crm_campaigns.py").read_text()
-    assert "set_crm_delivery_callback_context(db)" in source
+    assert "set_crm_delivery_callback_context(db, pid)" in source
     assert "set_crm_unsubscribe_token_context(db,digest)" in source
     assert "set_verified_organization_context(db,d.organization_id)" in source
 
