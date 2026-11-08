@@ -10,7 +10,7 @@ from app.core.models import AuditEvent, Membership, Organization, PortalWorkflow
 from app.api.portal_workflows import (
     PortalRecordCreate, PortalRecordUpdate, create_portal_record,
     list_portal_records, list_public_portal_content, read_portal_record,
-    update_portal_record,
+    update_portal_record, PortalPublicContentCreate, publish_public_portal_content,
 )
 
 
@@ -151,3 +151,26 @@ def test_portal_workflow_routes_are_registered():
     paths = set(app.openapi()["paths"])
     assert "/api/v1/portals/{portal}/public/{record_type}" in paths
     assert "/api/v1/portals/{portal}/records/{record_type}" in paths
+    assert "/api/v1/portals/admin/{portal}/public/{record_type}" in paths
+
+
+def test_public_content_publication_requires_platform_admin():
+    engine = _db()
+    with Session(engine) as db:
+        customer = User(email="customer@example.com", full_name="Customer", password_hash="unused")
+        admin = User(email="admin@example.com", full_name="Admin", password_hash="unused",
+                     platform_role="platform_admin")
+        db.add_all([customer, admin])
+        db.commit()
+        payload = PortalPublicContentCreate(payload={
+            "title": "Service incident", "service": "API", "severity": "minor",
+            "summary": "A short public update",
+        })
+        with pytest.raises(HTTPException) as denied:
+            publish_public_portal_content("status", "incident", payload, customer, db)
+        assert denied.value.status_code == 403
+        published = publish_public_portal_content("status", "incident", payload, admin, db)
+        assert published["visibility"] == "public"
+        assert published["status"] == "published"
+        assert len(list_public_portal_content("status", "incident", 50, db)) == 1
+    engine.dispose()
