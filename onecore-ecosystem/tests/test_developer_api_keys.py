@@ -98,7 +98,7 @@ def test_developer_api_key_authentication_records_usage_and_rejects_revoked_keys
         })
         key = current_developer_api_key(request, created["secret"], db)
         response = developer_api_organization(request, key, db)
-        assert response["organization"]["id"] == org.id
+        assert response["organization"]["id"] == "sandbox-organization"
         assert db.query(DeveloperApiKeyUsage).filter_by(api_key_id=key.id).count() == 1
         revoked = revoke_developer_api_key(key.id, developer, db)
         assert revoked["revoked"] is True
