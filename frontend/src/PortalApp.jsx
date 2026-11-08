@@ -92,7 +92,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
 }
 
 function SupportWorkspace({user,setUser,checking,onSignOut,onStartLogin}) {
-  const [tickets,setTickets]=useState([]),[selected,setSelected]=useState(null),[adminTickets,setAdminTickets]=useState([]),[adminSelected,setAdminSelected]=useState(null),[orgs,setOrgs]=useState([]),[organizationId,setOrganizationId]=useState("");
+  const [tickets,setTickets]=useState([]),[selected,setSelected]=useState(null),[adminTickets,setAdminTickets]=useState([]),[adminSelected,setAdminSelected]=useState(null),[orgs,setOrgs]=useState([]),[organizationId,setOrganizationId]=useState(""),[helpArticles,setHelpArticles]=useState([]);
   const [guestTicket,setGuestTicket]=useState(null),[guestToken,setGuestToken]=useState("");
   const [ticketNumber,setTicketNumber]=useState(""),[accessToken,setAccessToken]=useState("");
   const [name,setName]=useState(""),[email,setEmail]=useState(user?.email||""),[phone,setPhone]=useState("");
@@ -101,6 +101,7 @@ function SupportWorkspace({user,setUser,checking,onSignOut,onStartLogin}) {
   const isPlatformAdmin=Boolean(user&&["root_superadmin","platform_admin"].includes(user.platform_role));
   async function refreshTickets(){if(!user)return;try{setTickets(await api("/api/v1/support/tickets"));}catch(e){setError(e.message);}}
   async function refreshAdminTickets(){if(!isPlatformAdmin)return;try{setAdminTickets(await api("/api/v1/support/admin/tickets"));}catch(e){setError(e.message);}}
+  useEffect(()=>{api("/api/v1/portals/docs/public/guide").then(rows=>setHelpArticles(rows)).catch(()=>setHelpArticles([]));},[]);
   useEffect(()=>{if(user){setEmail(user.email);setName(user.full_name||"");api("/api/v1/organizations").then(rows=>{setOrgs(rows);if(rows.length)setOrganizationId(old=>old||String(rows[0].id));}).catch(e=>setError(e.message));refreshTickets();if(["root_superadmin","platform_admin"].includes(user.platform_role))refreshAdminTickets();}},[user]);
   async function createTicket(e){e.preventDefault();setBusy(true);setError("");setNotice("");try{
     const payload={subject,category,message,contact_name:user?(user.full_name||user.email):name,contact_email:user?user.email:email,contact_phone:phone,organization_id:user&&organizationId?Number(organizationId):null};
