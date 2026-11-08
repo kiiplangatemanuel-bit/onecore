@@ -98,6 +98,8 @@ def upgrade():
         sa.Column("payment_reference", sa.String(120), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
     op.create_index("uq_payroll_run_org_idempotency", "payroll_runs", ["organization_id", "idempotency_key"], unique=True)
+    op.create_index("uq_payroll_run_org_branch_period", "payroll_runs", ["organization_id", "branch_id", "period_start", "period_end"], unique=True, sqlite_where=sa.text("branch_id IS NOT NULL"), postgresql_where=sa.text("branch_id IS NOT NULL"))
+    op.create_index("uq_payroll_run_org_all_period", "payroll_runs", ["organization_id", "period_start", "period_end"], unique=True, sqlite_where=sa.text("branch_id IS NULL"), postgresql_where=sa.text("branch_id IS NULL"))
     for col in ("organization_id", "branch_id"):
         op.create_index("ix_payroll_runs_" + col, "payroll_runs", [col])
 
