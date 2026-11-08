@@ -10,13 +10,15 @@ import re
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+
 _ROLE_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
 def apply_runtime_database_role(connection) -> str | None:
     if connection.dialect.name != "postgresql":
         return None
-    environment = os.getenv("APP_ENV", "development").strip().lower()
+    environment = settings.app_env.strip().lower()
     if environment not in {"production", "prod"}:
         return None
     role = os.getenv("ONECORE_DATABASE_RUNTIME_ROLE", "").strip()
