@@ -8,8 +8,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.models import AuditEvent, Branch, POSShift, POSSale, POSPayment, POSRefund
-from app.core.pos_completion_models import POSDevice, POSOfflineConflict, POSCustomer, POSLoyaltyEntry, POSPeripheralCommand, POSCustomerSale
+from app.core.models import AuditEvent, Branch, Organization, POSShift, POSSale, POSPayment, POSRefund
+from app.core.pos_completion_models import POSDevice, POSOfflineConflict, POSCustomer, POSLoyaltyEntry, POSPeripheralCommand, POSCustomerSale, POSLoyaltyRewardPolicy
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, can_access_branch, branch_scope_ids
@@ -61,6 +61,13 @@ class CustomerIn(BaseModel):
     branch_id: str | None = Field(default=None,max_length=36)
 class CustomerSaleIn(BaseModel):
     sale_id: int = Field(gt=0)
+class LoyaltyRewardPolicyIn(BaseModel):
+    earn_points_per_100_units: int = Field(ge=0, le=100000)
+    points_per_currency_unit: int = Field(gt=0, le=1000000)
+    max_redemption_percent: Decimal = Field(gt=0, le=100, multiple_of=Decimal("0.01"))
+    is_active: bool = True
+
+
 class LoyaltyRedeemIn(BaseModel):
     points: int = Field(gt=0,le=1000000)
     idempotency_key: str = Field(min_length=8,max_length=100)
@@ -77,6 +84,50 @@ class PeripheralAckIn(BaseModel):
 class SettlementIn(BaseModel):
     provider_reference: str = Field(min_length=3,max_length=120)
     evidence_note: str = Field(min_length=5,max_length=500)
+
+@router.get("/loyalty/reward-policy")
+def get_loyalty_reward_policy(membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    row=db.query(POSLoyaltyRewardPolicy).filter_by(organization_id=membership.organization_id).first()
+    org=db.query(Organization).filter_by(id=membership.organization_id).first()
+    if not row:
+        return {"configured":False,"currency":org.currency if org else "KES",
+            "earn_points_per_100_units":1,"points_per_currency_unit":100,
+            "max_redemption_percent":"50.00","is_active":False}
+    return {"id":row.id,"configured":True,"currency":org.currency if org else "KES",
+        "earn_points_per_100_units":row.earn_points_per_100_units,
+        "points_per_currency_unit":row.points_per_currency_unit,
+        "max_redemption_percent":str(row.max_redemption_percent),"is_active":row.is_active}
+
+
+@router.put("/loyalty/reward-policy")
+def save_loyalty_reward_policy(payload:LoyaltyRewardPolicyIn,membership=Depends(active_membership),
+    user=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    row=db.query(POSLoyaltyRewardPolicy).filter_by(
+        organization_id=membership.organization_id
+    ).with_for_update().first()
+    if row is None:
+        row=POSLoyaltyRewardPolicy(
+            organization_id=membership.organization_id,
+            created_by=user.id,updated_by=user.id,
+            **payload.model_dump(),
+        )
+        db.add(row)
+    else:
+        for key,value in payload.model_dump().items():
+            setattr(row,key,value)
+        row.updated_by=user.id
+        row.updated_at=datetime.now(timezone.utc)
+    db.flush()
+    _audit(db,user,membership.organization_id,"pos.loyalty.policy.updated",
+        "pos_loyalty_reward_policy",row.id,
+        f"earn:{payload.earn_points_per_100_units};points_per_unit:{payload.points_per_currency_unit};max_redemption:{payload.max_redemption_percent};active:{payload.is_active}")
+    db.commit()
+    return {"id":row.id,"configured":True,"earn_points_per_100_units":row.earn_points_per_100_units,
+        "points_per_currency_unit":row.points_per_currency_unit,
+        "max_redemption_percent":str(row.max_redemption_percent),"is_active":row.is_active}
+
 
 @router.post("/devices/register",status_code=201)
 def register_device(payload:DeviceIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
@@ -255,21 +306,13 @@ def customer_history(customer_id:int,membership=Depends(active_membership),db:Se
         "lifetime_spend":str(customer.lifetime_spend)},"purchases":[{"sale_id":x.id,"branch_id":x.branch_id,"total":str(x.total_amount),"currency":x.currency,"created_at":x.created_at} for x in rows]}
 
 @router.post("/customers/{customer_id}/rewards/redeem")
-def redeem_points(customer_id:int,payload:LoyaltyRedeemIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
+def redeem_points(customer_id:int,payload:LoyaltyRedeemIn,membership=Depends(active_membership),
+    user=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
-    customer=db.query(POSCustomer).filter_by(id=customer_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
-    if not customer:raise HTTPException(404,"Customer not found")
-    existing=db.query(POSLoyaltyEntry).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
-    if existing:
-        if existing.customer_id!=customer.id or existing.points_delta!=-payload.points:raise HTTPException(409,"Idempotency key reused with different redemption")
-        return {"id":existing.id,"points_balance":customer.points_balance,"idempotent":True}
-    if customer.branch_id:_branch(membership,customer.branch_id)
-    if customer.points_balance<payload.points:raise HTTPException(422,"Insufficient loyalty points")
-    customer.points_balance-=payload.points
-    row=POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,entry_type="redeem",
-        points_delta=-payload.points,idempotency_key=payload.idempotency_key,note=payload.note,created_by=user.id)
-    db.add(row); _audit(db,user,membership.organization_id,"pos.loyalty.redeemed","pos_customer",customer.id,str(payload.points)); db.commit()
-    return {"id":row.id,"points_redeemed":payload.points,"points_balance":customer.points_balance}
+    # Standalone point deductions have no corresponding priced transaction or
+    # accounting evidence. Redemptions must be applied atomically at checkout.
+    raise HTTPException(410,"Standalone loyalty deductions are disabled. Redeem points on a linked POS checkout so the currency discount, tax, sale and loyalty ledger are recorded together.")
+
 
 @router.post("/peripherals/commands",status_code=201)
 def queue_peripheral(payload:PeripheralIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
