@@ -831,6 +831,41 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
     return {"id": order.id, "order_number": order.order_number, "status": order.status}
 
 
+@router.post("/procurement/orders/{order_id}/cancel")
+def cancel_purchase_order(order_id: int, payload: dict,
+                          membership=Depends(active_membership),
+                          user: User=Depends(current_user), db: Session=Depends(get_db)):
+    """Cancel an unreceived PO without mutating inventory, invoices or accounting history."""
+    if (membership.role or "").lower() not in {"org_admin", "manager"}:
+        raise HTTPException(403, "Only procurement managers or organization administrators can cancel purchase orders")
+    reason = str(payload.get("reason", "")).strip()[:500]
+    if len(reason) < 5:
+        raise HTTPException(422, "A cancellation reason of at least five characters is required")
+    q = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        q = q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id == -1)
+    order = q.with_for_update().first()
+    if not order:
+        raise HTTPException(404, "Purchase order not found")
+    if order.status not in {"draft", "approved"}:
+        raise HTTPException(409, "Only draft or approved purchase orders can be cancelled")
+    # Even an uninspected GRN or unmatched invoice is a downstream commitment.
+    if db.query(ProcurementGoodsReceipt.id).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id).first():
+        raise HTTPException(409, "This order has a goods receipt; resolve the receipt workflow before cancellation")
+    if db.query(ProcurementSupplierInvoice.id).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id).first():
+        raise HTTPException(409, "This order has a supplier invoice; resolve invoice and AP workflows before cancellation")
+    order.status = "cancelled"
+    db.flush()
+    audit(db, user.id, membership.organization_id, "procurement.order.cancelled",
+          "purchase_order", order.id, reason)
+    return {"id": order.id, "order_number": order.order_number,
+            "status": order.status, "cancellation_reason": reason}
+
+
 @router.post("/procurement/orders/{order_id}/approve")
 def approve_purchase_order(order_id: int, membership=Depends(active_membership),
                            user: User = Depends(current_user), db: Session = Depends(get_db)):

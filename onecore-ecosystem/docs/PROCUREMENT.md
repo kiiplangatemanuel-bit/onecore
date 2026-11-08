@@ -28,6 +28,7 @@ purchase-order approval to the inventory stock ledger.
 - `GET/POST /api/v1/procurement/suppliers`
 - `GET/POST /api/v1/procurement/orders`
 - `POST /api/v1/procurement/orders/{id}/approve`
+- `POST /api/v1/procurement/orders/{id}/cancel` (manager/admin only; requires a reason; draft/approved orders with no GRN or supplier invoice only)
 - `POST /api/v1/procurement/orders/{id}/goods-receipts`
 - `GET /api/v1/procurement/goods-receipts`
 - `GET /api/v1/procurement/goods-receipts/{id}`
@@ -61,12 +62,24 @@ product prevention, model registration and API route registration. CI must pass
 migration upgrade/downgrade/re-upgrade, compilation and the complete test suite before
 this increment is considered verified.
 
+## Controlled purchase-order cancellation
+
+Managers and organization administrators can cancel a draft or approved PO using
+ `POST /api/v1/procurement/orders/{id}/cancel` with a JSON `reason` of at least five
+ characters. The operation locks the PO row, enforces tenant and branch scope, and
+ refuses cancellation once any goods receipt (including pending inspection) or supplier
+ invoice exists. It does not delete lines, reverse stock, alter AP, or erase approval
+ history; it changes the PO status to `cancelled` and records an audit event. Orders with
+ downstream activity must be resolved through their receipt, return, invoice and AP
+ workflows rather than being silently rolled back. Supplier notification/acknowledgement
+ is not implied by this internal status change.
+
 ## Remaining implementation and production gates
 
 The current mainline includes the requisition, PO approval, RFQ/quotation, supplier invoice matching, returns, AP integration, supplier settlement/remittance, supplier statement reconciliation, delegated approval, supplier portal and discrepancy/reconciliation workflows described below. Do not use the earlier "Remaining gaps" bullets as a current statement that those delivered features are absent.
 
 Still not evidenced as complete in the current repository:
-- PO amendment/cancellation with controlled downstream reversal, supplier acknowledgement and scheduled delivery milestones.
+- PO amendments, supplier acknowledgement and scheduled delivery milestones. Controlled cancellation is now available only before any GRN or supplier invoice exists; downstream reversals remain deliberately blocked pending explicit accounting and stock reversal workflows.
 - Complete tax/freight/discount/landed-cost allocation across receipt and AP accounting.
 - Automated supplier email/RFQ/remittance notifications and reliable delivery tracking beyond supplier-reported updates.
 - Full CSV bulk import/export and detailed on-time delivery analytics/dashboard exports.
