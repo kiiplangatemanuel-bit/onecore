@@ -29,9 +29,9 @@ Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The b
 ## Release verification
 
 Use a disposable Supabase staging project to verify:
-- Alembic upgrade to head and full downgrade/re-upgrade, including migrations 0053 (Support ticket/message RLS) and 0054 (private Support attachment metadata/RLS).
+- Alembic upgrade to head and full downgrade/re-upgrade, including migrations 0054 (Support ticket/message RLS) and 0055 (private Support attachment metadata/RLS).
 - Python compilation, full pytest and Vite production build.
 - PostgreSQL row locking, uniqueness, transaction rollback, idempotency and concurrent goods-receipt/settlement operations.
 - API/worker schema parity, backup/PITR and restore rehearsal.
 
-Migrations 0052–0054 enable and force RLS for portal workflow records, Support tickets/messages and Support attachment metadata. The API binds verified OneCore identity and validated guest ticket-token hashes to transaction-local PostgreSQL settings. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. Verify the actual connected role and policies in staging before production rollout.\n\nSQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
+Migrations 0052–0055 enable and force RLS for portal workflow records, Support tickets/messages and Support attachment metadata. The API binds verified OneCore identity and validated guest ticket-token hashes to transaction-local PostgreSQL settings. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. Verify the actual connected role and policies in staging before production rollout.\n\nSQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
