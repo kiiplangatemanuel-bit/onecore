@@ -51,3 +51,29 @@ def test_chat_input_limits_prompt_and_restricts_task():
 
 def test_supported_language_set_includes_required_african_languages():
     assert {"en", "sw", "fr", "ar", "so", "am", "ha", "yo", "zu", "pt"} <= SUPPORTED_LANGUAGES
+
+from fastapi import HTTPException
+from app.api.ai_routes import _extract_upload
+
+
+def test_ai_file_extraction_supports_text_and_csv():
+    assert "quarter,revenue" in _extract_upload("report.csv", b"quarter,revenue\\nQ1,100")
+    assert "Project notes" in _extract_upload("notes.txt", b"Project notes")
+
+
+def test_ai_file_extraction_rejects_unknown_and_mismatched_file_types():
+    with pytest.raises(HTTPException) as exc:
+        _extract_upload("payload.exe", b"hello")
+    assert exc.value.status_code == 415
+    with pytest.raises(HTTPException) as exc:
+        _extract_upload("fake.pdf", b"not a pdf")
+    assert exc.value.status_code == 415
+
+
+def test_ai_file_extraction_enforces_size_and_nonempty_content():
+    with pytest.raises(HTTPException) as exc:
+        _extract_upload("large.txt", b"x" * (5 * 1024 * 1024 + 1))
+    assert exc.value.status_code == 413
+    with pytest.raises(HTTPException) as exc:
+        _extract_upload("empty.txt", b"   ")
+    assert exc.value.status_code == 422
