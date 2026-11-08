@@ -157,6 +157,38 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert paid.json()["status"] == "paid"
             assert paid.json()["settlement_journal_id"]
 
+            actor["user"], actor["role"] = users[0], "payroll_manager"
+            december = client.post("/api/v1/payroll/runs", json={
+                "branch_id": branch_id, "period_start": "2026-12-01",
+                "period_end": "2026-12-31", "employee_ids": [employee_id],
+                "idempotency_key": "payroll-2026-12-hq-original",
+            })
+            assert december.status_code == 201, december.text
+            december_id = december.json()["id"]
+            assert client.post(f"/api/v1/payroll/runs/{december_id}/submit").status_code == 200
+
+            actor["user"], actor["role"] = users[1], "payroll_approver"
+            assert client.post(f"/api/v1/payroll/runs/{december_id}/approve").status_code == 200
+
+            actor["user"], actor["role"] = users[0], "org_admin"
+            december_post = client.post(f"/api/v1/payroll/runs/{december_id}/post-to-accounting")
+            assert december_post.status_code == 201, december_post.text
+            reversed_journal = client.post(
+                f"/api/v1/payroll/runs/{december_id}/reverse-accounting-journal",
+                json={"reason": "Correction required before payment"},
+            )
+            assert reversed_journal.status_code == 200, reversed_journal.text
+            assert reversed_journal.json()["status"] == "reversed"
+
+            actor["role"] = "payroll_manager"
+            replacement = client.post("/api/v1/payroll/runs", json={
+                "branch_id": branch_id, "period_start": "2026-12-01",
+                "period_end": "2026-12-31", "employee_ids": [employee_id],
+                "idempotency_key": "payroll-2026-12-hq-corrected",
+            })
+            assert replacement.status_code == 201, replacement.text
+            assert replacement.json()["id"] != december_id
+
             actor["role"] = "staff"
             forbidden = client.get(f"/api/v1/payroll/runs/{run_id}/payslips")
             assert forbidden.status_code == 403
