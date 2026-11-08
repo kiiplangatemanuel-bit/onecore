@@ -447,6 +447,8 @@ def set_support_attachment_scan_result(
         raise HTTPException(404, "Support attachment not found")
     if attachment.status != "pending_scan":
         raise HTTPException(409, "Only quarantined attachments can receive a security review decision")
+    if payload.status == "available":
+        raise HTTPException(409, "Attachments can only be released by a successful automated malware scan")
     attachment.status = payload.status
     _audit(db, user.id, ticket.organization_id, "support.attachment.security_reviewed",
            ticket, f"attachment_id={attachment.id};status={attachment.status}")
