@@ -20,5 +20,7 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: PORTAL_REDIRECT_ORIGINS
+        sync: false
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "30"

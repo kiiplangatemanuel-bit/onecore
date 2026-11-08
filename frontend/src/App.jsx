@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, api, clearToken, getToken, login, setActiveOrganization } from "./api";
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
@@ -9,20 +9,37 @@ import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 function Icon({children}) { return <span className="nav-icon" aria-hidden="true">{children}</span>; }
 function Login({onLogin}) {
  const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [busy,setBusy]=useState(false); const [error,setError]=useState("");
- async function submit(e){e.preventDefault();setBusy(true);setError("");try{const user=await login(email,password);onLogin(user);}catch(err){setError(err.message);}finally{setBusy(false);}}
- return <main className="login-shell"><section className="login-brand"><div className="brand-mark">O</div><p className="eyebrow">ONECORE TECHNOLOGIES</p><h1>One platform.<br/>Every organization.</h1><p className="muted-light">A connected workspace for finance, commerce, education, healthcare and operations.</p><div className="login-foot">Secure access to your OneCore workspace</div></section><section className="login-panel"><form className="login-card" onSubmit={submit}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to OneCore</h2><p className="muted">Use your organization account to continue.</p>{error&&<div className="alert error">{error}</div>}<label>Email address<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com"/></label><label>Password<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter your password"/></label><button className="primary full" disabled={busy}>{busy?"Signing in…":"Sign in securely"}</button><p className="tiny">Authentication is verified by your OneCore API. Contact your administrator if you need an account.</p></form></section></main>;
+ async function submit(e){e.preventDefault();setBusy(true);setError("");try{const identity=await login(email,password);await onLogin(identity);}catch(err){setError(err.message);}finally{setBusy(false);}}
+ return <main className="login-shell"><section className="login-brand"><div className="brand-mark">O</div><p className="eyebrow">ONECORE TECHNOLOGIES</p><h1>One platform.<br/>Every organization.</h1><p className="muted-light">A connected workspace for finance, commerce, education, healthcare and operations.</p><div className="login-foot">Secure access to your OneCore workspace</div></section><section className="login-panel"><form className="login-card" onSubmit={submit}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to OneCore</h2><p className="muted">Use your organization account to continue.</p>{error&&<div className="alert error">{error}</div>}<label>Email address<input type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com"/></label><label>Password<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter your password"/></label><button className="primary full" disabled={busy}>{busy?"Signing in…":"Sign in securely"}</button><p className="tiny">Authentication is verified by your OneCore API. <a href={"/register"+window.location.search}>Create an organization account</a> if you are new to OneCore.</p></form></section></main>;
 }
 function App(){
  const [user,setUser]=useState(null); const [checking,setChecking]=useState(Boolean(getToken())); const [path,setPath]=useState(window.location.pathname); const [collapsed,setCollapsed]=useState(false); const [query,setQuery]=useState(""); const [health,setHealth]=useState("checking"); const [orgs,setOrgs]=useState([]); const [activeOrgId,setActiveOrgId]=useState(sessionStorage.getItem("onecore.organization_id")||""); const [modules,setModules]=useState([]); const [notice,setNotice]=useState(""); 
  useEffect(()=>{const pop=()=>setPath(window.location.pathname);window.addEventListener("popstate",pop);return()=>window.removeEventListener("popstate",pop);},[]);
  useEffect(()=>{if(!getToken()){setChecking(false);return;}api("/api/v1/auth/me").then(setUser).catch(()=>{clearToken();setUser(null);}).finally(()=>setChecking(false));},[]);
+ const ssoRedirectStarted=useRef(false);
+ async function finishPortalSignIn(identity){
+  const params=new URLSearchParams(window.location.search);
+  const redirectUri=params.get("return_to");
+  if(!redirectUri){setUser(identity);return;}
+  const state=params.get("state"),codeChallenge=params.get("code_challenge");
+  if(!state||!codeChallenge)throw new Error("The portal sign-in request is incomplete. Return to the portal and try again.");
+  const handoff=await api("/api/v1/auth/portal-code",{method:"POST",body:JSON.stringify({redirect_uri:redirectUri,state,code_challenge:codeChallenge})});
+  window.location.assign(handoff.redirect_url);
+ }
+ useEffect(()=>{
+  if(!user||path!=="/login"||ssoRedirectStarted.current)return;
+  const params=new URLSearchParams(window.location.search);
+  if(!params.get("return_to"))return;
+  ssoRedirectStarted.current=true;
+  finishPortalSignIn(user).catch(error=>{ssoRedirectStarted.current=false;setNotice("Could not complete portal sign-in: "+error.message);});
+ },[user,path]);
  useEffect(()=>{if(!user)return;api("/health").then(()=>setHealth("online")).catch(()=>setHealth("offline"));api("/api/v1/organizations").then(rows=>{setOrgs(rows);if(rows.length&&!rows.some(o=>String(o.id)===sessionStorage.getItem("onecore.organization_id"))){setActiveOrganization(rows[0].id);setActiveOrgId(String(rows[0].id));}}).catch(()=>setOrgs([]));api("/api/v1/modules").then(v=>setModules(Array.isArray(v)?v:(v.modules||[]))).catch(()=>setModules([]));},[user]);
  const active=allModules.find(m=>m[1]===path); const selectedOrg=orgs.find(o=>String(o.id)===String(activeOrgId))||orgs[0]; const title=active?.[0]||"Overview";
  const visibleGroups=useMemo(()=>groups.map(g=>({...g,items:g.items.filter(m=>m[0].toLowerCase().includes(query.toLowerCase())||m[3].toLowerCase().includes(query.toLowerCase()))})).filter(g=>g.items.length),[query]);
  function navigate(next){history.pushState({}, "", next);setPath(next);setNotice("");}
  function signOut(){clearToken();setUser(null);setOrgs([]);navigate("/");}
  if(checking)return <div className="loading-screen"><div className="brand-mark">O</div><p>Securing your workspace…</p></div>;
- if(!user)return path==="/login"?<Login onLogin={setUser}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:<PublicSite/>;
+ if(!user)return path==="/login"?<Login onLogin={finishPortalSignIn}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:<PublicSite/>;
  const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const portalRoutes=new Set(["/team","/domains","/cms","/media","/seo","/integrations","/analytics","/operations","/security","/subscriptions","/school-portal","/hospital-portal","/finance-portal","/hr-portal","/property-portal","/hotel-portal","/restaurant-portal","/services-portal"]); const moduleCount=modules.length||allModules.length;
  return <div className="app-shell">
   <aside className={collapsed?"sidebar collapsed":"sidebar"}><div className="sidebar-brand"><div className="brand-mark small">O</div>{!collapsed&&<div><strong>onecore</strong><small>WORKSPACE</small></div>}<button className="collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation">{collapsed?"»":"«"}</button></div>

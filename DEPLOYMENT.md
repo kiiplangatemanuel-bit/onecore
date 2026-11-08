@@ -5,10 +5,11 @@
 1. Create a Supabase project and copy its PostgreSQL connection URI from **Project Settings → Database**. Use the Supavisor session pooler or direct connection where supported, and append `sslmode=require`.
 2. Connect this GitHub repository to Render and select the repository Blueprint. Render reads the root `render.yaml` and builds the backend using `onecore-ecosystem/Dockerfile`.
 3. Set the secret `SUPABASE_DB_URL` on the Render `onecore-api` service. Use the actual Supabase URI; do not commit it or expose it to Vite.
-4. Set `CORS_ORIGINS` to the exact deployed Vercel origin(s), comma-separated, with no wildcard (for example, `https://your-project.vercel.app`). If you attach a custom API domain, update `TRUSTED_HOSTS` to include that hostname.
-5. Review generated `SECRET_KEY`; keep `APP_ENV=production`, `DEBUG=false`, and `FORCE_HTTPS=true`.
-6. Deploy and wait for Render's `/ready` health check. The container runs `alembic upgrade head` before starting Uvicorn. Confirm the migration head in the deployment logs.
-7. Create the first organization/admin through the supported onboarding/bootstrap process. Do not set bootstrap credentials unless you can rotate/remove them immediately after first use.
+4. Set `CORS_ORIGINS` to the exact deployed Vercel origins, comma-separated, with no wildcard. Include the main app and every independently deployed portal origin.
+5. Set `PORTAL_REDIRECT_ORIGINS` to that same exact comma-separated HTTPS origin allowlist. The shared sign-in flow uses short-lived, single-use PKCE authorization codes and rejects unregistered redirect origins. If you attach a custom API domain, update `TRUSTED_HOSTS` to include that hostname.
+6. Review generated `SECRET_KEY`; keep `APP_ENV=production`, `DEBUG=false`, and `FORCE_HTTPS=true`.
+7. Deploy and wait for Render's `/ready` health check. The container runs `alembic upgrade head` before starting Uvicorn. Confirm the migration head in the deployment logs.
+8. Create the first organization/admin through the supported onboarding/bootstrap process. Do not set bootstrap credentials unless you can rotate/remove them immediately after first use.
 
 ## Frontend — Vercel
 
