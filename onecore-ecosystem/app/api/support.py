@@ -227,7 +227,7 @@ def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, 
     ).first()
     if not attachment:
         raise HTTPException(404, "Support attachment not found")
-    if attachment.status == "uploaded":
+    if attachment.status != "pending":
         return {"id": attachment.id, "status": attachment.status}
     storage = _storage_client()
     try:
