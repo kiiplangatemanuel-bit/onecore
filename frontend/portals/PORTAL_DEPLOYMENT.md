@@ -72,3 +72,18 @@ Support attachments use a private S3-compatible bucket. The API creates short-li
 ## Supabase Auth login exchange (migration 0057)
 
 Set backend `SUPABASE_URL` and `SUPABASE_ANON_KEY` and matching central frontend `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. The shared login signs in with Supabase Auth, sends the access token to `POST /api/v1/auth/supabase-session`, and receives the normal OneCore bearer token. The backend validates the token against the configured Supabase Auth `/auth/v1/user` endpoint, requires a confirmed email and rejects anonymous sessions. Existing OneCore users are linked by their verified email; new verified Supabase users receive a OneCore identity. The OneCore user ID is stored in a unique mapping column. This exchange never exposes or uses a Supabase service-role key. Apply Alembic migration 0057 before enabling the flow.
+
+## Developer webhook delivery worker
+
+Developer webhook configurations are created in the authenticated Developers portal. An organization Developer or Administrator activates each configured endpoint; the signing secret is displayed once and stored encrypted at rest using a key derived from the API `SECRET_KEY`. Keep `SECRET_KEY` stable across deployments and backups or existing encrypted webhook secrets cannot be decrypted. Rotate secrets after any suspected exposure.
+
+The API writes events to the durable `developer_webhook_deliveries` outbox with an endpoint/event idempotency constraint. Deliveries are signed using HMAC-SHA256 over `timestamp + "." + exact_raw_body` and sent with `X-OneCore-Event`, `X-OneCore-Event-Id`, `X-OneCore-Timestamp`, and `X-OneCore-Signature: sha256=...` headers. Receivers must compare signatures in constant time, reject stale timestamps (recommended maximum age: five minutes), and deduplicate event IDs. Delivery retries use exponential backoff, stop after eight attempts, do not follow redirects, and use bounded connection/request timeouts.
+
+Apply migrations through `0057_developer_webhooks` after `0057_supabase_auth_identity`. Provision the dedicated `onecore_webhook_worker` role using the SQL in `onecore-ecosystem/docs/SUPABASE.md`. Run the worker as a separate process, not as a public unauthenticated API route:
+
+```bash
+cd onecore-ecosystem
+python -m app.workers.webhook_delivery --batch-size 25
+```
+
+Schedule that command every minute using the deployment platform's worker/cron facility. Multiple worker instances may run concurrently; PostgreSQL row locks with `SKIP LOCKED` prevent two workers from claiming the same pending delivery in the same transaction. The worker uses a dedicated PostgreSQL login with `NOBYPASSRLS`; configure `WEBHOOK_WORKER_DATABASE_URL` only on the worker service and keep `SECRET_KEY` stable. Configure network egress policy as an additional SSRF boundary; endpoint DNS is checked for public addresses at activation and immediately before delivery, redirects and environment proxies are disabled. DNS pinning/network-level egress enforcement remains a deployment responsibility.
