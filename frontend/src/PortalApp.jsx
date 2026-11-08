@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { API_BASE, api, clearToken, getToken, login } from "./api";
 import { portalLink, portalUrl } from "./config/portals";
+import PortalExperience from "./PortalExperience.jsx";
 import "./portal.css";
 
 const CATALOG = {
@@ -29,6 +30,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   useEffect(()=>{if(portal==="admin"&&user)loadAdmin();},[portal,user]);
   function signOut(){clearToken();setUser(null);}
   if(portal==="support") return <SupportWorkspace user={user} setUser={setUser} checking={checking} onSignOut={signOut}/>;
+  if(portal!=="admin" && ["status","developers","docs","community","trust","events","careers","partners"].includes(portal)) return <PortalExperience portal={portal} user={user} setUser={setUser} onSignOut={signOut} checking={checking}/>;
   return <div className="portal-site"><header className="portal-header"><a href={portalUrl("publicSite")||"/"} className="portal-logo"><b>O</b><span>onecore<small>TECHNOLOGIES LTD</small></span></a><nav><a href={portalLink("publicSite")}>Main website</a><a href={portalLink("docs")}>Documentation</a><a href={portalLink("support")}>Support</a></nav><div>{user?<><span className="portal-user">{user.full_name||user.email}</span><button className="portal-quiet" onClick={signOut}>Sign out</button></>:<button className="portal-quiet" onClick={()=>setShowLogin(v=>!v)}>Sign in</button>}</div></header>
   <main className="portal-main"><section className="portal-hero"><span>{config.eyebrow}</span><h1>{config.name}</h1><p>{config.intro}</p><div className="portal-actions"><button onClick={()=>setShowLogin(v=>!v)}>{user?"Account":"Sign in"}</button>{portal==="developers"&&<a href={API_BASE+"/docs"} target="_blank" rel="noreferrer">Open API reference ↗</a>}</div></section>
   {checking?<p className="portal-notice">Checking your OneCore session…</p>:null}
