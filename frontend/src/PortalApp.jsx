@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { API_BASE, api, clearToken, getToken, setToken } from "./api";
 import { portalLink, portalUrl } from "./config/portals";
+import PortalWorkflowWorkspace from "./PortalWorkflowWorkspace.jsx";
 import "./portal.css";
 
 const PUBLIC_CONTENT = {
@@ -71,6 +72,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   {error&&<div className="portal-error" role="alert">{error}</div>}
   {user?<section className="portal-panel portal-account"><div className="portal-panel-head"><div><span className="portal-kicker">AUTHENTICATED ACCESS</span><h2>Your OneCore identity</h2><p>{user.full_name||user.email} · {user.email}</p></div><span className="portal-role">{user.platform_role||"customer"}</span></div><div className="portal-form-grid"><label>Active organization<select value={activeOrg} onChange={e=>setActiveOrg(e.target.value)}><option value="">Personal access</option>{organizations.map(org=><option key={org.id} value={org.id}>{org.name} · {org.role}</option>)}</select></label><div><strong>Organization memberships</strong><p>{organizations.length} active organization{organizations.length===1?"":"s"} available to this identity.</p></div></div>{adminDenied&&<div className="portal-error">Your identity is authenticated, but this account does not have the platform administrator role required for this application.</div>}<p className="portal-muted">Private records are loaded only from authenticated API endpoints. The organization selector is context only; every backend endpoint must independently validate membership and permissions.</p><a className="portal-account-link" href={portalUrl("app")}>Open OneCore workspace ↗</a></section>:null}
   <PublicPortalContent portal={portal} content={content}/>
+  {user&&!adminDenied&&portal!=="admin"?<PortalWorkflowWorkspace portal={portal} organizationId={activeOrg} organizations={organizations}/>:null}
   <section className="portal-notice" id="contact"><strong>Independent deployment</strong><p>This application is independently deployable. Its public URL and shared API URL are configured in this application's environment. Public browsing does not require an account.</p></section></main><footer className="portal-footer">© {new Date().getFullYear()} OneCore Technologies Ltd · One Platform. Every Organization. Anywhere.</footer></div>;
 }
 
