@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.core.models import AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment
+from app.core.models import AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, CRMCampaignAttribution
 from app.core.schemas import AccountingInvoiceIn, AccountingInvoicePaymentIn
 from app.main import app
 
