@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     ai_base_url: str = ""
     ai_api_key: str = ""
     ai_model: str = ""
+    integration_ai_fallback_enabled: bool = False
+    ai_fallback_base_url: str = ""
+    ai_fallback_api_key: str = ""
+    ai_fallback_model: str = ""
 
     integration_object_storage_enabled: bool = False
     s3_endpoint_url: str = ""
