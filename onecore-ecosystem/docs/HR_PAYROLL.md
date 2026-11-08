@@ -13,6 +13,7 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - Gross pay includes configured recurring allowances and benefits. Base salary, recurring components and employee pension are prorated by eligible calendar days for hires/terminations during the month.
 - Approved attendance overtime minutes are included in payroll only when the employee has an explicit overtime multiplier configured. Hourly pay is derived from monthly base salary and the employee's scheduled daily minutes using a documented 26-day payroll divisor; the multiplier is employer policy, not a statutory rate.
 - Approved unpaid leave is prorated into a gross-pay deduction for the days overlapping the payroll month. Pending/rejected leave and unapproved attendance do not affect payroll. The calculation snapshot records overtime minutes/earnings and unpaid-leave days/deductions.
+- One-off earnings and deductions are submitted with an effective date, reason and idempotency key, then independently approved/rejected by HR. Only approved, unassigned adjustments in the payroll period are applied once; earnings enter taxable gross pay and deductions reduce net pay after statutory deductions. Each item and its reason are retained in the immutable payslip snapshot.
 - PAYE is progressive over the configured bands after the configured deductible pension amount and personal relief. NSSF is calculated by configured tiers. SHIF and Housing Levy use configured rates.
 - Draft payroll calculation snapshots and individual payslip snapshots are persisted. Submitted runs require a different user to approve; the approver cannot also record payment. Payment references are confirmations only and do not initiate transfers.
 - Idempotency key on payroll run creation; database uniqueness for employee numbers, rule versions, payroll idempotency keys and one payslip per employee per run.
@@ -31,6 +32,9 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - `GET /api/v1/hr/attendance`
 - `POST /api/v1/hr/attendance`
 - `POST /api/v1/hr/attendance/{attendance_id}/decision`
+- `GET /api/v1/hr/payroll-adjustments`
+- `POST /api/v1/hr/employees/{employee_id}/payroll-adjustments`
+- `POST /api/v1/hr/payroll-adjustments/{adjustment_id}/decision`
 - `GET/POST /api/v1/payroll/rule-sets`
 - `POST /api/v1/payroll/rule-sets/{rule_set_id}/submit`
 - `POST /api/v1/payroll/rule-sets/{rule_set_id}/approve`
@@ -44,9 +48,9 @@ This implementation replaces the former HR/Payroll scaffold with the first datab
 - `POST /api/v1/payroll/runs/{run_id}/reverse-accounting-journal`
 
 ## Calculation and release limitations
-This slice is not yet a complete statutory payroll product or a production compliance certification. The current calculation model covers recurring monthly salary/allowances/benefits, configured pension, PAYE, NSSF, SHIF and Housing Levy. Attendance capture, review and overtime-minute calculation are implemented, and approved overtime and unpaid leave now feed the immutable payroll calculation snapshot. Shift differentials, one-off earnings/deductions, additional tax relief variants, employee self-service access, statutory return generation/filing, statutory remittance integrations, payment reversals and direct bank/M-Pesa transfer integrations remain follow-on work. The accrual journal, pre-payment accrual reversal and externally confirmed net-pay settlement journal are implemented; direct money movement is not.
+This slice is not yet a complete statutory payroll product or a production compliance certification. The current calculation model covers recurring monthly salary/allowances/benefits, configured pension, PAYE, NSSF, SHIF and Housing Levy. Attendance capture, review and overtime-minute calculation are implemented, and approved overtime and unpaid leave now feed the immutable payroll calculation snapshot. Shift differentials, additional tax relief variants, employee self-service access, statutory return generation/filing, statutory remittance integrations, payment reversals and direct bank/M-Pesa transfer integrations remain follow-on work. The accrual journal, pre-payment accrual reversal and externally confirmed net-pay settlement journal are implemented; direct money movement is not.
 
-Before production use, OneCore must run migrations 0037–0041 against a controlled database, validate rule sets against the applicable official publications and effective dates, execute payroll parallel runs/UAT, and obtain finance/HR sign-off.
+Before production use, OneCore must run migrations 0037–0044 against a controlled database, validate rule sets against the applicable official publications and effective dates, execute payroll parallel runs/UAT, and obtain finance/HR sign-off.
 
 
 ## Integration reconciliation (legacy HR PR #69)
@@ -63,8 +67,8 @@ The current `main` HR domain is the canonical implementation. It uses `app/core/
 | Kenya statutory PAYE, NSSF, SHIF and Housing Levy rules | Implemented as effective-dated, separately approved rule sets; official-source validation and HR/finance sign-off remain release gates |
 | Payroll preparation, approvals and payslips | Implemented with immutable calculation snapshots and maker-checker controls |
 | Payroll accounting accrual and reversal | Implemented with balanced journals and controlled pre-payment reversal |
-| One-off earnings and deductions | Implemented on the current domain by the separate payroll-adjustments change set; retain its own review and CI gates |
-| Legacy payment batches and bank reconciliation | Not transplanted: the old implementation depends on the duplicate payroll tables and generic Record storage. A provider-backed disbursement/reconciliation workflow must be designed against the current PayrollRun/PayrollPayslip model before implementation |
+| One-off earnings and deductions | Implemented on the current canonical domain in migrations 0043–0044 with independent approval, immutable payslip snapshots and accounting liability mapping |
+| Legacy payment batches and bank reconciliation | Legacy generic-record implementation not transplanted; a new canonical payment-batch and bank-reconciliation workflow is implemented in migration 0042 against PayrollRun/PayrollPayslip |
 | Inherited Healthcare, Pharmacy/Lab, SACCO, School and CRM files | Excluded from HR integration; they must be delivered and reviewed through their own module branches |
 
 This payment-batch implementation is a new, focused change against the canonical payroll domain. It does not copy the legacy generic-record payment tables or claim to initiate bank transfers. External payment references are supplied after funds have been sent through an independently operated bank/provider channel.
@@ -79,3 +83,14 @@ This payment-batch implementation is a new, focused change against the canonical
 - Import bank statement lines as structured rows from a bank export. Exact reference, amount and currency matches are automatic; ambiguous or unmatched lines remain visible as exceptions. A finance reviewer can manually resolve an exception only when amount and currency exactly match a paid batch item, with a required audit note.
 - A statement line and a payroll batch item can each be reconciled only once. Duplicate statement fingerprints are rejected. Cross-organization data is not visible or matchable.
 - API paths: `GET/POST /api/v1/payroll/payment-batches`, `POST /api/v1/payroll/payment-batches/{id}/submit`, `POST /api/v1/payroll/payment-batches/{id}/cancel`, `POST /api/v1/payroll/payment-batches/{id}/approve`, `POST /api/v1/payroll/payment-batches/{id}/settlements`, `POST /api/v1/payroll/bank-statements/import`, `GET /api/v1/payroll/bank-statements`, and `POST /api/v1/payroll/bank-statements/{id}/resolve`.
+
+
+## One-off payroll adjustments (migrations 0043–0044)
+
+- `payroll_adjustments` stores tenant/branch-scoped employee earnings and deductions with effective dates, reasons, idempotency keys and submitter/decision audit fields.
+- Adjustment submitters cannot approve or reject their own requests. Only pending requests can be decided; approved/rejected/applied states are explicit.
+- Payroll calculation locks eligible approved adjustments for the period and employee, includes earnings in gross/taxable pay and deductions after statutory deductions, and marks each adjustment applied to the resulting payroll run in the same transaction.
+- Immutable payslip snapshots include adjustment IDs, types, amounts, effective dates, descriptions and reasons.
+- Pre-payment accrual reversal releases adjustments back to approved/unassigned state for a corrected payroll run. Paid runs cannot use this reversal path.
+- A one-off deduction is posted to a separate liability account. Posting is blocked until Finance maps an active tenant-owned liability account; the journal remains balanced.
+- Migration 0043 adds the adjustment table after payment-batch migration 0042. Migration 0044 adds the optional other-deductions liability mapping. Both migrations are reversible and included in the migration upgrade/downgrade CI workflow.
