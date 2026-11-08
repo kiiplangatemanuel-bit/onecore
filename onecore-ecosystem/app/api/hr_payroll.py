@@ -947,7 +947,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
         journal_id=journal.id,mapping_snapshot={name:getattr(mapping,name) for name in (
             "salary_expense_account_id","employer_contribution_expense_account_id","net_payable_account_id",
             "paye_payable_account_id","nssf_payable_account_id","shif_payable_account_id",
-            "housing_levy_payable_account_id","pension_payable_account_id","bank_account_id")},
+            "housing_levy_payable_account_id","pension_payable_account_id","bank_account_id",
+            "other_deductions_payable_account_id")},
         created_by=user.id)
     db.add(link)
     audit(db,user,membership.organization_id,"payroll.run.posted_to_accounting","payroll_run",run.id,
