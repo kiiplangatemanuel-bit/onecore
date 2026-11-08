@@ -2,6 +2,8 @@ import hashlib
 import secrets
 import uuid
 import re
+import socket
+import struct
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -226,6 +228,55 @@ def _create_attachment_upload(ticket: SupportTicket, payload: SupportAttachmentI
     }
 
 
+def _parse_clamav_response(response: str) -> tuple[str, str | None]:
+    value = response.strip().rstrip(chr(0))
+    if value.endswith(': OK'):
+        return 'clean', None
+    if value.endswith(' FOUND'):
+        return 'infected', value.rsplit(': ', 1)[-1][:-6]
+    raise RuntimeError('ClamAV returned an invalid or error response')
+
+
+def _scan_attachment_object(storage, object_key: str) -> tuple[str, str | None]:
+    if not settings.support_attachment_scanning_enabled or not settings.clamav_host.strip():
+        raise HTTPException(503, 'Automated attachment scanning is not configured')
+    try:
+        remote = storage.get_object(Bucket=settings.s3_bucket, Key=object_key)
+        body = remote['Body']
+        try:
+            with socket.create_connection((settings.clamav_host.strip(), settings.clamav_port), timeout=settings.clamav_timeout_seconds) as scanner:
+                scanner.settimeout(settings.clamav_timeout_seconds)
+                scanner.sendall(b'zINSTREAM' + bytes([0]))
+                total = 0
+                while True:
+                    chunk = body.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > 10 * 1024 * 1024:
+                        raise RuntimeError('Attachment exceeds the scanner size limit')
+                    scanner.sendall(struct.pack('!I', len(chunk)))
+                    scanner.sendall(chunk)
+                scanner.sendall(struct.pack('!I', 0))
+                chunks = []
+                received = 0
+                while received < 1024:
+                    part = scanner.recv(1024 - received)
+                    if not part:
+                        break
+                    chunks.append(part)
+                    received += len(part)
+                    if bytes([0]) in part:
+                        break
+                response = b''.join(chunks).decode('utf-8', errors='replace')
+        finally:
+            body.close()
+        return _parse_clamav_response(response)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, 'Automated attachment scan failed; file remains quarantined') from exc
+
 def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, db: Session) -> dict:
     attachment = db.query(SupportAttachment).filter_by(
         id=attachment_id, ticket_id=ticket.id
@@ -243,13 +294,25 @@ def _complete_attachment(ticket: SupportTicket, attachment_id: int, user: User, 
         raise HTTPException(422, "Uploaded attachment size does not match the declared size")
     if remote.get("ContentType", "").lower() != attachment.content_type:
         raise HTTPException(422, "Uploaded attachment content type does not match")
-    # Keep the object quarantined until an authorized malware-scanning/review
-    # process explicitly releases it for customer downloads.
-    attachment.status = "pending_scan"
-    _audit(db, user.id, ticket.organization_id, "support.attachment.upload_completed",
-           ticket, f"attachment_id={attachment.id};status=pending_scan")
+    # Fail closed: only an explicit clean ClamAV verdict releases a file.
+    # Scanner outages leave the object private and quarantined.
+    if settings.support_attachment_scanning_enabled:
+        result, signature = _scan_attachment_object(storage, attachment.object_key)
+        attachment.scan_engine = "clamav"
+        attachment.scan_result = result
+        attachment.scan_signature = signature
+        attachment.scanned_at = datetime.now(timezone.utc)
+        attachment.status = "available" if result == "clean" else "rejected"
+        action = "support.attachment.scan_clean" if result == "clean" else "support.attachment.scan_infected"
+        _audit(db, user.id, ticket.organization_id, action, ticket,
+               f"attachment_id={attachment.id};engine=clamav;result={result}")
+    else:
+        attachment.status = "pending_scan"
+        _audit(db, user.id, ticket.organization_id, "support.attachment.upload_completed",
+               ticket, f"attachment_id={attachment.id};status=pending_scan")
     db.commit()
-    return {"id": attachment.id, "status": attachment.status}
+    return {"id": attachment.id, "status": attachment.status,
+            "scan_engine": attachment.scan_engine, "scan_result": attachment.scan_result}
 
 
 def _attachment_download(attachment: SupportAttachment) -> dict:
