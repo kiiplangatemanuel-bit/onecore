@@ -44,6 +44,9 @@ def test_pos_contract_requires_transaction_id_and_positive_quantity():
 
 
 def test_pos_models_and_routes_are_registered():
+    assert "loyalty_points_redeemed" in POSSale.__table__.columns
+    assert "loyalty_discount_amount" in POSSale.__table__.columns
+    assert "loyalty_discount_amount" in POSSaleLine.__table__.columns
     assert POSShift.__tablename__ == "pos_shifts"
     assert POSSale.__tablename__ == "pos_sales"
     assert POSSaleLine.__tablename__ == "pos_sale_lines"
