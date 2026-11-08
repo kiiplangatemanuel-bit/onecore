@@ -28,3 +28,9 @@ def test_tenant_rls_leaves_tables_with_dedicated_policy_chains_alone():
     source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
     for table in ("memberships", "portal_workflow_records", "support_tickets", "developer_api_keys"):
         assert f'"{table}"' in source
+
+
+def test_org_admin_cannot_grant_or_escalate_another_org_admin():
+    source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
+    assert "role <> 'org_admin'" in source
+    assert "OR public.onecore_is_platform_admin()" in source
