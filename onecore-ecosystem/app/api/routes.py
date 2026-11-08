@@ -52,7 +52,7 @@ def me(user: User = Depends(current_user)):
 def create_organization(payload: OrganizationIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if db.query(Organization).filter_by(slug=payload.slug).first():
         raise HTTPException(409, "Organization slug already exists")
-    org = Organization(**payload.model_dump())
+    org = Organization(**payload.model_dump(), owner_user_id=user.id)
     db.add(org); db.flush()
     db.add(Membership(user_id=user.id, organization_id=org.id, role="org_admin", branch_scope="*"))
     db.commit(); db.refresh(org)
