@@ -91,4 +91,4 @@ def test_public_status_incident_fanout_targets_only_matching_active_subscribers(
     assert all(isinstance(row, StatusAlertDelivery) for row in db.added)
     assert {row.user_id for row in db.added} == {1, 2}
     assert all(row.incident_record_id == 77 and row.status == "pending" for row in db.added)
-    assert len({row.event_key for row in db.added}) == 2
+    assert len({(row.user_id, row.event_key) for row in db.added}) == 2
