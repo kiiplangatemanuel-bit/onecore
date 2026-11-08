@@ -174,3 +174,27 @@ def test_public_content_publication_requires_platform_admin():
         assert published["status"] == "published"
         assert len(list_public_portal_content("status", "incident", 50, db)) == 1
     engine.dispose()
+
+
+
+def test_only_designated_security_reviewers_can_access_confidential_reports():
+    engine = _db()
+    with Session(engine) as db:
+        owner = User(email="owner@example.com", full_name="Owner", password_hash="unused")
+        reviewer = User(email="security@example.com", full_name="Security", password_hash="unused",
+                        platform_role="security_admin")
+        unrelated = User(email="unrelated@example.com", full_name="Unrelated", password_hash="unused",
+                         platform_role="platform_admin")
+        db.add_all([owner, reviewer, unrelated])
+        db.commit()
+        report = create_portal_record(
+            "trust", "security_report",
+            PortalRecordCreate(payload={"title": "Disclosure", "description": "Private details", "severity": "high"}),
+            owner, db,
+        )
+        assert len(list_portal_records("trust", "security_report", None, 50, reviewer, db)) == 1
+        assert read_portal_record("trust", report["id"], reviewer, db)["id"] == report["id"]
+        assert list_portal_records("trust", "security_report", None, 50, unrelated, db) == []
+        with pytest.raises(HTTPException):
+            read_portal_record("trust", report["id"], unrelated, db)
+    engine.dispose()
