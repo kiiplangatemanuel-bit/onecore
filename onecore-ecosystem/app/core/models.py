@@ -1715,7 +1715,7 @@ class DeveloperWebhookEndpoint(Base):
     """Private endpoint signing material for a developer webhook workflow record."""
     __tablename__ = "developer_webhook_endpoints"
     id: Mapped[int] = mapped_column(primary_key=True)
-    workflow_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), unique=True, index=True)
+    workflow_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), unique=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     secret_encrypted: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
