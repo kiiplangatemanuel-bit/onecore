@@ -64,6 +64,7 @@ class PortalItemIn(BaseModel):
     body: str = Field(default="", max_length=20000)
     data: dict = Field(default_factory=dict)
     organization_id: int | None = Field(default=None, gt=0)
+    visibility: str = Field(default="private", pattern=r"^(private|organization|public)$")
 
 class PortalItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -71,6 +72,7 @@ class PortalItemUpdate(BaseModel):
     body: str | None = Field(default=None, max_length=20000)
     data: dict | None = None
     status: str | None = Field(default=None, min_length=2, max_length=24)
+    visibility: str | None = Field(default=None, pattern=r"^(private|organization|public)$")
 
 def _validate_portal(portal: str):
     if portal not in PORTALS:
@@ -164,8 +166,12 @@ def create_portal_resource(
     if org_id is not None:
         membership = _membership(db, user, org_id)
         require_permission(membership, "create")
-    if payload.resource_type in SENSITIVE_TYPES and org_id is not None:
+    if payload.resource_type in SENSITIVE_TYPES and (org_id is not None or payload.visibility != "private"):
         raise HTTPException(422, "Confidential trust reports must be submitted as personal, owner-only records")
+    if payload.visibility != "private" and user.platform_role not in {"root_superadmin", "platform_admin"}:
+        raise HTTPException(403, "Only authorized OneCore staff can publish portal resources")
+    if payload.visibility == "organization" and org_id is None:
+        raise HTTPException(422, "Organization visibility requires an organization membership")
     data = dict(payload.data)
     initial_status = {
         "post": "pending_review", "comment": "pending_review",
@@ -185,7 +191,7 @@ def create_portal_resource(
         data["_credential_prefix"] = one_time_secret[:15]
     row = PortalResource(
         portal=portal, resource_type=payload.resource_type,
-        visibility="private", title=payload.title.strip(), body=payload.body.strip(),
+        visibility=payload.visibility, title=payload.title.strip(), body=payload.body.strip(),
         data=data, status=initial_status, owner_user_id=user.id, organization_id=org_id,
     )
     db.add(row)
@@ -228,6 +234,14 @@ def update_portal_resource(
         row.title = payload.title.strip()
     if payload.body is not None:
         row.body = payload.body.strip()
+    if payload.visibility is not None:
+        if row.resource_type in SENSITIVE_TYPES and payload.visibility != "private":
+            raise HTTPException(422, "Confidential trust records cannot be published")
+        if payload.visibility != "private" and not is_platform_admin:
+            raise HTTPException(403, "Only authorized OneCore staff can change resource visibility")
+        if payload.visibility == "organization" and row.organization_id is None:
+            raise HTTPException(422, "Organization visibility requires an organization-owned resource")
+        row.visibility = payload.visibility
     if payload.status is not None:
         allowed_statuses = STATUS_TRANSITIONS.get(row.resource_type, {"active", "archived"})
         if payload.status not in allowed_statuses:
