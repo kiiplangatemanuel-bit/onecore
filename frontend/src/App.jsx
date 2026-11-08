@@ -31,7 +31,7 @@ function App(){
   const params=new URLSearchParams(window.location.search);
   if(!params.get("return_to"))return;
   ssoRedirectStarted.current=true;
-  finishPortalSignIn(user).catch(()=>{ssoRedirectStarted.current=false;});
+  finishPortalSignIn(user).catch(error=>{ssoRedirectStarted.current=false;setNotice("Could not complete portal sign-in: "+error.message);});
  },[user,path]);
  useEffect(()=>{if(!user)return;api("/health").then(()=>setHealth("online")).catch(()=>setHealth("offline"));api("/api/v1/organizations").then(rows=>{setOrgs(rows);if(rows.length&&!rows.some(o=>String(o.id)===sessionStorage.getItem("onecore.organization_id"))){setActiveOrganization(rows[0].id);setActiveOrgId(String(rows[0].id));}}).catch(()=>setOrgs([]));api("/api/v1/modules").then(v=>setModules(Array.isArray(v)?v:(v.modules||[]))).catch(()=>setModules([]));},[user]);
  const active=allModules.find(m=>m[1]===path); const selectedOrg=orgs.find(o=>String(o.id)===String(activeOrgId))||orgs[0]; const title=active?.[0]||"Overview";
