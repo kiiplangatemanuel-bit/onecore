@@ -72,3 +72,48 @@ def validate_return_refund_total(total: Decimal, refunds) -> None:
     refunded = sum((money(Decimal(str(item.amount))) for item in refunds), Decimal("0.00"))
     if money(total) != refunded:
         raise HTTPException(422, "Refund allocations must equal the return value")
+
+
+def apply_loyalty_redemption(prepared, points: int, points_per_currency_unit: int,
+                            max_redemption_percent: Decimal):
+    """Apply a pre-tax points discount proportionally and recalculate each line's tax.
+
+    Prepared line tuples are (line, unit_price, subtotal, manager_discount,
+    tax_rate, tax, line_total, loyalty_discount). The last tuple item is
+    replaced with the allocated loyalty discount for a redemption.
+    """
+    if points <= 0:
+        return prepared, Decimal("0.00"), money(sum((item[5] for item in prepared), Decimal("0.00"))), money(sum((item[6] for item in prepared), Decimal("0.00")))
+    if points_per_currency_unit <= 0:
+        raise HTTPException(409, "Loyalty conversion policy is invalid")
+    loyalty_discount = money(Decimal(points) / Decimal(points_per_currency_unit))
+    discountable_base = money(sum(
+        (Decimal(item[2]) - Decimal(item[3]) for item in prepared), Decimal("0.00")
+    ))
+    maximum = money(discountable_base * Decimal(max_redemption_percent) / Decimal("100"))
+    if loyalty_discount <= 0:
+        raise HTTPException(422, "The selected loyalty points are worth less than one cent")
+    if loyalty_discount > maximum:
+        raise HTTPException(422, "Loyalty redemption exceeds the configured per-sale percentage limit")
+    remaining = loyalty_discount
+    adjusted = []
+    for index, item in enumerate(prepared):
+        line, unit_price, subtotal, discount, tax_rate, tax, line_total, _ = item
+        taxable_base = money(Decimal(subtotal) - Decimal(discount))
+        if index == len(prepared) - 1:
+            share = remaining
+        else:
+            raw = loyalty_discount * taxable_base / discountable_base
+            share = (raw * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
+            share = min(money(share), remaining, taxable_base)
+        remaining = money(remaining - share)
+        new_taxable = money(Decimal(subtotal) - Decimal(discount) - share)
+        new_tax = money(new_taxable * Decimal(tax_rate) / Decimal("100"))
+        new_total = money(new_taxable + new_tax)
+        adjusted.append((line, unit_price, subtotal, discount, tax_rate, new_tax, new_total, share))
+    return (
+        adjusted,
+        loyalty_discount,
+        money(sum((item[5] for item in adjusted), Decimal("0.00"))),
+        money(sum((item[6] for item in adjusted), Decimal("0.00"))),
+    )
