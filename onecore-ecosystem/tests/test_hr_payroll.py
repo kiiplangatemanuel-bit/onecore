@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app.api.hr_payroll import (
     LeaveIn, PayrollRunIn, RuleSetIn, _calculate, _progressive_tax, _tiered_contribution, require_payroll_action,
 )
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
 from app.main import app
 
 
@@ -50,6 +50,8 @@ def test_hr_payroll_domain_models_are_tenant_scoped_and_snapshotted():
     assert PayrollRuleSet.__tablename__ == "payroll_rule_sets"
     assert PayrollRun.__tablename__ == "payroll_runs"
     assert PayrollPayslip.__tablename__ == "payroll_payslips"
+    assert PayrollAccountingMapping.__tablename__ == "payroll_accounting_mappings"
+    assert PayrollAccountingLink.__tablename__ == "payroll_accounting_links"
     assert "uq_payroll_run_org_idempotency" in {x.name for x in PayrollRun.__table__.indexes}
     assert "uq_payroll_payslip_run_employee" in {x.name for x in PayrollPayslip.__table__.indexes}
 
@@ -64,6 +66,8 @@ def test_hr_payroll_routes_are_registered():
         "/api/v1/payroll/rule-sets/{rule_set_id}/approve", "/api/v1/payroll/runs",
         "/api/v1/payroll/runs/{run_id}/submit", "/api/v1/payroll/runs/{run_id}/approve",
         "/api/v1/payroll/runs/{run_id}/mark-paid", "/api/v1/payroll/runs/{run_id}/payslips",
+        "/api/v1/payroll/accounting-mapping", "/api/v1/payroll/runs/{run_id}/post-to-accounting",
+        "/api/v1/payroll/runs/{run_id}/reverse-accounting-journal",
     }
     assert expected.issubset(paths)
 
@@ -154,6 +158,7 @@ def test_hr_payroll_authorization_supports_maker_checker_roles():
     assert "create" not in ROLE_PERMISSIONS["payroll_manager"]
     assert "create" not in ROLE_PERMISSIONS["hr_manager"]
     assert "create" not in ROLE_PERMISSIONS["payroll_approver"]
+    assert ROLE_PERMISSIONS["payroll_accounting"] == {"read"}
 
 
 
