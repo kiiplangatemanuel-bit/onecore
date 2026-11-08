@@ -175,3 +175,24 @@ def test_supabase_aal1_session_cannot_bypass_enabled_onecore_mfa(monkeypatch):
         assert denied.value.status_code == 403
         assert "multi-factor" in denied.value.detail
     engine.dispose()
+
+
+def test_supabase_enrolled_mfa_factor_requires_aal2(monkeypatch):
+    identity = _identity(factors=[{"id": "factor-1", "factor_type": "totp", "status": "verified"}])
+    _configure_supabase(monkeypatch, identity)
+    engine = _db()
+    with Session(engine) as db:
+        aal1_token = jwt.encode(
+            {"sub": identity["id"], "aal": "aal1"},
+            "test-only-unverified-signature", algorithm="HS256",
+        )
+        with pytest.raises(HTTPException) as denied:
+            exchange_supabase_session(SupabaseSessionExchange(access_token=aal1_token), db)
+        assert denied.value.status_code == 403
+        aal2_token = jwt.encode(
+            {"sub": identity["id"], "aal": "aal2"},
+            "test-only-unverified-signature", algorithm="HS256",
+        )
+        result = exchange_supabase_session(SupabaseSessionExchange(access_token=aal2_token), db)
+        assert result["access_token"]
+    engine.dispose()
