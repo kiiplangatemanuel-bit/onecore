@@ -5,7 +5,7 @@ Statutory rules are tenant-owned and cannot be activated without independent rev
 """
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, JSON, Numeric, String, Text, Time, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -19,6 +19,7 @@ class HREmployee(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    default_shift_id: Mapped[int | None] = mapped_column(ForeignKey("hr_shifts.id"), nullable=True)
     employee_number: Mapped[str] = mapped_column(String(60))
     first_name: Mapped[str] = mapped_column(String(100))
     last_name: Mapped[str] = mapped_column(String(100))
@@ -125,6 +126,9 @@ class PayrollPayslip(Base):
     gross_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     taxable_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     paye: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    overtime_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    shift_differential_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    unpaid_leave_deduction: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     nssf_employee: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     shif_employee: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     housing_levy_employee: Mapped[Decimal] = mapped_column(Numeric(18, 2))
@@ -174,3 +178,46 @@ class PayrollAccountingLink(Base):
     reversal_reason: Mapped[str] = mapped_column(String(500), default="")
     __table_args__ = (Index("uq_payroll_accounting_reversal_journal", "reversal_journal_id", unique=True),
                       Index("uq_payroll_accounting_settlement_journal", "settlement_journal_id", unique=True))
+
+
+
+class HRShift(Base):
+    __tablename__ = "hr_shifts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    shift_code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    start_time: Mapped[datetime.time] = mapped_column(Time)
+    end_time: Mapped[datetime.time] = mapped_column(Time)
+    break_minutes: Mapped[int] = mapped_column(default=0)
+    differential_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), default=Decimal("0"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("uq_hr_shift_org_code", "organization_id", "shift_code", unique=True),)
+
+
+class HRAttendance(Base):
+    __tablename__ = "hr_attendance"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("hr_shifts.id"))
+    attendance_date: Mapped[datetime.date] = mapped_column(Date, index=True)
+    clock_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    clock_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_minutes: Mapped[int] = mapped_column(default=0)
+    worked_minutes: Mapped[int] = mapped_column(default=0)
+    overtime_minutes: Mapped[int] = mapped_column(default=0)
+    differential_minutes: Mapped[int] = mapped_column(default=0)
+    differential_rate: Mapped[Decimal] = mapped_column(Numeric(8, 6), default=Decimal("0"))
+    status: Mapped[str] = mapped_column(String(24), default="present")
+    approval_status: Mapped[str] = mapped_column(String(24), default="pending")
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("uq_hr_attendance_org_employee_date", "organization_id", "employee_id", "attendance_date", unique=True),)
