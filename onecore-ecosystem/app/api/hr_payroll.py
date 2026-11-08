@@ -494,7 +494,20 @@ def list_payroll_runs(membership=Depends(active_membership),db:Session=Depends(g
     require_hr_read(membership)
     q=db.query(PayrollRun).filter_by(organization_id=membership.organization_id)
     q=scoped(q,PayrollRun,membership)
-    return [_run_out(x) for x in q.order_by(PayrollRun.id.desc()).limit(200).all()]
+    rows=q.order_by(PayrollRun.id.desc()).limit(200).all()
+    links=db.query(PayrollAccountingLink).filter(
+        PayrollAccountingLink.organization_id==membership.organization_id,
+        PayrollAccountingLink.payroll_run_id.in_([x.id for x in rows] or [-1])
+    ).all()
+    by_run={x.payroll_run_id:x for x in links}
+    result=[]
+    for row in rows:
+        item=_run_out(row); link=by_run.get(row.id)
+        item.update({"accounting_journal_id":link.journal_id if link else None,
+                     "settlement_journal_id":link.settlement_journal_id if link else None,
+                     "reversal_journal_id":link.reversal_journal_id if link else None})
+        result.append(item)
+    return result
 
 
 @router.post("/payroll/runs",status_code=201)
