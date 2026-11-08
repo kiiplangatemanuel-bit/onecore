@@ -136,3 +136,34 @@ def test_developer_api_key_migration_is_chained_after_support_attachments():
     assert 'down_revision = "0055_support_attachments"' in source
     assert "developer_api_key_select" in source
     assert "developer_api_key_usage_insert" in source
+
+
+def test_developer_api_key_routes_are_registered():
+    from app.main import app
+
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/developer/api-keys" in paths
+    assert "/api/v1/developer/api-keys/{key_id}/revoke" in paths
+    assert "/api/v1/developer/api-keys/{key_id}/usage" in paths
+    assert "/api/v1/developer/v1/organization" in paths
+
+
+def test_developer_api_key_cannot_be_managed_by_another_tenant():
+    engine = _db()
+    with Session(engine) as db:
+        org_a = Organization(name="A", slug="org-a")
+        org_b = Organization(name="B", slug="org-b")
+        db.add_all([org_a, org_b])
+        db.flush()
+        owner = _user(db, org_a, "owner@example.com")
+        outsider = _user(db, org_b, "outsider@example.com", role="org_admin")
+        db.commit()
+        created = create_developer_api_key(
+            DeveloperApiKeyCreate(organization_id=org_a.id, name="Tenant A key"),
+            owner, db,
+        )
+        with pytest.raises(HTTPException) as denied:
+            revoke_developer_api_key(created["id"], outsider, db)
+        assert denied.value.status_code == 404
+        assert db.query(DeveloperApiKey).filter_by(id=created["id"]).one().revoked_at is None
+    engine.dispose()
