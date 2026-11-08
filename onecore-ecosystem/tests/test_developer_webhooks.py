@@ -347,3 +347,42 @@ def test_webhook_migration_has_tenant_rls_and_idempotency():
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "uq_developer_webhook_endpoint_event" in source
     assert "current_user = 'onecore_webhook_worker'" in source
+
+
+def test_worker_claims_and_persists_one_delivery_per_transaction(monkeypatch):
+    engine = _db()
+    monkeypatch.setattr(webhooks, "_validate_endpoint", lambda url: "hooks.example.com")
+
+    class Response:
+        status_code = 200
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def post(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(webhooks.httpx, "Client", Client)
+    with Session(engine) as db:
+        org = Organization(name="Tenant", slug="tenant")
+        db.add(org)
+        db.flush()
+        user = _developer(db, org)
+        record = _webhook(db, org, user)
+        endpoint = _endpoint(db, record)
+        for index in range(3):
+            db.add(DeveloperWebhookDelivery(
+                endpoint_id=endpoint.id, organization_id=org.id,
+                event_id=f"evt_worker_{index:02d}", event_type="organization.updated",
+                payload={"id": f"evt_worker_{index:02d}"}, status="pending", attempts=0,
+            ))
+        db.commit()
+        results = webhooks.process_webhook_deliveries(db, limit=3)
+        assert len(results) == 3
+        assert all(item["status"] == "delivered" for item in results)
+        assert db.query(DeveloperWebhookDelivery).filter_by(status="pending").count() == 0
+    engine.dispose()
