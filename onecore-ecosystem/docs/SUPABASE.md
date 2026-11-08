@@ -77,3 +77,24 @@ GRANT UPDATE ON TABLE public.developer_webhook_deliveries TO onecore_webhook_wor
 ```
 
 Set `WEBHOOK_WORKER_DATABASE_URL` to a connection URI using this login. Do not grant table ownership, `BYPASSRLS`, schema creation, or broad write privileges. The API runtime role remains separate and uses the normal OneCore user-identity RLS context.
+
+## Status incident email alert worker
+
+Migration 0060 adds an idempotent email outbox for published public Status incidents. Active personal subscriptions matching the incident service (or `*`) are queued in the publishing transaction. Email is the default channel; when explicit notification preferences exist, only an active `email` preference is queued. SMTP delivery is asynchronous, uses bounded exponential retry (eight attempts), and stores only the recipient address and notification content needed to deliver the alert. The worker does not read other tenant business tables.
+
+Provision a dedicated non-owner worker role after migration 0060:
+
+```sql
+CREATE ROLE onecore_status_alert_worker LOGIN PASSWORD '<generated-secret>' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE postgres TO onecore_status_alert_worker;
+GRANT USAGE ON SCHEMA public TO onecore_status_alert_worker;
+GRANT SELECT, UPDATE ON TABLE public.status_alert_deliveries TO onecore_status_alert_worker;
+```
+
+Set `STATUS_ALERT_WORKER_DATABASE_URL` only on the worker service and run:
+
+```bash
+python -m app.workers.status_alert_delivery
+```
+
+The API runtime role needs SELECT and INSERT on `status_alert_deliveries`; RLS permits platform administrators to enqueue deliveries and users to read only their own delivery records. The worker role can claim and update deliveries but cannot create or delete them. Configure SMTP using `INTEGRATION_EMAIL_ENABLED`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_FROM`, and optional authentication/STARTTLS settings. Delivery is at-least-once: a worker crash after SMTP acceptance but before the database commit can cause a retry; `X-OneCore-Alert-ID` is supplied for provider-side deduplication where supported.
