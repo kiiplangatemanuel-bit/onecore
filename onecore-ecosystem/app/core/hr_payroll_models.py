@@ -191,7 +191,7 @@ class PayrollAccountingLink(Base):
     __tablename__ = "payroll_accounting_links"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
-    payroll_run_id: Mapped[int] = mapped_column(ForeignKey("payroll_runs.id"), unique=True, index=True)
+    payroll_run_id: Mapped[int] = mapped_column(ForeignKey("payroll_runs.id"), index=True)
     journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), unique=True, index=True)
     mapping_snapshot: Mapped[dict] = mapped_column(JSON)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -248,6 +248,9 @@ class PayrollPaymentBatchItem(Base):
         Index("uq_payroll_batch_item_org_reference", "organization_id", "payment_reference",
               unique=True, sqlite_where=text("payment_reference <> ''"),
               postgresql_where=text("payment_reference <> ''")),
+        Index("uq_payroll_batch_item_active_run", "payroll_run_id", unique=True,
+              sqlite_where=text("status <> 'cancelled'"),
+              postgresql_where=text("status <> 'cancelled'")),
     )
 
 
