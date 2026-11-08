@@ -1709,3 +1709,34 @@ class DeveloperApiKeyUsage(Base):
     method: Mapped[str] = mapped_column(String(10))
     status_code: Mapped[int] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class DeveloperWebhookEndpoint(Base):
+    """Private endpoint signing material for a developer webhook workflow record."""
+    __tablename__ = "developer_webhook_endpoints"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workflow_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"), unique=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    secret_encrypted: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    rotated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class DeveloperWebhookDelivery(Base):
+    """Durable, idempotent webhook outbox with bounded retry state."""
+    __tablename__ = "developer_webhook_deliveries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    endpoint_id: Mapped[int] = mapped_column(ForeignKey("developer_webhook_endpoints.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    event_id: Mapped[str] = mapped_column(String(80))
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("uq_developer_webhook_endpoint_event", "endpoint_id", "event_id", unique=True),)
