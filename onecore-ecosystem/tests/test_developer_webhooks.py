@@ -343,7 +343,7 @@ def test_webhook_migration_has_tenant_rls_and_idempotency():
     migration = Path(__file__).parents[1] / "migrations" / "versions" / "0057_developer_webhooks.py"
     source = migration.read_text()
     assert 'revision = "0057_developer_webhooks"' in source
-    assert 'down_revision = "0056_developer_api_keys"' in source
+    assert 'down_revision = "0057_supabase_auth_identity"' in source
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "uq_developer_webhook_endpoint_event" in source
     assert "current_user = 'onecore_webhook_worker'" in source
