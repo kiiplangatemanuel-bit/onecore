@@ -51,6 +51,7 @@ def test_ar_ap_models_and_routes_are_registered():
     paths = set(app.openapi()["paths"])
     assert "/api/v1/accounting/invoices" in paths
     assert "/api/v1/accounting/invoices/{invoice_id}/post" in paths
+    assert "/api/v1/accounting/invoices/{invoice_id}/cancel" in paths
     assert "/api/v1/accounting/invoices/{invoice_id}/payments" in paths
     assert "/api/v1/accounting/aging" in paths
 
