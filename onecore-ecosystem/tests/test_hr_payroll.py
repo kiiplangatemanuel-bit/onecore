@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app.api.hr_payroll import (
     LeaveIn, PayrollRunIn, RuleSetIn, _calculate, _progressive_tax, _tiered_contribution, require_payroll_action,
 )
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, HRAttendanceRecord
 from app.main import app
 
 
@@ -62,6 +62,7 @@ def test_hr_payroll_routes_are_registered():
         "/api/v1/hr/employees", "/api/v1/hr/employees/{employee_id}/employment-status",
         "/api/v1/hr/employees/{employee_id}/leave",
         "/api/v1/hr/leave-requests", "/api/v1/hr/leave-requests/{request_id}/decision",
+        "/api/v1/hr/attendance", "/api/v1/hr/attendance/{attendance_id}/decision",
         "/api/v1/payroll/rule-sets", "/api/v1/payroll/rule-sets/{rule_set_id}/submit",
         "/api/v1/payroll/rule-sets/{rule_set_id}/approve", "/api/v1/payroll/runs",
         "/api/v1/payroll/runs/{run_id}/submit", "/api/v1/payroll/runs/{run_id}/approve",
@@ -184,3 +185,34 @@ def test_payroll_actions_are_separated_by_role():
         require_payroll_action(SimpleNamespace(role="payroll_approver"), "prepare")
     with pytest.raises(HTTPException):
         require_payroll_action(SimpleNamespace(role="payroll_payment"), "prepare")
+
+
+
+def test_attendance_domain_model_and_overtime_duration_validation():
+    assert HRAttendanceRecord.__tablename__ == "hr_attendance_records"
+    assert "uq_hr_attendance_org_employee_date" in {x.name for x in HRAttendanceRecord.__table__.indexes}
+    from app.api.hr_payroll import AttendanceIn
+    payload = AttendanceIn(
+        employee_id=1, work_date="2026-11-08",
+        clock_in="2026-11-08T08:00:00+03:00",
+        clock_out="2026-11-08T18:00:00+03:00",
+        break_minutes=60, scheduled_minutes=480,
+        idempotency_key="attendance-emp1-20261108",
+    )
+    worked = int((payload.clock_out - payload.clock_in).total_seconds() // 60) - payload.break_minutes
+    assert worked == 540
+    assert worked - payload.scheduled_minutes == 60
+    with pytest.raises(ValidationError):
+        AttendanceIn(
+            employee_id=1, work_date="2026-11-08",
+            clock_in="2026-11-08T08:00:00",
+            clock_out="2026-11-08T18:00:00",
+            idempotency_key="attendance-invalid",
+        )
+    with pytest.raises(ValidationError):
+        AttendanceIn(
+            employee_id=1, work_date="2026-11-08",
+            clock_in="2026-11-08T18:00:00+03:00",
+            clock_out="2026-11-08T08:00:00+03:00",
+            idempotency_key="attendance-invalid2",
+        )
