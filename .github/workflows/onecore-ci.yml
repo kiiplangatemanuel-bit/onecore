@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "onecore-ecosystem/**"
+      - "frontend/**"
       - ".github/workflows/onecore-ci.yml"
   pull_request:
     paths:
@@ -41,3 +42,19 @@ jobs:
       - name: Run tests
         working-directory: onecore-ecosystem
         run: python -m pytest -q tests
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Build Vercel frontend
+        working-directory: frontend
+        run: npm run build
