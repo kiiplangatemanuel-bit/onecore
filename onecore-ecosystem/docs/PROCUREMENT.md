@@ -61,20 +61,20 @@ product prevention, model registration and API route registration. CI must pass
 migration upgrade/downgrade/re-upgrade, compilation and the complete test suite before
 this increment is considered verified.
 
-## Remaining gaps
+## Remaining implementation and production gates
 
-- Supplier edit/archive, supplier terms, RFQ/quotation comparison and supplier
-  performance reporting are now implemented by this increment.
-- Delegated approval, approval expiry/escalation, configurable approver groups and
-  branch-specific approval matrices remain future work.
-- PO edit/cancel, PDF/email dispatch, supplier acknowledgement and delivery schedule.
-- Automated AP journal posting/payment settlement, tax compliance validation,
-  credit-note accounting allocation and supplier statement reconciliation remain future work.
-- Tax/freight/discount allocations, landed cost and accounts-payable integration.
-- Supplier portal/email dispatch, RFQ notification delivery, CSV import/export,
-  detailed on-time delivery analytics and procurement dashboard exports.
-- PostgreSQL concurrent receipt tests, end-to-end branch isolation, security review,
-  accessibility and UAT.
+The current mainline includes the requisition, PO approval, RFQ/quotation, supplier invoice matching, returns, AP integration, supplier settlement/remittance, supplier statement reconciliation, delegated approval, supplier portal and discrepancy/reconciliation workflows described below. Do not use the earlier "Remaining gaps" bullets as a current statement that those delivered features are absent.
+
+Still not evidenced as complete in the current repository:
+- PO amendment/cancellation with controlled downstream reversal, supplier acknowledgement and scheduled delivery milestones.
+- Complete tax/freight/discount/landed-cost allocation across receipt and AP accounting.
+- Automated supplier email/RFQ/remittance notifications and reliable delivery tracking beyond supplier-reported updates.
+- Full CSV bulk import/export and detailed on-time delivery analytics/dashboard exports.
+- Direct bank-provider payment initiation; bank statement import/matching exists separately.
+- PostgreSQL concurrency/locking tests for receipts, invoice allocation and settlements; end-to-end branch-isolation tests, accessibility audit and production UAT.
+
+These are distinct implementation slices and must not be represented as completed merely because the advanced workflow APIs exist.
+
 
 
 ## GRN inspection increment — 7 November 2026
