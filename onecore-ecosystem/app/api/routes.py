@@ -2374,7 +2374,9 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
             organization_id=membership.organization_id,
             contact_id=payload.contact_id,
         ).with_for_update().first()
-        if not crm_order or not can_access_branch(membership, crm_order.branch_id):
+        allowed_order_branches = branch_scope_ids(membership)
+        if (not crm_order or not can_access_branch(membership, crm_order.branch_id)
+                or (allowed_order_branches is not None and crm_order.branch_id not in allowed_order_branches)):
             raise HTTPException(404, "CRM sales order not found")
         if crm_order.status != "confirmed":
             raise HTTPException(409, "Only a confirmed CRM sales order can be invoiced")
