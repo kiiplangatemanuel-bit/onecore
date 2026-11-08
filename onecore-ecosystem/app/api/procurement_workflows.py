@@ -690,7 +690,7 @@ def escalate_purchase_order_approval(order_id: int, payload: ApprovalEscalationI
     ).order_by(ProcurementApprovalRule.approval_level).all()
     rules = [x for x in rules if x.maximum_amount is None or amount <= x.maximum_amount]
     actions = db.query(ProcurementApprovalAction).filter_by(
-        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
+        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id, approval_version=order.amendment_version
     ).all()
     approved = {x.approval_level for x in actions if x.action == "approved"}
     next_rule = next((x for x in rules if x.approval_level not in approved), None)
