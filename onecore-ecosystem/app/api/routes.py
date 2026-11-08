@@ -1379,7 +1379,7 @@ def create_supplier_invoice(payload:SupplierInvoiceIn,membership=Depends(active_
         purchase_order_line_id=x.purchase_order_line_id,quantity=x.quantity,unit_cost=x.unit_cost))
     audit(db,user.id,membership.organization_id,"procurement.invoice.three_way_matched","supplier_invoice",invoice.id,payload.invoice_number)
     db.commit()
-    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"status":invoice.status,"subtotal":str(subtotal),"tax_total":str(invoice.tax_total),"total":str(subtotal+invoice.tax_total)}
+    return {"id":invoice.id,"invoice_number":invoice.invoice_number,"status":invoice.status,"subtotal":str(subtotal),"tax_total":str(invoice.tax_total),"total":str(subtotal+invoice.tax_total),"crm_sales_order_id":invoice.crm_sales_order_id}
 
 
 @router.post("/procurement/goods-receipts/{receipt_id}/returns",status_code=201)
@@ -2364,6 +2364,27 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
     if payload.supplier_id and not db.query(ProcurementSupplier).filter_by(
         id=payload.supplier_id,organization_id=membership.organization_id,is_active=True).first():
         raise HTTPException(404,"Supplier not found")
+    crm_order = None
+    invoice_branch_id = payload.branch_id
+    if payload.crm_sales_order_id is not None:
+        if payload.invoice_type != "receivable" or not payload.contact_id:
+            raise HTTPException(422, "Only a customer receivable invoice can be linked to a CRM sales order")
+        crm_order = db.query(CRMSalesOrder).filter_by(
+            id=payload.crm_sales_order_id,
+            organization_id=membership.organization_id,
+            contact_id=payload.contact_id,
+        ).with_for_update().first()
+        allowed_order_branches = branch_scope_ids(membership)
+        if (not crm_order or not can_access_branch(membership, crm_order.branch_id)
+                or (allowed_order_branches is not None and crm_order.branch_id not in allowed_order_branches)):
+            raise HTTPException(404, "CRM sales order not found")
+        if crm_order.status != "confirmed":
+            raise HTTPException(409, "Only a confirmed CRM sales order can be invoiced")
+        if crm_order.currency != payload.currency:
+            raise HTTPException(422, "Invoice currency must match the CRM sales order currency")
+        if payload.branch_id and crm_order.branch_id and payload.branch_id != crm_order.branch_id:
+            raise HTTPException(422, "Invoice and CRM sales order must belong to the same branch")
+        invoice_branch_id = payload.branch_id or crm_order.branch_id
     account_ids={x.account_id for x in payload.lines}
     account_ids.update(x.tax_account_id for x in payload.lines if x.tax_account_id)
     accounts=_accounting_get_accounts(db,membership.organization_id,account_ids)
@@ -2386,9 +2407,19 @@ def create_accounting_invoice(payload:AccountingInvoiceIn,membership=Depends(act
         computed.append((item,line_sub,line_tax,line_total))
     total=subtotal+tax_total
     if total<=0: raise HTTPException(422,"Invoice total must be greater than zero")
+    if crm_order is not None:
+        already_invoiced = db.query(func.coalesce(func.sum(AccountingInvoice.total), 0)).filter(
+            AccountingInvoice.organization_id == membership.organization_id,
+            AccountingInvoice.crm_sales_order_id == crm_order.id,
+            AccountingInvoice.invoice_type == "receivable",
+            AccountingInvoice.status != "cancelled",
+        ).scalar() or Decimal("0.00")
+        if Decimal(already_invoiced) + total > Decimal(crm_order.total):
+            raise HTTPException(422, "Invoice total exceeds the remaining uninvoiced CRM sales order value")
     invoice=AccountingInvoice(
-        organization_id=membership.organization_id,branch_id=payload.branch_id,
+        organization_id=membership.organization_id,branch_id=invoice_branch_id,
         invoice_type=payload.invoice_type,contact_id=payload.contact_id,supplier_id=payload.supplier_id,
+        crm_sales_order_id=crm_order.id if crm_order is not None else None,
         invoice_number=payload.invoice_number.strip().upper(),
         issue_date=datetime.combine(payload.issue_date,time.min,tzinfo=timezone.utc),
         due_date=datetime.combine(payload.due_date,time.min,tzinfo=timezone.utc),
@@ -2489,18 +2520,49 @@ def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
         if invoice_type not in ("receivable","payable"): raise HTTPException(422,"Invalid invoice type")
         q=q.filter(AccountingInvoice.invoice_type==invoice_type)
     if status:
-        if status not in ("draft","posted","partially_paid","paid"): raise HTTPException(422,"Invalid invoice status")
+        if status not in ("draft","posted","partially_paid","paid","cancelled"): raise HTTPException(422,"Invalid invoice status")
         q=q.filter(AccountingInvoice.status==status)
     allowed=branch_scope_ids(membership)
     if allowed is not None:
         if not allowed:return []
         q=q.filter((AccountingInvoice.branch_id==None)|(AccountingInvoice.branch_id.in_(allowed)))
     rows=q.order_by(AccountingInvoice.due_date,AccountingInvoice.id.desc()).limit(limit).all()
+    approval_rows = db.query(AccountingInvoiceApproval.invoice_id, AccountingInvoiceApproval.status).filter(
+        AccountingInvoiceApproval.organization_id == membership.organization_id,
+        AccountingInvoiceApproval.invoice_id.in_([row.id for row in rows]),
+    ).all() if rows else []
+    approval_status = {invoice_id: status for invoice_id, status in approval_rows}
     return [{"id":x.id,"invoice_number":x.invoice_number,"invoice_type":x.invoice_type,
         "contact_id":x.contact_id,"supplier_id":x.supplier_id,"issue_date":x.issue_date.date().isoformat(),
         "due_date":x.due_date.date().isoformat(),"currency":x.currency,"subtotal":str(x.subtotal),
         "tax_total":str(x.tax_total),"total":str(x.total),"amount_paid":str(x.amount_paid),
-        "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id} for x in rows]
+        "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id,
+        "crm_sales_order_id":x.crm_sales_order_id,"approval_status":approval_status.get(x.id)} for x in rows]
+
+
+@router.post("/accounting/invoices/{invoice_id}/cancel")
+def cancel_accounting_invoice(invoice_id:int,membership=Depends(active_membership),
+    user:User=Depends(current_user),db:Session=Depends(get_db)):
+    require_permission(membership,"manage")
+    invoice=db.query(AccountingInvoice).filter_by(
+        id=invoice_id,organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not invoice or (invoice.branch_id and not can_access_branch(membership,invoice.branch_id)):
+        raise HTTPException(404,"Invoice not found")
+    if invoice.status != "draft":
+        raise HTTPException(409,"Only draft invoices can be cancelled")
+    approval=db.query(AccountingInvoiceApproval).filter_by(
+        organization_id=membership.organization_id,invoice_id=invoice.id
+    ).first()
+    if approval and approval.status in ("pending","approved"):
+        approval.status="cancelled"
+        approval.decision_note="Invoice cancelled before posting"
+        approval.decided_at=datetime.now(timezone.utc)
+    invoice.status="cancelled"
+    audit(db,user.id,membership.organization_id,"accounting.invoice.cancelled",
+        "accounting_invoice",invoice.id,"draft invoice cancelled")
+    db.commit()
+    return {"id":invoice.id,"status":invoice.status}
 
 
 @router.post("/accounting/invoices/{invoice_id}/post")
@@ -2653,6 +2715,56 @@ def list_accounting_credit_notes(invoice_id:int|None=None,membership=Depends(act
         "journal_id":x.journal_id} for x in rows]
 
 
+def _record_paid_invoice_crm_attribution(db, invoice, payment_date, user):
+    """Append one idempotent campaign revenue event when a linked AR invoice is fully paid."""
+    if invoice.invoice_type != "receivable" or invoice.status != "paid" or not invoice.crm_sales_order_id:
+        return False
+    order = db.query(CRMSalesOrder).filter_by(
+        id=invoice.crm_sales_order_id, organization_id=invoice.organization_id,
+        contact_id=invoice.contact_id,
+    ).first()
+    if not order:
+        raise HTTPException(409, "Linked CRM sales order is unavailable for invoice attribution")
+    lead = db.query(CRMLead).filter_by(
+        id=order.lead_id, organization_id=invoice.organization_id
+    ).first() if order.lead_id else None
+    campaign_id = lead.source_campaign_id if lead else None
+    if campaign_id is None:
+        prior = db.query(CRMCampaignAttribution).filter_by(
+            organization_id=invoice.organization_id, sales_order_id=order.id
+        ).order_by(CRMCampaignAttribution.id.desc()).first()
+        campaign_id = prior.campaign_id if prior else None
+    if campaign_id is None:
+        return False
+    campaign = db.query(CRMCampaign).filter_by(
+        id=campaign_id, organization_id=invoice.organization_id
+    ).first()
+    if not campaign:
+        raise HTTPException(409, "Linked CRM campaign is unavailable for invoice attribution")
+    existing = db.query(CRMCampaignAttribution).filter_by(
+        organization_id=invoice.organization_id, accounting_invoice_id=invoice.id
+    ).first()
+    if existing:
+        return False
+    event = CRMCampaignAttribution(
+        organization_id=invoice.organization_id, campaign_id=campaign.id,
+        contact_id=order.contact_id, lead_id=order.lead_id, sales_order_id=order.id,
+        accounting_invoice_id=invoice.id, event_type="invoice_paid",
+        revenue_amount=Decimal(invoice.total), currency=invoice.currency,
+        idempotency_key="accounting-invoice-paid-" + str(invoice.id),
+        occurred_at=datetime.combine(payment_date, time.min, tzinfo=timezone.utc),
+        created_by=user.id,
+    )
+    db.add(event)
+    db.add(AuditEvent(
+        organization_id=invoice.organization_id, actor_user_id=user.id,
+        action="crm.campaign.attribution.invoice_paid",
+        resource_type="crm_campaign_attribution", resource_id=str(invoice.id),
+        detail=f"campaign:{campaign.id};sales_order:{order.id};invoice:{invoice.id}",
+    ))
+    return True
+
+
 @router.post("/accounting/invoices/{invoice_id}/payments",status_code=201)
 def record_accounting_invoice_payment(invoice_id:int,payload:AccountingInvoicePaymentIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -2692,13 +2804,17 @@ def record_accounting_invoice_payment(invoice_id:int,payload:AccountingInvoicePa
         reference=payload.reference,idempotency_key=payload.idempotency_key,created_by=user.id)
     db.add(payment);invoice.amount_paid=Decimal(invoice.amount_paid)+payload.amount
     invoice.status="paid" if invoice.amount_paid==invoice.total else "partially_paid"
+    crm_attribution_created = _record_paid_invoice_crm_attribution(
+        db, invoice, payload.payment_date, user
+    )
     try: db.commit()
     except IntegrityError:
         db.rollback();raise HTTPException(409,"Payment conflicts with an existing request")
     audit(db,user.id,membership.organization_id,"accounting.invoice.payment","accounting_invoice",invoice.id,
         f"{payload.amount}:{payload.reference}")
     return {"id":payment.id,"status":invoice.status,"amount_paid":str(invoice.amount_paid),
-        "balance":str(invoice.total-invoice.amount_paid),"journal_id":journal.id}
+        "balance":str(invoice.total-invoice.amount_paid),"journal_id":journal.id,
+        "crm_attribution_created":crm_attribution_created}
 
 
 @router.get("/accounting/aging")
