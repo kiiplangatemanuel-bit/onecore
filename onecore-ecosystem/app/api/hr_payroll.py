@@ -3,6 +3,7 @@
 Statutory rates are never bundled as defaults. A rule set must cite current official
 KRA, NSSF and SHA source evidence and be approved by a different organization member.
 """
+from calendar import monthrange
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse
@@ -129,6 +130,8 @@ class RuleSetIn(BaseModel):
                 raise ValueError("Only the final PAYE band may be open-ended")
             if upper is not None:
                 previous = upper
+        if self.paye_bands[-1].get("upper_bound") is not None:
+            raise ValueError("The final PAYE band must be open-ended")
         previous = Decimal("0")
         for tier in self.nssf_tiers:
             lower, upper = dec(tier.get("lower_bound")), dec(tier.get("upper_bound"))
@@ -166,6 +169,8 @@ class PayrollRunIn(BaseModel):
     def valid_period(self):
         if self.period_end < self.period_start:
             raise ValueError("Payroll period end must not precede start")
+        if self.period_start.day != 1 or self.period_end != date(self.period_start.year, self.period_start.month, monthrange(self.period_start.year, self.period_start.month)[1]):
+            raise ValueError("Monthly payroll periods must cover one complete calendar month")
         if len(self.employee_ids) != len(set(self.employee_ids)):
             raise ValueError("Employee IDs must be unique")
         return self
@@ -176,7 +181,7 @@ class PaidIn(BaseModel):
 
 
 def employee_out(x):
-    return {"id": x.id, "branch_id": x.branch_id, "employee_number": x.employee_number,
+    return {"id": x.id, "termination_date": x.termination_date.date().isoformat() if x.termination_date else None, "branch_id": x.branch_id, "employee_number": x.employee_number,
             "first_name": x.first_name, "last_name": x.last_name, "email": x.email,
             "phone": x.phone, "department": x.department, "job_title": x.job_title,
             "employment_type": x.employment_type, "employment_status": x.employment_status,
@@ -206,11 +211,21 @@ def _tiered_contribution(gross, tiers, rate_key):
     return rounded(total)
 
 
-def _calculate(employee, rules):
-    allowances = {k: rounded(v) for k, v in (employee.recurring_allowances or {}).items()}
-    benefits = {k: rounded(v) for k, v in (employee.recurring_benefits or {}).items()}
-    gross = rounded(dec(employee.base_salary) + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
-    pension = rounded(employee.pension_contribution)
+def _calculate(employee, rules, period_start, period_end):
+    total_days = (period_end - period_start).days + 1
+    hired = employee.hire_date.date() if isinstance(employee.hire_date, datetime) else employee.hire_date
+    terminated = employee.termination_date.date() if isinstance(employee.termination_date, datetime) else employee.termination_date
+    eligible_start = max(period_start, hired)
+    eligible_end = min(period_end, terminated or period_end)
+    eligible_days = max(0, (eligible_end - eligible_start).days + 1)
+    if eligible_days == 0:
+        raise HTTPException(422, f"Employee {employee.employee_number} was not employed during this payroll period")
+    factor = Decimal(eligible_days) / Decimal(total_days)
+    allowances = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_allowances or {}).items()}
+    benefits = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_benefits or {}).items()}
+    prorated_salary = rounded(dec(employee.base_salary) * factor)
+    gross = rounded(prorated_salary + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
+    pension = rounded(dec(employee.pension_contribution) * factor)
     deductible_pension = min(pension, dec(rules["pension_tax_deductible_limit"]))
     taxable = max(ZERO, gross - deductible_pension)
     paye = max(ZERO, _progressive_tax(taxable, rules["paye_bands"]) - dec(rules["personal_relief"]))
@@ -227,6 +242,7 @@ def _calculate(employee, rules):
     return {"employee_id": employee.id, "employee_number": employee.employee_number,
             "employee_name": (employee.first_name + " " + employee.last_name).strip(),
             "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
+            "proration_days": eligible_days, "period_days": total_days, "proration_factor": str(factor), "base_salary_prorated": str(prorated_salary),
             "nssf_employee": str(nssf_employee), "nssf_employer": str(nssf_employer),
             "shif_employee": str(shif), "housing_levy_employee": str(housing_employee),
             "housing_levy_employer": str(housing_employer), "pension_employee": str(pension),
@@ -267,6 +283,39 @@ def create_employee(payload: EmployeeIn, membership=Depends(active_membership),
         db.rollback()
         raise HTTPException(409, "Employee number already exists in this organization")
     db.refresh(row)
+    return employee_out(row)
+
+
+class EmploymentChangeIn(BaseModel):
+    status: str = Field(pattern="^(active|on_leave|terminated)$")
+    termination_date: date | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+    @model_validator(mode="after")
+    def termination_date_required(self):
+        if self.status == "terminated" and self.termination_date is None:
+            raise ValueError("A termination date is required when terminating employment")
+        if self.status != "terminated" and self.termination_date is not None:
+            raise ValueError("Termination date is only valid for terminated employees")
+        return self
+
+
+@router.post("/hr/employees/{employee_id}/employment-status")
+def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
+                             membership=Depends(active_membership), user: User=Depends(current_user),
+                             db: Session=Depends(get_db)):
+    require_permission(membership, "update")
+    row=db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
+    if not row or not can_access_branch(membership,row.branch_id):
+        raise HTTPException(404, "Employee not found")
+    if row.employment_status == "terminated":
+        raise HTTPException(409, "Terminated employment records cannot be changed")
+    if payload.termination_date and payload.termination_date < row.hire_date.date():
+        raise HTTPException(422, "Termination date cannot precede hire date")
+    row.employment_status=payload.status
+    row.termination_date=datetime.combine(payload.termination_date,time.max,tzinfo=timezone.utc) if payload.termination_date else None
+    audit(db,user,membership.organization_id,"hr.employee.status_changed","hr_employee",row.id,payload.reason)
+    db.commit()
     return employee_out(row)
 
 
@@ -425,7 +474,7 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     if any(not can_access_branch(membership,x.branch_id) for x in employees): raise HTTPException(404,"Employee not found")
     snapshots=[]
     for employee in employees:
-        item=_calculate(employee,rules.rules); item["rule_set_id"]=rules.id
+        item=_calculate(employee,rules.rules,payload.period_start,payload.period_end); item["rule_set_id"]=rules.id
         snapshots.append(item)
     gross=sum((dec(x["gross_pay"]) for x in snapshots),ZERO)
     deductions=sum((dec(x["total_deductions"]) for x in snapshots),ZERO)
