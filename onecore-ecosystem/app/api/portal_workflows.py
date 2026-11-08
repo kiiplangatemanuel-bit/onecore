@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, StatusAlertDelivery, User
-from app.core.security import current_user
+from app.core.security import current_user, set_status_alert_fanout_context
 
 router = APIRouter(prefix="/api/v1/portals", tags=["public portals"])
 
