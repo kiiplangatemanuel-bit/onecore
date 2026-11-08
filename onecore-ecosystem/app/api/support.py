@@ -217,6 +217,17 @@ def list_support_queue(
     return [_ticket_out(row, db) for row in rows]
 
 
+@router.get("/admin/tickets/{ticket_number}")
+def read_support_ticket_admin(
+    ticket_number: str,
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    ticket = db.query(SupportTicket).filter_by(ticket_number=ticket_number).first()
+    if not ticket:
+        raise HTTPException(404, "Support ticket not found")
+    return _ticket_out(ticket, db, include_messages=True)
+
+
 @router.post("/admin/tickets/{ticket_number}/messages", status_code=201)
 def reply_as_support(
     ticket_number: str, payload: SupportMessageIn,
