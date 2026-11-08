@@ -240,6 +240,7 @@ def _verify_rls_database_boundary(connection):
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices",
+        "status_alert_deliveries",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""
