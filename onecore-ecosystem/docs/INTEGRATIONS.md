@@ -13,3 +13,7 @@ All provider integrations are disabled by default. `.env.example` lists supporte
 | Object storage | `S3_` + `INTEGRATION_OBJECT_STORAGE_ENABLED` | Private buckets by default; signed URLs; never expose tenant files on public CDN. |
 
 Implement a class conforming to `IntegrationAdapter` for each provider. Keep request signing, token refresh, provider payload mapping, callback verification, retries, dead-letter handling and reconciliation inside the adapter/service boundary. Do not return secret values from API endpoints.
+
+## Support attachment malware scanning
+
+Support attachments are uploaded to a private object-storage bucket using short-lived presigned PUT URLs. Upload completion verifies the stored size and content type, then keeps the object quarantined until scanning returns an explicit clean verdict. Configure `SUPPORT_ATTACHMENT_SCANNING_ENABLED=true`, `CLAMAV_HOST`, `CLAMAV_PORT` (default `3310`) and `CLAMAV_TIMEOUT_SECONDS` (default `30`) to use a reachable ClamAV `clamd` service. The API streams the object to ClamAV using `INSTREAM`; infected files are marked rejected and scanner errors/timeouts leave files quarantined. Only clean files can receive short-lived download URLs. Keep the ClamAV service on a private network, do not publish port 3310 publicly, keep signatures updated, and monitor daemon health. Production startup validation refuses to enable Support object storage without scanning enabled. Manual platform-admin review remains a separate fallback only when automated scanning is not configured in non-production environments.
