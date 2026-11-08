@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, HRAttendanceRecord, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, HRAttendanceRecord, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, PayrollPaymentBatch, PayrollPaymentBatchItem, PayrollBankStatementLine
 from app.core.models import AuditEvent, Branch, Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingFiscalPeriod
 from app.core.security import current_user
 from app.core.tenancy import active_membership
