@@ -60,5 +60,6 @@ def test_generic_tenant_policies_allow_only_explicitly_scoped_worker_transaction
 def test_crm_provider_and_unsubscribe_callbacks_are_tenant_scoped():
     source = (Path(__file__).parents[1] / "migrations" / "versions" / "0059_tenant_domain_row_level_security.py").read_text()
     assert '"crm_campaign_deliveries"' in source
-    assert "app.crm_delivery_callback_authenticated" in source
+    assert "app.crm_delivery_provider_message_id" in source
+    assert "provider_message_id = NULLIF(current_setting" in source
     assert "app.crm_unsubscribe_token_hash" in source
