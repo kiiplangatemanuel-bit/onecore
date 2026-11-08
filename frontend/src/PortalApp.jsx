@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { API_BASE, api, clearToken, getToken, login } from "./api";
+import { API_BASE, api, clearToken, getToken, login, setToken } from "./api";
 import { portalLink, portalUrl } from "./config/portals";
 import "./portal.css";
 
@@ -39,15 +39,51 @@ function PublicPortalContent({portal,content}) {
 export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || "support" }) {
   const content=PUBLIC_CONTENT[portal] || PUBLIC_CONTENT.support;
   const [user,setUser]=useState(null),[checking,setChecking]=useState(Boolean(getToken())),[showLogin,setShowLogin]=useState(false),[error,setError]=useState(""),[organizations,setOrganizations]=useState([]),[activeOrg,setActiveOrg]=useState("");
-  useEffect(()=>{if(!getToken()){setChecking(false);return;}api("/api/v1/auth/me").then(setUser).catch(()=>{clearToken();setUser(null);}).finally(()=>setChecking(false));},[]);
+  async function startSharedLogin(){
+    try{
+      const loginUrl=portalUrl("app","login");
+      if(!loginUrl)throw new Error("The shared OneCore sign-in application URL is not configured for this deployment.");
+      const bytes=new Uint8Array(48);window.crypto.getRandomValues(bytes);
+      const verifier=Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
+      const stateBytes=new Uint8Array(24);window.crypto.getRandomValues(stateBytes);
+      const state=Array.from(stateBytes,b=>b.toString(16).padStart(2,"0")).join("");
+      const digest=await window.crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier));
+      const challenge=btoa(String.fromCharCode(...new Uint8Array(digest))).split("+").join("-").split("/").join("_").replace(/=+$/,"");
+      sessionStorage.setItem("onecore.sso.verifier",verifier);
+      sessionStorage.setItem("onecore.sso.state",state);
+      const callback=window.location.origin+window.location.pathname;
+      window.location.assign(loginUrl+"?return_to="+encodeURIComponent(callback)+"&state="+encodeURIComponent(state)+"&code_challenge="+encodeURIComponent(challenge));
+    }catch(e){setError(e.message);}
+  }
+  useEffect(()=>{
+    async function restoreSession(){
+      const params=new URLSearchParams(window.location.search);
+      const code=params.get("code");
+      if(code){
+        const state=params.get("state"), expected=sessionStorage.getItem("onecore.sso.state"), verifier=sessionStorage.getItem("onecore.sso.verifier");
+        window.history.replaceState({}, "", window.location.pathname+window.location.hash);
+        sessionStorage.removeItem("onecore.sso.state");sessionStorage.removeItem("onecore.sso.verifier");
+        if(!state||!expected||state!==expected||!verifier){setError("The sign-in response could not be verified. Please start sign-in again.");setChecking(false);return;}
+        try{
+          const callback=window.location.origin+window.location.pathname;
+          const result=await api("/api/v1/auth/exchange-portal-code",{method:"POST",body:JSON.stringify({code,redirect_uri:callback,code_verifier:verifier})});
+          setToken(result.access_token);
+        }catch(e){setError(e.message);clearToken();setChecking(false);return;}
+      }
+      if(!getToken()){setChecking(false);return;}
+      try{setUser(await api("/api/v1/auth/me"));}catch{clearToken();setUser(null);}
+      finally{setChecking(false);}
+    }
+    restoreSession();
+  },[]);
   useEffect(()=>{if(!user)return;api("/api/v1/organizations").then(rows=>{setOrganizations(rows);if(rows.length)setActiveOrg(old=>rows.some(x=>String(x.id)===old)?old:String(rows[0].id));}).catch(e=>setError(e.message));},[user]);
   const adminDenied=portal==="admin" && user && !["root_superadmin","platform_admin"].includes(user.platform_role);
   async function loadAdmin(){try{await api("/api/v1/admin/overview");setError("");}catch(e){setError(e.message);}}
   useEffect(()=>{if(portal==="admin"&&user&&!adminDenied)loadAdmin();},[portal,user,adminDenied]);
   function signOut(){clearToken();setUser(null);setOrganizations([]);setActiveOrg("");}
-  if(portal==="support") return <SupportWorkspace user={user} setUser={setUser} checking={checking} onSignOut={signOut}/>;
-  return <div className="portal-site"><header className="portal-header"><a href={portalUrl("publicSite")||"/"} className="portal-logo"><b>O</b><span>onecore<small>TECHNOLOGIES LTD</small></span></a><nav aria-label="OneCore applications"><a href={portalLink("publicSite")}>Main website</a><a href={portalLink("docs")}>Documentation</a><a href={portalLink("support")}>Support</a><a href={portalLink("status")}>Status</a></nav><div>{user?<><span className="portal-user">{user.full_name||user.email}</span><button className="portal-quiet" onClick={signOut}>Sign out</button></>:<button className="portal-quiet" onClick={()=>setShowLogin(v=>!v)}>Sign in</button>}</div></header>
-  <main className="portal-main"><section className="portal-hero"><span>{portal.toUpperCase()} · ONECORE ECOSYSTEM</span><h1>{({status:"OneCore Status",developers:"OneCore Developers",docs:"OneCore Documentation",community:"OneCore Community",trust:"OneCore Trust Centre",events:"OneCore Events",careers:"OneCore Careers",partners:"OneCore Partners",admin:"OneCore Operations Centre"})[portal]||"OneCore"}</h1><p>{({status:"Service availability and incident transparency.",developers:"Build secure integrations with OneCore.",docs:"Guides for every OneCore organization and role.",community:"Connect, learn and share with the OneCore ecosystem.",trust:"Security, privacy and responsible disclosure.",events:"Discover events, webinars and learning sessions.",careers:"Explore opportunities at OneCore Technologies Ltd.",partners:"Build with OneCore as a technology or implementation partner.",admin:"Privileged platform administration."})[portal]}</p><div className="portal-actions"><button onClick={()=>setShowLogin(v=>!v)}>{user?"Account":"Sign in"}</button>{portal==="developers"&&<a href={API_BASE+"/docs"} target="_blank" rel="noreferrer">Open API reference ↗</a>}</div></section>
+  if(portal==="support") return <SupportWorkspace user={user} setUser={setUser} checking={checking} onSignOut={signOut} onStartLogin={startSharedLogin}/>;
+  return <div className="portal-site"><header className="portal-header"><a href={portalUrl("publicSite")||"/"} className="portal-logo"><b>O</b><span>onecore<small>TECHNOLOGIES LTD</small></span></a><nav aria-label="OneCore applications"><a href={portalLink("publicSite")}>Main website</a><a href={portalLink("docs")}>Documentation</a><a href={portalLink("support")}>Support</a><a href={portalLink("status")}>Status</a></nav><div>{user?<><span className="portal-user">{user.full_name||user.email}</span><button className="portal-quiet" onClick={signOut}>Sign out</button></>:<button className="portal-quiet" onClick={startSharedLogin}>Sign in</button>}</div></header>
+  <main className="portal-main"><section className="portal-hero"><span>{portal.toUpperCase()} · ONECORE ECOSYSTEM</span><h1>{({status:"OneCore Status",developers:"OneCore Developers",docs:"OneCore Documentation",community:"OneCore Community",trust:"OneCore Trust Centre",events:"OneCore Events",careers:"OneCore Careers",partners:"OneCore Partners",admin:"OneCore Operations Centre"})[portal]||"OneCore"}</h1><p>{({status:"Service availability and incident transparency.",developers:"Build secure integrations with OneCore.",docs:"Guides for every OneCore organization and role.",community:"Connect, learn and share with the OneCore ecosystem.",trust:"Security, privacy and responsible disclosure.",events:"Discover events, webinars and learning sessions.",careers:"Explore opportunities at OneCore Technologies Ltd.",partners:"Build with OneCore as a technology or implementation partner.",admin:"Privileged platform administration."})[portal]}</p><div className="portal-actions"><button onClick={user?()=>setError(""):startSharedLogin}>{user?"Account":"Sign in"}</button>{portal==="developers"&&<a href={API_BASE+"/docs"} target="_blank" rel="noreferrer">Open API reference ↗</a>}</div></section>
   {checking&&<p className="portal-notice">Checking your OneCore session…</p>}
   {showLogin&&!user&&!checking&&<LoginPanel onSignedIn={identity=>{setUser(identity);setShowLogin(false);setError("");}}/>}
   {error&&<div className="portal-error" role="alert">{error}</div>}
@@ -56,14 +92,13 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
   <section className="portal-notice" id="contact"><strong>Independent deployment</strong><p>This application is independently deployable. Its public URL and shared API URL are configured in this application's environment. Public browsing does not require an account.</p></section></main><footer className="portal-footer">© {new Date().getFullYear()} OneCore Technologies Ltd · One Platform. Every Organization. Anywhere.</footer></div>;
 }
 
-function SupportWorkspace({user,setUser,checking,onSignOut}) {
+function SupportWorkspace({user,setUser,checking,onSignOut,onStartLogin}) {
   const [tickets,setTickets]=useState([]),[selected,setSelected]=useState(null),[adminTickets,setAdminTickets]=useState([]),[adminSelected,setAdminSelected]=useState(null),[orgs,setOrgs]=useState([]),[organizationId,setOrganizationId]=useState("");
   const [guestTicket,setGuestTicket]=useState(null),[guestToken,setGuestToken]=useState("");
   const [ticketNumber,setTicketNumber]=useState(""),[accessToken,setAccessToken]=useState("");
   const [name,setName]=useState(""),[email,setEmail]=useState(user?.email||""),[phone,setPhone]=useState("");
   const [subject,setSubject]=useState(""),[category,setCategory]=useState("general"),[message,setMessage]=useState("");
   const [reply,setReply]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
-  const [showLogin,setShowLogin]=useState(false);
   const isPlatformAdmin=Boolean(user&&["root_superadmin","platform_admin"].includes(user.platform_role));
   async function refreshTickets(){if(!user)return;try{setTickets(await api("/api/v1/support/tickets"));}catch(e){setError(e.message);}}
   async function refreshAdminTickets(){if(!isPlatformAdmin)return;try{setAdminTickets(await api("/api/v1/support/admin/tickets"));}catch(e){setError(e.message);}}
@@ -83,10 +118,9 @@ function SupportWorkspace({user,setUser,checking,onSignOut}) {
   }catch(e){setError(e.message);}finally{setBusy(false);}}
   async function updateAdminStatus(status){if(!adminSelected)return;setBusy(true);setError("");try{const result=await api("/api/v1/support/admin/tickets/"+encodeURIComponent(adminSelected.ticket_number),{method:"PATCH",body:JSON.stringify({status})});setAdminSelected(result);await refreshAdminTickets();}catch(e){setError(e.message);}finally{setBusy(false);}}
   const active=user?(adminSelected||selected):guestTicket;
-  return <div className="portal-site"><header className="portal-header"><a href={portalUrl("publicSite")||"/"} className="portal-logo"><b>O</b><span>onecore<small>TECHNOLOGIES LTD</small></span></a><nav><a href={portalLink("publicSite")}>Main website</a><a href={portalLink("docs")}>Help guides</a><a href={portalLink("status")}>Service status</a></nav><div>{user?<><span className="portal-user">{user.full_name||user.email}</span><button className="portal-quiet" onClick={onSignOut}>Sign out</button></>:<button className="portal-quiet" onClick={()=>setShowLogin(v=>!v)}>Sign in</button>}</div></header>
+  return <div className="portal-site"><header className="portal-header"><a href={portalUrl("publicSite")||"/"} className="portal-logo"><b>O</b><span>onecore<small>TECHNOLOGIES LTD</small></span></a><nav><a href={portalLink("publicSite")}>Main website</a><a href={portalLink("docs")}>Help guides</a><a href={portalLink("status")}>Service status</a></nav><div>{user?<><span className="portal-user">{user.full_name||user.email}</span><button className="portal-quiet" onClick={onSignOut}>Sign out</button></>:<button className="portal-quiet" onClick={onStartLogin}>Sign in</button>}</div></header>
   <main className="portal-main"><section className="portal-hero"><span>CUSTOMER CARE</span><h1>OneCore Support</h1><p>Get help with your OneCore account, organization and services. You can submit a request without signing in, or sign in to manage your support history.</p><div className="portal-actions"><button onClick={()=>document.getElementById("support-new-ticket")?.scrollIntoView({behavior:"smooth"})}>Create support request</button>{user&&<span>Authenticated as {user.email}</span>}</div></section>
   {checking&&<p className="portal-notice">Checking your OneCore session…</p>}
-  {showLogin&&!user&&!checking&&<LoginPanel onSignedIn={async()=>{try{const me=await api("/api/v1/auth/me");setUser(me);setShowLogin(false);}catch(e){setError(e.message);}}}/>}
   {error&&<div role="alert" className="portal-error">{error}</div>}{notice&&<div role="status" className="portal-notice">{notice}</div>}
   {isPlatformAdmin&&<section className="portal-panel"><div className="portal-panel-head"><div><h2>Support administration queue</h2><p>Platform-admin access is verified by the backend.</p></div><button className="portal-quiet" onClick={refreshAdminTickets}>Refresh queue</button></div>{adminTickets.length?adminTickets.map(t=><button key={t.ticket_number} className="portal-ticket-row" onClick={async()=>{try{setAdminSelected(await api("/api/v1/support/admin/tickets/"+encodeURIComponent(t.ticket_number)));setSelected(null);setGuestTicket(null);}catch(e){setError(e.message);}}}><strong>{t.subject}</strong><span>{t.ticket_number} · {t.status} · {t.priority}</span></button>):<p>No support tickets in the queue.</p>}</section>}
   <section className="portal-columns"><article className="portal-panel"><h2>Help before you submit</h2><ul><li>Include the organization and module affected</li><li>Describe what you expected and what happened</li><li>Never include passwords, API secrets or payment card details</li><li>For urgent security incidents, use the Trust Centre</li></ul><p className="portal-muted">Requests are stored in the OneCore platform database and are visible only to the requester, authorized organization administrators and authorized platform support administrators.</p></article>
