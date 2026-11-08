@@ -213,7 +213,7 @@ def test_production_object_storage_requires_automated_attachment_scanning():
     with pytest.raises(ValidationError, match="SUPPORT_ATTACHMENT_SCANNING_ENABLED"):
         Settings(
             _env_file=None, app_env="production", debug=False,
-            secret_key="a" * 48, database_url="postgresql://user:pass@db.project.supabase.co/app",
+            secret_key="a" * 48, supabase_db_url="", database_url="postgresql://user:pass@db.project.supabase.co/app",
             cors_origins="https://app.example.com", trusted_hosts="api.example.com",
             force_https=True, portal_redirect_origins="https://support.example.com",
             integration_object_storage_enabled=True,
