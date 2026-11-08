@@ -155,7 +155,7 @@ def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
 def _out(row: PortalWorkflowRecord) -> dict:
     return {
         "id": row.id, "portal": row.portal_key, "record_type": row.record_type,
-        "organization_id": row.organization_id, "owner_user_id": row.owner_user_id,
+        "organization_id": row.organization_id,
         "visibility": row.visibility, "status": row.status, "payload": row.payload,
         "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
     }
@@ -205,6 +205,20 @@ def _validate_related_records(portal: str, record_type: str, payload: dict,
 
 
 def _validate_payload(portal: str, record_type: str, payload: dict):
+    def has_secret_key(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                normalized = str(key).lower().replace("-", "_")
+                if any(term in normalized for term in ("password", "secret", "token", "private_key", "api_key", "credential")):
+                    return True
+                if has_secret_key(child):
+                    return True
+        elif isinstance(value, list):
+            return any(has_secret_key(child) for child in value)
+        return False
+
+    if has_secret_key(payload):
+        raise HTTPException(422, "Credentials and secrets must be stored in the dedicated secret manager, not portal records")
     required = REQUIRED_FIELDS.get((portal, record_type), set())
     required = required | {
         ("status", "incident"): {"title", "service", "severity", "summary"},
