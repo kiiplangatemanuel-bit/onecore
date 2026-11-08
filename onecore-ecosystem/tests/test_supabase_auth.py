@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, User
+from app.core.security import current_user
 from app.api.supabase_auth import SupabaseSessionExchange, exchange_supabase_session
 
 
@@ -59,6 +60,7 @@ def test_supabase_auth_session_provisions_onecore_identity_and_issues_api_token(
         assert user.supabase_auth_user_id == identity["id"]
         assert user.is_active is True
         assert user.full_name == "Verified User"
+        assert current_user(result["access_token"], db).id == user.id
     engine.dispose()
 
 
@@ -141,3 +143,9 @@ def test_supabase_auth_identity_migration_is_chained_after_developer_keys():
     assert 'revision = "0057_supabase_auth_identity"' in source
     assert 'down_revision = "0056_developer_api_keys"' in source
     assert "supabase_auth_user_id" in source
+
+
+def test_supabase_auth_exchange_route_is_registered():
+    from app.main import app
+
+    assert "/api/v1/auth/supabase-session" in app.openapi()["paths"]
