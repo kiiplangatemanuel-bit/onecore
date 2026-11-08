@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -54,7 +55,7 @@ def _send_verification_email(email: str, full_name: str, token: str):
 @router.post("/register-organization", status_code=202)
 def register_organization(payload: OrganizationRegistrationIn, db: Session = Depends(get_db)):
     email = str(payload.email).lower()
-    if db.query(User).filter(User.email == email).first():
+    if db.query(User).filter(func.lower(User.email) == email).first():
         raise HTTPException(409, "An account with this email already exists. Sign in or contact support.")
     if db.query(Organization).filter(Organization.slug == payload.organization_slug).first():
         raise HTTPException(409, "Organization URL is already in use. Choose another slug.")
@@ -110,7 +111,7 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
 def verify_email(payload: EmailVerificationIn, db: Session = Depends(get_db)):
     verification = db.query(EmailVerification).filter_by(
         token_hash=_token_hash(payload.token)
-    ).first()
+    ).with_for_update().first()
     if not verification or verification.consumed_at is not None:
         raise HTTPException(400, "Verification link is invalid or has already been used.")
     expires_at = verification.expires_at
