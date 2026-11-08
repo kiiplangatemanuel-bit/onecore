@@ -198,3 +198,37 @@ def test_only_designated_security_reviewers_can_access_confidential_reports():
         with pytest.raises(HTTPException):
             read_portal_record("trust", report["id"], unrelated, db)
     engine.dispose()
+
+
+def test_comments_and_applications_cannot_reference_other_tenant_or_unpublished_records():
+    engine = _db()
+    with Session(engine) as db:
+        org_a = Organization(name="A", slug="org-a")
+        org_b = Organization(name="B", slug="org-b")
+        db.add_all([org_a, org_b])
+        db.flush()
+        author = _identity(db, "author@example.com", org_a, "staff")
+        outsider = _identity(db, "outsider@example.com", org_b, "staff")
+        db.commit()
+        post = create_portal_record(
+            "community", "post",
+            PortalRecordCreate(organization_id=org_a.id, visibility="organization",
+                               payload={"title": "Tenant A post", "body": "Content"}),
+            author, db,
+        )
+        with pytest.raises(HTTPException) as cross_tenant:
+            create_portal_record(
+                "community", "comment",
+                PortalRecordCreate(organization_id=org_b.id, visibility="organization",
+                                   payload={"post_id": post["id"], "body": "Cross-tenant comment"}),
+                outsider, db,
+            )
+        assert cross_tenant.value.status_code == 404
+        with pytest.raises(HTTPException) as missing_vacancy:
+            create_portal_record(
+                "careers", "application",
+                PortalRecordCreate(payload={"vacancy_id": 9999, "cover_letter": "I am interested"}),
+                outsider, db,
+            )
+        assert missing_vacancy.value.status_code == 404
+    engine.dispose()
