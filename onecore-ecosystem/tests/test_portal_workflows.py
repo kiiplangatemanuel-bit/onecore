@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.database import Base
+from app.core.security import create_access_token, current_user
 from app.core.models import AuditEvent, Membership, Organization, PortalWorkflowRecord, User
 from app.api.portal_workflows import (
     PortalRecordCreate, PortalRecordUpdate, create_portal_record,
@@ -302,4 +303,18 @@ def test_revoked_organization_membership_removes_owner_access_to_tenant_records(
         with pytest.raises(HTTPException) as denied_update:
             update_portal_record("community", record["id"], PortalRecordUpdate(payload={"body": "changed"}), owner, db)
         assert denied_update.value.status_code == 404
+    engine.dispose()
+
+
+
+def test_verified_identity_is_bound_to_database_session_for_rls():
+    engine = _db()
+    with Session(engine) as db:
+        user = User(email="identity@example.com", full_name="Identity", password_hash="unused")
+        db.add(user)
+        db.commit()
+        token = create_access_token(user.id, user.auth_version)
+        authenticated = current_user(token, db)
+        assert authenticated.id == user.id
+        assert db.info["onecore_user_id"] == user.id
     engine.dispose()
