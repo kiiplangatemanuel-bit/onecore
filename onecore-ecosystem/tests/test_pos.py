@@ -177,3 +177,28 @@ def test_loyalty_redemption_rejects_points_above_sale_cap_and_subcent_values():
     with pytest.raises(HTTPException) as subcent:
         apply_loyalty_redemption(prepared, 1, 1000, Decimal("50.00"))
     assert subcent.value.status_code == 422
+
+
+
+def test_loyalty_points_restore_and_earned_points_reverse_proportionally_on_returns():
+    from app.services.pos import calculate_loyalty_return_adjustments
+
+    restore, reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("100.00"), sale_total=Decimal("200.00"),
+    )
+    assert (restore, reverse) == (50, 1)
+
+    retry_restore, retry_reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("100.00"), sale_total=Decimal("200.00"),
+        already_restored=50, already_reversed=1,
+    )
+    assert (retry_restore, retry_reverse) == (0, 0)
+
+    full_restore, full_reverse = calculate_loyalty_return_adjustments(
+        points_redeemed=100, points_earned=2,
+        cumulative_refunds=Decimal("200.00"), sale_total=Decimal("200.00"),
+        already_restored=50, already_reversed=1,
+    )
+    assert (full_restore, full_reverse) == (50, 1)
