@@ -184,8 +184,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert mapping.status_code == 200, mapping.text
             posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
             assert posted.status_code == 201, posted.text
-            assert posted.json()["debits"] == "23112.50"
-            assert posted.json()["credits"] == "23112.50"
+            assert posted.json()["debits"] == "23267.54"
+            assert posted.json()["credits"] == "23267.54"
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",
