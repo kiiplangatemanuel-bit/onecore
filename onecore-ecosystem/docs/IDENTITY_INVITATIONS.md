@@ -42,8 +42,9 @@ required before this can be treated as complete branch management.
 
 ## Remaining identity requirements
 
-MFA/TOTP and recovery codes, external OIDC identity federation, durable session
-and device inventory, per-session revocation, privileged step-up authentication,
+mandatory MFA policy for root superadmins and other privileged roles, external
+OIDC identity federation, durable session and device inventory, per-session
+revocation, privileged step-up authentication,
 account recovery for unverified users, distributed edge/WAF throttling, and
 production email-domain authentication and delivery monitoring remain release
 requirements. The current password-reset email sender is synchronous SMTP; a
