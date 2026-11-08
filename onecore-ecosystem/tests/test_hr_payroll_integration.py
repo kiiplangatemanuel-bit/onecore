@@ -214,10 +214,10 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
 
             actor["user"], actor["role"] = users[0], "payroll_manager"
             excluded = client.post("/api/v1/payroll/runs", json={
-                "branch_id": branch_id, "period_start": "2026-12-01",
-                "period_end": "2026-12-31",
+                "branch_id": branch_id, "period_start": "2027-01-01",
+                "period_end": "2027-01-31",
                 "employee_ids": [new_employee.json()["id"]],
-                "idempotency_key": "payroll-terminated-employee-december",
+                "idempotency_key": "payroll-terminated-employee-january-2027",
             })
             assert excluded.status_code == 404
     finally:
