@@ -418,7 +418,7 @@ def update_portal_record(
         queue_organization_webhook_event(
             db, row.organization_id, event_type,
             {"record_id": row.id, "name": (row.payload or {}).get("name", ""), "status": row.status},
-            event_id=f"evt_{row.record_type}_{row.id}_{int(row.updated_at.timestamp())}_updated",
+            event_id=f"evt_{row.record_type}_{row.id}_{int(row.updated_at.timestamp() * 1_000_000)}_updated",
         )
     db.commit()
     db.refresh(row)
