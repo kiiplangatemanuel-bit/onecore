@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_bucket: str = ""
     s3_region: str = ""
+    clamav_host: str = ""
+    clamav_port: int = Field(default=3310, ge=1, le=65535)
+    clamav_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
 
     @property
