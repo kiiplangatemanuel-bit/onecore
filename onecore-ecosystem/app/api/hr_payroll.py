@@ -1135,6 +1135,15 @@ class PayrollStatementResolveIn(BaseModel):
     note: str = Field(min_length=5, max_length=500)
 
 
+def _assert_payment_batch_branch_scope(db, batch, membership):
+    items = db.query(PayrollPaymentBatchItem).filter_by(
+        organization_id=membership.organization_id, batch_id=batch.id
+    ).all()
+    if not items or any(not can_access_branch(membership, item.branch_id) for item in items):
+        raise HTTPException(404, "Payment batch not found")
+    return items
+
+
 def _payment_batch_out(db, batch):
     items = db.query(PayrollPaymentBatchItem).filter_by(
         organization_id=batch.organization_id, batch_id=batch.id
@@ -1165,7 +1174,12 @@ def list_payroll_payment_batches(membership=Depends(active_membership), db: Sess
     rows = db.query(PayrollPaymentBatch).filter_by(
         organization_id=membership.organization_id
     ).order_by(PayrollPaymentBatch.created_at.desc()).limit(200).all()
-    return [_payment_batch_out(db, x) for x in rows]
+    visible = []
+    for row in rows:
+        items = db.query(PayrollPaymentBatchItem).filter_by(batch_id=row.id).all()
+        if items and all(can_access_branch(membership, item.branch_id) for item in items):
+            visible.append(_payment_batch_out(db, row))
+    return visible
 
 
 @router.post("/payroll/payment-batches", status_code=201)
@@ -1180,6 +1194,7 @@ def create_payroll_payment_batch(payload: PayrollPaymentBatchIn,
         existing_ids = [x.payroll_run_id for x in db.query(PayrollPaymentBatchItem).filter_by(batch_id=existing.id).all()]
         if set(existing_ids) != set(payload.payroll_run_ids) or len(existing_ids) != len(payload.payroll_run_ids):
             raise HTTPException(409, "Payment batch idempotency key was already used for different payroll runs")
+        _assert_payment_batch_branch_scope(db, existing, membership)
         return _payment_batch_out(db, existing)
     runs = db.query(PayrollRun).filter(
         PayrollRun.organization_id == membership.organization_id,
@@ -1235,6 +1250,7 @@ def submit_payroll_payment_batch(batch_id: int, membership=Depends(active_member
     ).with_for_update().first()
     if not batch:
         raise HTTPException(404, "Payment batch not found")
+    _assert_payment_batch_branch_scope(db, batch, membership)
     if batch.status != "draft":
         raise HTTPException(409, "Only draft payment batches can be submitted")
     batch.status = "pending_approval"
@@ -1255,6 +1271,7 @@ def approve_payroll_payment_batch(batch_id: int, membership=Depends(active_membe
     ).with_for_update().first()
     if not batch:
         raise HTTPException(404, "Payment batch not found")
+    _assert_payment_batch_branch_scope(db, batch, membership)
     if batch.status != "pending_approval":
         raise HTTPException(409, "Only submitted payment batches can be approved")
     if user.id in {batch.created_by, batch.submitted_by}:
@@ -1292,6 +1309,7 @@ def settle_payroll_payment_batch(batch_id: int, payload: PayrollBatchSettlementI
     ).with_for_update().first()
     if not batch or batch.status not in {"approved", "partially_paid"}:
         raise HTTPException(409, "Only approved or partially paid batches can be settled")
+    _assert_payment_batch_branch_scope(db, batch, membership)
     if user.id in {batch.created_by, batch.submitted_by, batch.approved_by}:
         raise HTTPException(409, "Batch creator, submitter and approver cannot authorize its payment")
     items_by_run = {x.payroll_run_id: x for x in db.query(PayrollPaymentBatchItem).filter_by(
@@ -1456,8 +1474,7 @@ def import_payroll_bank_statement(payload: PayrollStatementImportIn,
 @router.get("/payroll/bank-statements")
 def list_payroll_bank_statement_lines(status: str | None = None,
         membership=Depends(active_membership), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
-    require_hr_read(membership)
+    require_payroll_action(membership, "accounting")
     if status and status not in {"matched", "unmatched", "exception"}:
         raise HTTPException(422, "Invalid statement reconciliation status")
     q = db.query(PayrollBankStatementLine).filter_by(organization_id=membership.organization_id)
