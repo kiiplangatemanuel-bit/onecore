@@ -17,6 +17,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     platform_role: Mapped[str] = mapped_column(String(40), default="customer")
     auth_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    supabase_auth_user_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class Organization(Base):
