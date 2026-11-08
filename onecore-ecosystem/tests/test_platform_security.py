@@ -68,6 +68,7 @@ def test_production_settings_require_secure_values():
         secret_key="s" * 48,
         supabase_db_url="postgresql://postgres:pass@db.project-ref.supabase.co:5432/postgres",
         cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com,https://docs.example.com",
         trusted_hosts="api.example.com",
         force_https=True,
     )
