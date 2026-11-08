@@ -26,7 +26,7 @@ All endpoints use active organization membership and existing read/update/manage
 
 ## Campaign ROI
 
-A manager links a lead to its originating campaign. Accepted quotes and confirmed sales orders on that lead automatically append idempotent attribution events, linking campaign → lead → quote → sales order. Managers may also record explicit conversion events against a campaign/contact and link a CRM lead and sales order. Order-won and invoice-paid events require a sales-order reference. Revenue is grouped by currency. Set campaign budget before using ROI; zero budget produces a null ROI. This is transparent explicit attribution, not proof of causation or full multi-touch attribution. Automatic accounting invoice/payment event linkage remains a follow-up integration. Confirmed orders and accepted quotes are linked automatically, but the invoice/payment posting events are not yet emitted from Accounting.
+A manager links a lead to its originating campaign. Accepted quotes and confirmed sales orders on that lead automatically append idempotent attribution events, linking campaign → lead → quote → sales order. Managers may also record explicit conversion events against a campaign/contact and link a CRM lead and sales order. Order-won and invoice-paid events require a sales-order reference. Revenue is grouped by currency. Set campaign budget before using ROI; zero budget produces a null ROI. This is transparent explicit attribution, not proof of causation or full multi-touch attribution. Receivable invoices can now retain a tenant- and branch-validated CRM sales-order link. When a linked invoice is fully settled, Accounting atomically appends one idempotent `invoice_paid` event tied to the source invoice; multiple invoices for one order are grouped into the same campaign/order revenue. Orders without a campaign link remain un-attributed. Historical invoice backfill and credit-note/refund attribution are not included in this slice.
 
 ## Scheduler worker
 
@@ -40,6 +40,6 @@ Provider acceptance and delivered callbacks are separate states. Provider creden
 
 - Provider sandbox/production UAT and callback authentication per provider.
 - Automatically capture actual close timestamps in every lead stage-transition path; legacy wins are not backfilled.
-- Publish verified accounting invoice/payment events to attribution; manual explicit attribution is currently supported.
+- Backfill historical invoice/payment attribution and publish credit-note/refund events to keep net campaign revenue accurate.
 - Advanced dashboard drill-down by source, campaign, product and branch; visual dashboard currently exposes forecast, accuracy, targets, ROI and scheduler health.
 - PostgreSQL concurrency/load tests, secret manager setup, multi-organization scheduler orchestration, alert routing, production deployment and business acceptance.
