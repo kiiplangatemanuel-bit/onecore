@@ -10,7 +10,7 @@ from app.core.config import settings
 
 def parse_clamav_response(response: bytes) -> bool:
     """Return True for FOUND, False for OK; reject every other response."""
-    normalized = response.strip().rstrip(b"\\x00").decode("utf-8", errors="replace")
+    normalized = response.strip().rstrip(b"\x00").decode("utf-8", errors="replace")
     if normalized.endswith(": OK"):
         return False
     if " FOUND" in normalized:
@@ -21,6 +21,7 @@ def parse_clamav_response(response: bytes) -> bool:
 def scan_s3_attachment(storage, attachment) -> dict:
     if not settings.clamav_host:
         raise HTTPException(503, "Malware scanner is not configured; attachment remains quarantined")
+    body = None
     try:
         remote = storage.get_object(Bucket=settings.s3_bucket, Key=attachment.object_key)
         body = remote["Body"]
@@ -31,7 +32,7 @@ def scan_s3_attachment(storage, attachment) -> dict:
             timeout=settings.clamav_timeout_seconds,
         ) as scanner:
             scanner.settimeout(settings.clamav_timeout_seconds)
-            scanner.sendall(b"zINSTREAM\\0")
+            scanner.sendall(b"zINSTREAM\0")
             while True:
                 chunk = body.read(64 * 1024)
                 if not chunk:
@@ -50,7 +51,7 @@ def scan_s3_attachment(storage, attachment) -> dict:
                 if not part:
                     break
                 response.extend(part)
-                if b"\\0" in part or b"\\n" in part:
+                if b"\0" in part or b"\n" in part:
                     break
         infected = parse_clamav_response(bytes(response))
         return {
@@ -64,7 +65,5 @@ def scan_s3_attachment(storage, attachment) -> dict:
     except Exception as exc:
         raise HTTPException(503, "Malware scan failed; attachment remains quarantined") from exc
     finally:
-        try:
+        if body is not None:
             body.close()
-        except (UnboundLocalError, Exception):
-            pass
