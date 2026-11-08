@@ -547,10 +547,10 @@ def add_hr_payroll_item(run_id: int, payload: HRPayrollItemIn,
         gross, deductions, net = payroll_totals(line.base_pay, items)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    line.gross_pay, line.deductions_total, line.net_pay = gross, deductions, net
     previous_gross = Decimal(str(line.gross_pay))
     previous_deductions = Decimal(str(line.deductions_total))
     previous_net = Decimal(str(line.net_pay))
+    line.gross_pay, line.deductions_total, line.net_pay = gross, deductions, net
     db.add(item)
     all_lines = db.query(HRPayrollLine).filter_by(
         organization_id=membership.organization_id, run_id=run.id
