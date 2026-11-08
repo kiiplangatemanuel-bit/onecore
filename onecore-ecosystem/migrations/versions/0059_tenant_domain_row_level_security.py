@@ -196,7 +196,7 @@ def upgrade():
             FOR ALL
             USING (
                 organization_id = {organization_id}
-                OR NULLIF(current_setting('app.crm_delivery_callback_authenticated', true), '') = 'true'
+                OR provider_message_id = NULLIF(current_setting('app.crm_delivery_provider_message_id', true), '')
                 OR unsubscribe_token_hash = NULLIF(current_setting('app.crm_unsubscribe_token_hash', true), '')
                 OR EXISTS (
                     SELECT 1 FROM memberships m
