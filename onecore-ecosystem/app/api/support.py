@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -69,7 +70,7 @@ def _user_ticket(db: Session, ticket_number: str, user: User) -> SupportTicket:
         membership = db.query(Membership).filter_by(
             user_id=user.id, organization_id=ticket.organization_id, is_active=True
         ).first()
-        if membership and membership.role in {"org_admin", "branch_admin"}:
+        if membership and membership.role == "org_admin":
             return ticket
     raise HTTPException(404, "Support ticket not found")
 
@@ -166,7 +167,13 @@ def list_my_tickets(
     limit: int = Query(default=50, ge=1, le=100),
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
-    rows = db.query(SupportTicket).filter_by(created_by_user_id=user.id).order_by(
+    admin_org_ids = [row.organization_id for row in db.query(Membership).filter_by(
+        user_id=user.id, role="org_admin", is_active=True
+    ).all()]
+    visibility = [SupportTicket.created_by_user_id == user.id]
+    if admin_org_ids:
+        visibility.append(SupportTicket.organization_id.in_(admin_org_ids))
+    rows = db.query(SupportTicket).filter(or_(*visibility)).order_by(
         SupportTicket.updated_at.desc()
     ).limit(limit).all()
     return [_ticket_out(row, db) for row in rows]
