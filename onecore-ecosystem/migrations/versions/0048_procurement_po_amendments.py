@@ -11,6 +11,8 @@ depends_on = None
 def upgrade():
     op.add_column("procurement_purchase_orders", sa.Column("amendment_version", sa.Integer(), nullable=False, server_default="1"))
     op.add_column("procurement_approval_actions", sa.Column("approval_version", sa.Integer(), nullable=False, server_default="1"))
+    op.drop_index("ix_procurement_approval_action_org_entity_level", table_name="procurement_approval_actions")
+    op.create_index("ix_procurement_approval_action_org_entity_level", "procurement_approval_actions", ["organization_id", "entity_type", "entity_id", "approval_level", "approval_version"], unique=True)
     op.create_table("procurement_purchase_order_versions",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
@@ -30,6 +32,8 @@ def downgrade():
     op.drop_index("ix_procurement_purchase_order_versions_purchase_order_id", table_name="procurement_purchase_order_versions")
     op.drop_index("ix_procurement_purchase_order_versions_organization_id", table_name="procurement_purchase_order_versions")
     op.drop_table("procurement_purchase_order_versions")
+    op.drop_index("ix_procurement_approval_action_org_entity_level", table_name="procurement_approval_actions")
+    op.create_index("ix_procurement_approval_action_org_entity_level", "procurement_approval_actions", ["organization_id", "entity_type", "entity_id", "approval_level"], unique=True)
     with op.batch_alter_table("procurement_approval_actions") as batch:
         batch.drop_column("approval_version")
     with op.batch_alter_table("procurement_purchase_orders") as batch:
