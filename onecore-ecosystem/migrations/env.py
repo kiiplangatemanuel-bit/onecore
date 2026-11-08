@@ -9,13 +9,13 @@ from app.core import pos_completion_models  # noqa: F401 - register POS completi
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", settings.database_connection_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
 def run_migrations_offline():
     context.configure(
-        url=settings.database_url,
+        url=settings.database_connection_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
