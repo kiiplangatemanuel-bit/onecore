@@ -74,3 +74,40 @@ def test_pos_workspace_renders_all_operational_dashboards():
         "refreshOperationsReport", "operationsSummary", "branchReport", "terminalReport",
     ):
         assert f'id="{element_id}"' in page
+
+
+
+def test_pos_loyalty_policy_model_and_routes():
+    from app.core.pos_completion_models import POSLoyaltyRewardPolicy
+
+    assert POSLoyaltyRewardPolicy.__tablename__ == "pos_loyalty_reward_policies"
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/pos/loyalty/reward-policy" in paths
+    assert "get" in app.openapi()["paths"]["/api/v1/pos/loyalty/reward-policy"]
+    assert "put" in app.openapi()["paths"]["/api/v1/pos/loyalty/reward-policy"]
+
+
+def test_pos_loyalty_policy_schema_bounds():
+    from app.api.pos_completion import LoyaltyRewardPolicyIn
+    from pydantic import ValidationError
+
+    valid = LoyaltyRewardPolicyIn(
+        earn_points_per_100_units=1, points_per_currency_unit=100,
+        max_redemption_percent="50.00", is_active=True,
+    )
+    assert valid.points_per_currency_unit == 100
+    with pytest.raises(ValidationError):
+        LoyaltyRewardPolicyIn(
+            earn_points_per_100_units=-1, points_per_currency_unit=100,
+            max_redemption_percent="50.00",
+        )
+    with pytest.raises(ValidationError):
+        LoyaltyRewardPolicyIn(
+            earn_points_per_100_units=1, points_per_currency_unit=0,
+            max_redemption_percent="50.00",
+        )
+    with pytest.raises(ValidationError):
+        LoyaltyRewardPolicyIn(
+            earn_points_per_100_units=1, points_per_currency_unit=100,
+            max_redemption_percent="100.01",
+        )
