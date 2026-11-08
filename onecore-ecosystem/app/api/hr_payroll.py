@@ -909,7 +909,9 @@ def list_payslips(run_id:int,membership=Depends(active_membership),db:Session=De
     rows=db.query(PayrollPayslip).filter_by(organization_id=membership.organization_id,payroll_run_id=run_id).order_by(PayrollPayslip.employee_number).all()
     return [{"id":x.id,"employee_id":x.employee_id,"employee_number":x.employee_number,
         "employee_name":x.employee_name,"currency":x.currency,"gross_pay":str(x.gross_pay),
-        "taxable_pay":str(x.taxable_pay),"paye":str(x.paye),"nssf_employee":str(x.nssf_employee),
+        "taxable_pay":str(x.taxable_pay),"paye":str(x.paye),"overtime_pay":str(x.overtime_pay),
+        "shift_differential_pay":str(x.shift_differential_pay),"unpaid_leave_deduction":str(x.unpaid_leave_deduction),
+        "nssf_employee":str(x.nssf_employee),
         "shif_employee":str(x.shif_employee),"housing_levy_employee":str(x.housing_levy_employee),
         "pension_employee":str(x.pension_employee),"total_deductions":str(x.total_deductions),
         "net_pay":str(x.net_pay),"nssf_employer":str(x.nssf_employer),
@@ -1052,8 +1054,9 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
     housing_employer=sum((dec(x.housing_levy_employer) for x in payslips),ZERO)
     pension=sum((dec(x.pension_employee) for x in payslips),ZERO)
     employer_contributions=rounded(nssf_employer+housing_employer)
+    earned_gross=rounded(sum((dec(x.gross_pay)-dec(x.unpaid_leave_deduction) for x in payslips),ZERO))
     lines=[]
-    _append_journal_line(lines,mapping.salary_expense_account_id,"Payroll gross earnings",debit=run.gross_total,branch_id=run.branch_id)
+    _append_journal_line(lines,mapping.salary_expense_account_id,"Payroll earned gross earnings",debit=earned_gross,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.employer_contribution_expense_account_id,"Employer statutory contributions",debit=employer_contributions,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.net_payable_account_id,"Net payroll payable",credit=run.net_total,branch_id=run.branch_id)
     _append_journal_line(lines,mapping.paye_payable_account_id,"PAYE payable",credit=paye,branch_id=run.branch_id)
@@ -1087,8 +1090,8 @@ def post_payroll_to_accounting(run_id:int,membership=Depends(active_membership),
         db.rollback()
         raise HTTPException(409,"Payroll accounting journal was posted concurrently")
     return {"payroll_run_id":run.id,"journal_id":journal.id,"journal_number":journal.journal_number,
-            "status":"posted","debits":str(run.gross_total+employer_contributions),
-            "credits":str(run.gross_total+employer_contributions)}
+            "status":"posted","debits":str(earned_gross+employer_contributions),
+            "credits":str(earned_gross+employer_contributions)}
 
 
 @router.post("/payroll/runs/{run_id}/reverse-accounting-journal")
