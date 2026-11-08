@@ -11,11 +11,12 @@ from app.main import app
 
 def test_ar_ap_invoice_contracts_require_valid_type_and_lines():
     payload = AccountingInvoiceIn(
-        invoice_type="receivable", contact_id=1, invoice_number="INV-001",
+        invoice_type="receivable", contact_id=1, crm_sales_order_id=12, invoice_number="INV-001",
         issue_date="2026-11-08", due_date="2026-11-30", control_account_id=10,
         lines=[{"account_id": 20, "description": "Consulting", "quantity": "2",
                 "unit_price": "500.00", "tax_rate": "16"}])
     assert payload.invoice_type == "receivable"
+    assert payload.crm_sales_order_id == 12
     assert payload.lines[0].quantity == Decimal("2")
     with pytest.raises(ValidationError):
         AccountingInvoiceIn(
@@ -43,8 +44,10 @@ def test_invoice_payment_requires_positive_amount_and_idempotency_key():
 
 def test_ar_ap_models_and_routes_are_registered():
     assert AccountingInvoice.__tablename__ == "accounting_invoices"
+    assert hasattr(AccountingInvoice, "crm_sales_order_id")
     assert AccountingInvoiceLine.__tablename__ == "accounting_invoice_lines"
     assert AccountingInvoicePayment.__tablename__ == "accounting_invoice_payments"
+    assert hasattr(CRMCampaignAttribution, "accounting_invoice_id")
     paths = set(app.openapi()["paths"])
     assert "/api/v1/accounting/invoices" in paths
     assert "/api/v1/accounting/invoices/{invoice_id}/post" in paths
@@ -104,7 +107,7 @@ def test_bank_statement_reconciliation_contract_and_routes():
 
 
 def test_invoice_approval_and_credit_note_contracts_and_routes():
-    from app.core.models import AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine
+    from app.core.models import AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMCampaignAttribution
     from app.core.schemas import (
         AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn,
     )
