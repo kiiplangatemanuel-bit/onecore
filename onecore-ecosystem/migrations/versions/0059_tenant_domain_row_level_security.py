@@ -144,7 +144,6 @@ def upgrade():
             )
             OR (
                 organization_id = NULLIF(current_setting('app.organization_id', true), '')::integer
-                AND actor_user_id IS NOT NULL
             )
             OR (
                 actor_user_id IS NULL AND organization_id IS NULL
