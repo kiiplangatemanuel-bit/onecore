@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import Base
 from app.core.security import create_access_token, current_user
-from app.core.models import AuditEvent, Membership, Organization, PortalWorkflowRecord, User
+from app.core.models import AuditEvent, Membership, Organization, PortalWorkflowRecord, StatusAlertDelivery, User
 from app.api.portal_workflows import (
     PortalRecordCreate, PortalRecordUpdate, create_portal_record,
     list_portal_records, list_public_portal_content, read_portal_record,
@@ -19,7 +19,7 @@ def _db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         User.__table__, Organization.__table__, Membership.__table__,
-        AuditEvent.__table__, PortalWorkflowRecord.__table__,
+        AuditEvent.__table__, PortalWorkflowRecord.__table__, StatusAlertDelivery.__table__,
     ])
     return engine
 
@@ -317,4 +317,49 @@ def test_verified_identity_is_bound_to_database_session_for_rls():
         authenticated = current_user(token, db)
         assert authenticated.id == user.id
         assert db.info["onecore_user_id"] == user.id
+    engine.dispose()
+
+
+def test_published_status_incident_queues_matching_idempotent_email_alerts():
+    engine = _db()
+    with Session(engine) as db:
+        admin = User(email="admin@example.com", full_name="Admin", password_hash="unused",
+                     platform_role="platform_admin")
+        matching = User(email="matching@example.com", full_name="Matching", password_hash="unused")
+        other = User(email="other@example.com", full_name="Other", password_hash="unused")
+        opted_out = User(email="optout@example.com", full_name="Opt out", password_hash="unused")
+        db.add_all([admin, matching, other, opted_out])
+        db.flush()
+        db.add_all([
+            PortalWorkflowRecord(portal_key="status", record_type="alert_subscription",
+                organization_id=None, owner_user_id=matching.id, visibility="private",
+                status="active", payload={"service": "API"}),
+            PortalWorkflowRecord(portal_key="status", record_type="alert_subscription",
+                organization_id=None, owner_user_id=other.id, visibility="private",
+                status="active", payload={"service": "Database"}),
+            PortalWorkflowRecord(portal_key="status", record_type="alert_subscription",
+                organization_id=None, owner_user_id=opted_out.id, visibility="private",
+                status="active", payload={"service": "API"}),
+            PortalWorkflowRecord(portal_key="status", record_type="notification_preference",
+                organization_id=None, owner_user_id=opted_out.id, visibility="private",
+                status="active", payload={"channel": "sms"}),
+        ])
+        db.commit()
+        incident = publish_public_portal_content(
+            "status", "incident",
+            PortalPublicContentCreate(payload={
+                "title": "API latency", "service": "API", "severity": "major",
+                "summary": "Requests are slower than usual",
+            }),
+            admin, db,
+        )
+        deliveries = db.query(StatusAlertDelivery).all()
+        assert len(deliveries) == 1
+        assert deliveries[0].user_id == matching.id
+        assert deliveries[0].incident_record_id == incident["id"]
+        assert deliveries[0].recipient_email == matching.email
+        assert deliveries[0].status == "pending"
+        from app.api.portal_workflows import _queue_status_incident_alerts
+        row = db.get(PortalWorkflowRecord, incident["id"])
+        assert _queue_status_incident_alerts(db, row) == 0
     engine.dispose()
