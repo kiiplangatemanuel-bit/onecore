@@ -57,7 +57,7 @@ from app.api.ai_routes import _extract_upload
 
 
 def test_ai_file_extraction_supports_text_and_csv():
-    assert "quarter,revenue" in _extract_upload("report.csv", b"quarter,revenue\\nQ1,100")
+    assert "quarter,revenue" in _extract_upload("report.csv", b"quarter,revenue\nQ1,100")
     assert "Project notes" in _extract_upload("notes.txt", b"Project notes")
 
 
