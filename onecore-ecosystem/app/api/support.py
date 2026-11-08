@@ -195,7 +195,8 @@ def _create_attachment_upload(ticket: SupportTicket, payload: SupportAttachmentI
     try:
         upload_url = storage.generate_presigned_url(
             "put_object",
-            Params={"Bucket": settings.s3_bucket, "Key": object_key, "ContentType": content_type},
+            Params={"Bucket": settings.s3_bucket, "Key": object_key, "ContentType": content_type,
+                    "ContentLength": payload.size_bytes},
             ExpiresIn=300,
         )
     except Exception as exc:
