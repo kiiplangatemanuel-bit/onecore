@@ -274,6 +274,20 @@ def update_portal_resource(
     db.refresh(row)
     return _out(row)
 
+@router.get("/{portal}/admin")
+def list_portal_admin_resources(
+    portal: str, status: str | None = Query(default=None, max_length=24),
+    limit: int = Query(default=100, ge=1, le=250),
+    user: User = Depends(require_platform_admin), db: Session = Depends(get_db),
+):
+    """Moderation and publication queue; never available to ordinary members."""
+    _validate_portal(portal)
+    query = db.query(PortalResource).filter_by(portal=portal)
+    if status:
+        query = query.filter_by(status=status)
+    rows = query.order_by(PortalResource.updated_at.asc(), PortalResource.id.asc()).limit(limit).all()
+    return [_out(row) for row in rows]
+
 @router.get("/{portal}/items/{item_id}")
 def read_my_resource(
     portal: str, item_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
