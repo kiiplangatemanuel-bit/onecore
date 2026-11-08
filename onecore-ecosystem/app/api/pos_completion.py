@@ -306,21 +306,13 @@ def customer_history(customer_id:int,membership=Depends(active_membership),db:Se
         "lifetime_spend":str(customer.lifetime_spend)},"purchases":[{"sale_id":x.id,"branch_id":x.branch_id,"total":str(x.total_amount),"currency":x.currency,"created_at":x.created_at} for x in rows]}
 
 @router.post("/customers/{customer_id}/rewards/redeem")
-def redeem_points(customer_id:int,payload:LoyaltyRedeemIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
+def redeem_points(customer_id:int,payload:LoyaltyRedeemIn,membership=Depends(active_membership),
+    user=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
-    customer=db.query(POSCustomer).filter_by(id=customer_id,organization_id=membership.organization_id,is_active=True).with_for_update().first()
-    if not customer:raise HTTPException(404,"Customer not found")
-    existing=db.query(POSLoyaltyEntry).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
-    if existing:
-        if existing.customer_id!=customer.id or existing.points_delta!=-payload.points:raise HTTPException(409,"Idempotency key reused with different redemption")
-        return {"id":existing.id,"points_balance":customer.points_balance,"idempotent":True}
-    if customer.branch_id:_branch(membership,customer.branch_id)
-    if customer.points_balance<payload.points:raise HTTPException(422,"Insufficient loyalty points")
-    customer.points_balance-=payload.points
-    row=POSLoyaltyEntry(organization_id=membership.organization_id,customer_id=customer.id,entry_type="redeem",
-        points_delta=-payload.points,idempotency_key=payload.idempotency_key,note=payload.note,created_by=user.id)
-    db.add(row); _audit(db,user,membership.organization_id,"pos.loyalty.redeemed","pos_customer",customer.id,str(payload.points)); db.commit()
-    return {"id":row.id,"points_redeemed":payload.points,"points_balance":customer.points_balance}
+    # Standalone point deductions have no corresponding priced transaction or
+    # accounting evidence. Redemptions must be applied atomically at checkout.
+    raise HTTPException(410,"Standalone loyalty deductions are disabled. Redeem points on a linked POS checkout so the currency discount, tax, sale and loyalty ledger are recorded together.")
+
 
 @router.post("/peripherals/commands",status_code=201)
 def queue_peripheral(payload:PeripheralIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
