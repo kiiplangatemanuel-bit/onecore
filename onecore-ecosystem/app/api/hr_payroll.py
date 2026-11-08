@@ -926,6 +926,16 @@ class AttendanceDecisionIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+def _same_instant(left, right):
+    # SQLite drops timezone metadata on DateTime round-trips; normalize both
+    # values to UTC before comparing an idempotent retry.
+    if left.tzinfo is None:
+        left = left.replace(tzinfo=timezone.utc)
+    if right.tzinfo is None:
+        right = right.replace(tzinfo=timezone.utc)
+    return left.astimezone(timezone.utc) == right.astimezone(timezone.utc)
+
+
 def attendance_out(row):
     return {
         "id": row.id, "employee_id": row.employee_id, "branch_id": row.branch_id,
@@ -978,7 +988,7 @@ def submit_attendance(payload: AttendanceIn, membership=Depends(active_membershi
     ).first()
     if existing:
         same = (existing.employee_id == employee.id and existing.work_date.date() == payload.work_date
-                and existing.clock_in == payload.clock_in and existing.clock_out == payload.clock_out
+                and _same_instant(existing.clock_in, payload.clock_in) and _same_instant(existing.clock_out, payload.clock_out)
                 and existing.break_minutes == payload.break_minutes
                 and existing.scheduled_minutes == payload.scheduled_minutes)
         if not same or existing.submitted_by != user.id:
