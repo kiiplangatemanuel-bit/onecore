@@ -20,6 +20,7 @@ def upgrade():
         sa.Column("shif_payable_account_id", sa.Integer(), sa.ForeignKey("accounting_accounts.id"), nullable=False),
         sa.Column("housing_levy_payable_account_id", sa.Integer(), sa.ForeignKey("accounting_accounts.id"), nullable=False),
         sa.Column("pension_payable_account_id", sa.Integer(), sa.ForeignKey("accounting_accounts.id"), nullable=False),
+        sa.Column("bank_account_id", sa.Integer(), sa.ForeignKey("accounting_accounts.id"), nullable=False),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("updated_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -33,6 +34,7 @@ def upgrade():
         sa.Column("journal_id", sa.Integer(), sa.ForeignKey("accounting_journals.id"), nullable=False),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("settlement_journal_id", sa.Integer(), sa.ForeignKey("accounting_journals.id")),
         sa.Column("reversal_journal_id", sa.Integer(), sa.ForeignKey("accounting_journals.id")),
         sa.Column("reversed_by", sa.Integer(), sa.ForeignKey("users.id")),
         sa.Column("reversed_at", sa.DateTime(timezone=True)),
@@ -41,6 +43,7 @@ def upgrade():
     op.create_index("ix_payroll_accounting_links_payroll_run_id", "payroll_accounting_links", ["payroll_run_id"], unique=True)
     op.create_index("ix_payroll_accounting_links_journal_id", "payroll_accounting_links", ["journal_id"], unique=True)
     op.create_index("uq_payroll_accounting_reversal_journal", "payroll_accounting_links", ["reversal_journal_id"], unique=True)
+    op.create_index("uq_payroll_accounting_settlement_journal", "payroll_accounting_links", ["settlement_journal_id"], unique=True)
 
 
 def downgrade():
