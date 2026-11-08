@@ -696,3 +696,23 @@ class CRMCampaignIn(BaseModel):
         if len(value) < 2:
             raise ValueError("Campaign name and message must not be blank")
         return value
+
+
+class SupportTicketCreateIn(BaseModel):
+    subject: str = Field(min_length=4, max_length=180)
+    category: str = Field(default="general", pattern=r"^(general|billing|technical|account|security|integration|other)$")
+    message: str = Field(min_length=10, max_length=10000)
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: EmailStr
+    contact_phone: str = Field(default="", max_length=32)
+    organization_id: int | None = Field(default=None, gt=0)
+
+
+class SupportMessageIn(BaseModel):
+    body: str = Field(min_length=2, max_length=10000)
+
+
+class SupportStatusIn(BaseModel):
+    status: str = Field(pattern=r"^(open|in_progress|waiting_on_customer|resolved|closed)$")
+    priority: str | None = Field(default=None, pattern=r"^(low|normal|high|urgent)$")
+    assigned_to_user_id: int | None = Field(default=None, gt=0)
