@@ -1,7 +1,7 @@
 """POS checkout validation and offline replay helpers."""
 import hashlib
 import json
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from fastapi import HTTPException
 
 
