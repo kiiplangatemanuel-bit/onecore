@@ -396,6 +396,8 @@ def update_portal_record(
     if not row or not _can_manage(row, user, db):
         raise HTTPException(404, "Portal record not found")
     if payload.payload is not None:
+        if portal == "developers" and row.record_type == "webhook" and {"endpoint_url", "events"} & set(payload.payload):
+            raise HTTPException(409, "Use the authenticated webhook endpoint configuration API to change its destination or subscriptions")
         if (portal, row.record_type) in PERSONAL_TYPES or portal in {"trust", "careers"}:
             if row.owner_user_id != user.id:
                 raise HTTPException(404, "Portal record not found")
