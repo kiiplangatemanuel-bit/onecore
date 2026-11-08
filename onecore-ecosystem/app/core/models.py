@@ -24,6 +24,8 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     industry: Mapped[str] = mapped_column(String(100), default="general")
     country: Mapped[str] = mapped_column(String(2), default="KE")
+    registration_number: Mapped[str] = mapped_column(String(100), default="")
+    contact_phone: Mapped[str] = mapped_column(String(32), default="")
     currency: Mapped[str] = mapped_column(String(3), default="KES")
     timezone: Mapped[str] = mapped_column(String(80), default="Africa/Nairobi")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
