@@ -73,6 +73,12 @@ def upgrade():
                               )
                           )
                       )
+                      OR EXISTS (
+                          SELECT 1 FROM users u
+                          WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                            AND u.is_active = true
+                            AND u.platform_role IN ('root_superadmin', 'platform_admin')
+                      )
                 )
             )
             WITH CHECK (
@@ -89,6 +95,12 @@ def upgrade():
                                     AND m.is_active = true AND m.role = 'org_admin'
                               )
                           )
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM users u
+                          WHERE u.id = NULLIF(current_setting('app.user_id', true), '')::integer
+                            AND u.is_active = true
+                            AND u.platform_role IN ('root_superadmin', 'platform_admin')
                       )
                 )
             )
