@@ -107,9 +107,9 @@ class PayrollRun(Base):
     __table_args__ = (
         Index("uq_payroll_run_org_idempotency", "organization_id", "idempotency_key", unique=True),
         Index("uq_payroll_run_org_branch_period", "organization_id", "branch_id", "period_start", "period_end",
-              unique=True, sqlite_where=text("branch_id IS NOT NULL"), postgresql_where=text("branch_id IS NOT NULL")),
+              unique=True, sqlite_where=text("branch_id IS NOT NULL AND status <> 'cancelled'"), postgresql_where=text("branch_id IS NOT NULL AND status <> 'cancelled'")),
         Index("uq_payroll_run_org_all_period", "organization_id", "period_start", "period_end",
-              unique=True, sqlite_where=text("branch_id IS NULL"), postgresql_where=text("branch_id IS NULL")),
+              unique=True, sqlite_where=text("branch_id IS NULL AND status <> 'cancelled'"), postgresql_where=text("branch_id IS NULL AND status <> 'cancelled'")),
     )
 
 
@@ -165,7 +165,8 @@ class PayrollAccountingLink(Base):
     journal_id: Mapped[int] = mapped_column(ForeignKey("accounting_journals.id"), unique=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    reversal_journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), unique=True, nullable=True)
+    reversal_journal_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_journals.id"), nullable=True)
     reversed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reversal_reason: Mapped[str] = mapped_column(String(500), default="")
+    __table_args__ = (Index("uq_payroll_accounting_reversal_journal", "reversal_journal_id", unique=True),)
