@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Numeric, Index, text
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, Numeric, Index, CheckConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -120,4 +120,7 @@ class POSLoyaltyRewardPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     __table_args__ = (
         Index("uq_pos_loyalty_reward_policy_org", "organization_id", unique=True),
+        CheckConstraint("earn_points_per_100_units >= 0", name="ck_pos_loyalty_earn_rate_nonnegative"),
+        CheckConstraint("points_per_currency_unit > 0", name="ck_pos_loyalty_points_per_unit_positive"),
+        CheckConstraint("max_redemption_percent > 0 AND max_redemption_percent <= 100", name="ck_pos_loyalty_redemption_percent_range"),
     )
