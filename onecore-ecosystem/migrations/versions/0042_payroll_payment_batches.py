@@ -55,8 +55,10 @@ def upgrade():
                     "payroll_payment_batch_items", ["payroll_run_id"], unique=True)
     op.create_index("ix_payroll_payment_batch_items_branch_id",
                     "payroll_payment_batch_items", ["branch_id"])
-    op.create_index("ix_payroll_batch_item_org_reference",
-                    "payroll_payment_batch_items", ["organization_id", "payment_reference"])
+    op.create_index("uq_payroll_batch_item_org_reference",
+                    "payroll_payment_batch_items", ["organization_id", "payment_reference"],
+                    unique=True, sqlite_where=sa.text("payment_reference <> ''"),
+                    postgresql_where=sa.text("payment_reference <> ''"))
     op.create_index("ix_payroll_payment_batch_items_settlement_journal_id",
                     "payroll_payment_batch_items", ["settlement_journal_id"], unique=True)
 
