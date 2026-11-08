@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { API_BASE, api, clearToken, getToken, login, setActiveOrganization } from "./api";
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
+import PublicRegistration from "./PublicRegistration.jsx";
 import PortalWorkspace from "./PortalWorkspace.jsx";
 import AIWorkspace from "./AIWorkspace.jsx";
 import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
@@ -22,7 +23,7 @@ function App(){
  function navigate(next){history.pushState({}, "", next);setPath(next);setNotice("");}
  function signOut(){clearToken();setUser(null);setOrgs([]);navigate("/");}
  if(checking)return <div className="loading-screen"><div className="brand-mark">O</div><p>Securing your workspace…</p></div>;
- if(!user)return path==="/login"?<Login onLogin={setUser}/>:<PublicSite/>;
+ if(!user)return path==="/login"?<Login onLogin={setUser}/>:path==="/register"||path==="/verify-email"?<PublicRegistration/>:<PublicSite/>;
  const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const portalRoutes=new Set(["/team","/domains","/cms","/media","/seo","/integrations","/analytics","/operations","/security","/subscriptions","/school-portal","/hospital-portal","/finance-portal","/hr-portal","/property-portal","/hotel-portal","/restaurant-portal","/services-portal"]); const moduleCount=modules.length||allModules.length;
  return <div className="app-shell">
   <aside className={collapsed?"sidebar collapsed":"sidebar"}><div className="sidebar-brand"><div className="brand-mark small">O</div>{!collapsed&&<div><strong>onecore</strong><small>WORKSPACE</small></div>}<button className="collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation">{collapsed?"»":"«"}</button></div>
