@@ -34,6 +34,7 @@ from app.api.auth_workflows import router as auth_workflows_router
 from app.api.portal_auth import router as portal_auth_router
 from app.api.portal_workflows import router as portal_workflows_router
 from app.api.auth_mfa import router as auth_mfa_router
+from app.api.developer_api_keys import router as developer_api_keys_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 @asynccontextmanager
@@ -59,7 +60,7 @@ app.add_middleware(CORSMiddleware,
                    allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],
                    allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token", "X-Support-Access-Token"])
+                   allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Organization-ID", "X-POS-Device-Token", "X-Support-Access-Token", "X-OneCore-API-Key"])
 app.state.login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=settings.login_rate_limit_window_seconds,
@@ -90,6 +91,7 @@ app.include_router(auth_workflows_router)
 app.include_router(portal_auth_router)
 app.include_router(portal_workflows_router)
 app.include_router(auth_mfa_router)
+app.include_router(developer_api_keys_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
