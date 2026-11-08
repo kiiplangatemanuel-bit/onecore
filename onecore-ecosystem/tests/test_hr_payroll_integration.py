@@ -39,6 +39,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
         AccountingAccount(organization_id=org.id, code="2140", name="Housing Levy payable", account_type="liability", created_by=users[0].id),
         AccountingAccount(organization_id=org.id, code="2150", name="Pension payable", account_type="liability", created_by=users[0].id),
         AccountingAccount(organization_id=org.id, code="1000", name="Operating bank", account_type="asset", created_by=users[0].id),
+        AccountingAccount(organization_id=org.id, code="2160", name="Other deductions payable", account_type="liability", created_by=users[0].id),
     ]
     db.add_all(accounts)
     db.commit()
@@ -213,6 +214,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
                 "housing_levy_payable_account_id": account_ids[6],
                 "pension_payable_account_id": account_ids[7],
                 "bank_account_id": account_ids[8],
+                "other_deductions_payable_account_id": account_ids[9],
             })
             assert mapping.status_code == 200, mapping.text
             posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
