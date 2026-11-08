@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
+from urllib.parse import parse_qs, urlparse
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -14,6 +15,15 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600)
     database_url: str = "sqlite:///./onecore.db"
     cors_origins: str = "http://localhost:3000,http://localhost:8000"
+
+    @field_validator("database_url")
+    @classmethod
+    def normalize_postgres_url(cls, value: str) -> str:
+        if value.startswith("postgres://"):
+            return "postgresql+psycopg://" + value[len("postgres://"):]
+        if value.startswith("postgresql://"):
+            return "postgresql+psycopg://" + value[len("postgresql://"):]
+        return value
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
 
@@ -93,8 +103,11 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG must be false in production")
             if self.secret_key == "unsafe-development-key-change-me" or len(self.secret_key) < 32:
                 raise ValueError("SECRET_KEY must be a unique random value of at least 32 characters in production")
-            if self.database_url.startswith("sqlite"):
-                raise ValueError("A managed PostgreSQL database is required in production")
+            parsed_database_url = urlparse(self.database_url)
+            if parsed_database_url.scheme not in {"postgresql", "postgresql+psycopg"}:
+                raise ValueError("A managed PostgreSQL database such as Supabase is required in production")
+            if parse_qs(parsed_database_url.query).get("sslmode", [""])[0].lower() != "require":
+                raise ValueError("DATABASE_URL must require TLS with sslmode=require in production")
             origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
             if not origins or "*" in origins or any(not origin.startswith("https://") for origin in origins):
                 raise ValueError("CORS_ORIGINS must contain explicit HTTPS origins in production")
