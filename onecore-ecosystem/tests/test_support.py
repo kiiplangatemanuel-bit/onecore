@@ -4,9 +4,9 @@ from pydantic import ValidationError
 import pytest
 
 from app.core.database import Base
-from app.core.models import Organization, SupportMessage, SupportTicket, User, AuditEvent
+from app.core.models import Membership, Organization, SupportMessage, SupportTicket, User, AuditEvent
 from app.core.schemas import SupportMessageIn, SupportTicketCreateIn
-from app.api.support import _create_ticket, _guest_ticket
+from app.api.support import _create_ticket, _guest_ticket, _user_ticket
 
 
 def test_support_tables_and_indexes_are_registered():
@@ -62,3 +62,52 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/public/tickets" in paths
     assert "/api/v1/support/tickets" in paths
     assert "/api/v1/support/admin/tickets" in paths
+
+
+def test_support_organization_ticket_owner_loses_access_when_membership_is_revoked():
+    from fastapi import HTTPException
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[
+        User.__table__, Organization.__table__, Membership.__table__,
+        SupportTicket.__table__, SupportMessage.__table__, AuditEvent.__table__,
+    ])
+    with Session(engine) as db:
+        org = Organization(name="Tenant A", slug="tenant-a")
+        db.add(org)
+        db.flush()
+        owner = User(email="owner@example.com", full_name="Owner", password_hash="unused")
+        admin = User(email="admin@example.com", full_name="Admin", password_hash="unused")
+        db.add_all([owner, admin])
+        db.flush()
+        owner_membership = Membership(user_id=owner.id, organization_id=org.id, role="staff", is_active=True)
+        admin_membership = Membership(user_id=admin.id, organization_id=org.id, role="org_admin", is_active=True)
+        db.add_all([owner_membership, admin_membership])
+        ticket = SupportTicket(
+            ticket_number="OCS-TENANT0001", subject="Tenant issue", category="technical",
+            contact_name="Owner", contact_email="owner@example.com", organization_id=org.id,
+            created_by_user_id=owner.id,
+        )
+        db.add(ticket)
+        db.commit()
+        assert _user_ticket(db, ticket.ticket_number, owner).id == ticket.id
+        assert _user_ticket(db, ticket.ticket_number, admin).id == ticket.id
+        owner_membership.is_active = False
+        db.commit()
+        with pytest.raises(HTTPException) as denied:
+            _user_ticket(db, ticket.ticket_number, owner)
+        assert denied.value.status_code == 404
+        assert _user_ticket(db, ticket.ticket_number, admin).id == ticket.id
+    engine.dispose()
+
+
+def test_support_rls_migration_is_part_of_the_alembic_chain():
+    from pathlib import Path
+
+    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0053_support_row_level_security.py"
+    source = migration.read_text()
+    assert 'revision = "0053_support_row_level_security"' in source
+    assert 'down_revision = "0052_portal_workflow_records"' in source
+    assert "support_ticket_select" in source
+    assert "support_message_insert" in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
