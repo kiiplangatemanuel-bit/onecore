@@ -1626,7 +1626,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
         ).order_by(POSPayment.id).all()
         return {"id": existing.id, "client_transaction_id": existing.client_transaction_id,
                 "status": "already_synced", "total_amount": str(existing.total_amount),
-                "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+                "loyalty_points_redeemed": existing.loyalty_points_redeemed,
+                "loyalty_discount_amount": str(existing.loyalty_discount_amount), "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
                              for p in existing_payments]}
     shift = db.query(POSShift).filter_by(
         id=payload.shift_id, organization_id=membership.organization_id,
@@ -1877,7 +1878,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
     ).order_by(POSPayment.id).all()
     return {"id": sale.id, "client_transaction_id": sale.client_transaction_id,
             "status": "synced", "total_amount": str(sale.total_amount), "currency": sale.currency,
-            "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
+            "loyalty_points_redeemed": sale.loyalty_points_redeemed,
+            "loyalty_discount_amount": str(sale.loyalty_discount_amount), "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount), "status": p.status}
                          for p in sale_payments],
             "accounting_status": accounting_link.status, "accounting_journal_id": accounting_link.journal_id}
 
@@ -2049,7 +2051,8 @@ def create_pos_return(sale_id: int, payload: POSReturnIn,
             organization_id=membership.organization_id,customer_id=customer_sale.customer_id,sale_id=sale.id,entry_type="reversal").scalar() or 0)
         cumulative_refunds=db.query(func.coalesce(func.sum(POSReturn.refund_total),0)).filter_by(
             organization_id=membership.organization_id,sale_id=sale.id).scalar() or Decimal("0")
-        target_reversal=min(int(earned),int(Decimal(str(cumulative_refunds))//Decimal("100")))
+        refund_ratio=min(Decimal("1"),Decimal(str(cumulative_refunds))/Decimal(str(sale.total_amount))) if Decimal(str(sale.total_amount))>0 else Decimal("1")
+        target_reversal=min(int(earned),int((Decimal(int(earned))*refund_ratio).quantize(Decimal("1"),rounding=ROUND_HALF_UP)))
         points_to_reverse=max(0,target_reversal-int(already_reversed))
         loyalty_customer=db.query(POSCustomer).filter_by(id=customer_sale.customer_id,organization_id=membership.organization_id).with_for_update().first()
         if loyalty_customer:
