@@ -57,3 +57,20 @@ jobs:
       - name: Build Vercel frontend
         working-directory: frontend
         run: npm run build
+  portal-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        portal: [support, status, developers, docs, community, trust, events, careers, partners, admin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install portal dependencies
+        working-directory: frontend/portals/${{ matrix.portal }}
+        run: npm install
+      - name: Build independent portal
+        working-directory: frontend/portals/${{ matrix.portal }}
+        run: npm run build
