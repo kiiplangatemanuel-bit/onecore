@@ -21,7 +21,9 @@ passed the repository CI test workflow at the recorded commits:
 - Informational maintenance notices with organization/user/platform-role targeting,
   scheduling, dismissal, draft editing, second-admin publication approval and withdrawal.
 - Mandatory footer API wording and public homepage attribution.
-- CI workflow for dependency installation, Python compilation and pytest.
+- Registration email verification and password recovery with hashed, expiring, single-use tokens; password reset increments an authentication version to invalidate previously issued access tokens. Production SMTP delivery still requires deployment configuration.
+- Shared cross-origin portal sign-in using a short-lived, single-use PKCE authorization code, exact HTTPS origin allowlist, state verification and per-origin session storage; bearer tokens are not placed in redirect URLs.
+- CI workflow for dependency audit, migration upgrade/downgrade, Python compilation, pytest, the main frontend and ten independent portal builds.
 
 ## Verification evidence
 
@@ -42,9 +44,11 @@ monitoring, documentation and user acceptance testing.
 
 Shared platform work still outstanding includes:
 
-- Production email delivery and email verification; password reset; MFA/TOTP and
-  recovery codes; SSO/OIDC; session/device inventory and revocation; throttling and
-  account lockout.
+- Production SMTP/email deliverability and domain authentication; MFA/TOTP and
+  recovery codes; external OIDC identity federation; durable session/device
+  inventory and per-session revocation; distributed throttling and account lockout.
+  Registration email verification and password recovery flows are implemented,
+  but live delivery depends on deployment SMTP configuration.
 - A dedicated organization/branch administration frontend and verified branch
   existence in branch-scope assignment/invitation UX.
 - Domain ingress provisioning, automated certificate issuance/renewal, primary-domain
@@ -816,11 +820,12 @@ HTTPS-only CORS validation, environment documentation and container build exclus
 verify the latest PR-head run before merge.
 
 Remaining operational/security release gates: distributed ingress/WAF throttling
-(the application limiter is per worker), MFA/TOTP and recovery, OIDC/SSO, email
-verification/password reset, durable session inventory and revocation, automated
-secret rotation, centralized tamper-evident audit, backup/PITR restore drills,
-metrics/tracing/alerts, production ingress/database/secret-manager configuration,
-penetration testing, load testing, privacy review and production UAT. This baseline
+(the application limiter is per worker), MFA/TOTP and recovery, external OIDC
+identity federation, durable session/device inventory and per-session revocation,
+automated secret rotation, centralized tamper-evident audit, backup/PITR restore
+drills, metrics/tracing/alerts, production ingress/database/secret-manager and
+SMTP/deliverability configuration, penetration testing, load testing, privacy
+review and production UAT. This baseline
 is not a security certification or evidence of a live production deployment.
 
 
@@ -908,3 +913,47 @@ Delivered scope includes:
 - Tenant/branch/patient access controls, encrypted patient-linked resources, audit events, idempotency on stock and dispensing/return operations, shared inventory movement posting, and a pharmacy/laboratory workspace.
 
 The module is not production-certified by code completion alone. Vendor analyzer protocols, licensed/clinically governed drug-interaction data, real-time critical-result notification delivery, insurer/payment integrations, clinical UAT, security/privacy review, concurrency/load testing and operational acceptance remain explicit release gates. The module metadata is therefore marked `implemented_with_external_release_gates`, not production-ready.
+
+
+
+## Identity recovery and shared portal access (8 November 2026)
+
+Merged shared portal access (PR #100, merge commit
+`7cf75d2b9acf04db8deeade4090bf5f99878a4f9`). The portal handoff uses a 90-second,
+single-use authorization code, SHA-256 code storage, PKCE S256, an exact HTTPS
+redirect-origin allowlist, state verification and per-origin browser session
+storage. The access token is exchanged at the destination portal and is never
+placed in the redirect URL. The PR-head CI run
+[42470713532](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42470713532)
+passed 234 tests, the migration upgrade/downgrade checks, dependency audit, Python
+compilation, the main frontend build and all ten independent portal builds.
+
+Added password recovery in main commit
+`3494ec5cff8be5a7d65e41fc597083da5f543237`:
+
+- `POST /api/v1/auth/password-reset/request` returns a uniform response for
+  existing, inactive and unknown accounts. Active-account tokens are random,
+  SHA-256 hashed in storage, expire after 30 minutes, supersede prior unconsumed
+  tokens and are delivered through the configured SMTP integration.
+- The email uses a URL fragment for the reset secret; the SPA strips it from the
+  address bar before submitting the token.
+- `POST /api/v1/auth/password-reset/confirm` locks and consumes the token,
+  updates the Argon2 password hash, records an audit event and increments the
+  user's `auth_version`. JWT validation now checks this version, invalidating
+  all previously issued access tokens after a successful password reset.
+- Both public reset endpoints are covered by the existing per-process public-write
+  rate limiter. SMTP delivery failures roll back token creation and are logged
+  without changing the public response, preventing account enumeration.
+
+Verification: [CI run 42471611488](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42471611488)
+passed 241 tests (5 warnings), dependency audit, Alembic upgrade and
+downgrade/re-upgrade, Python compilation, the main frontend build and all ten
+independent portal builds.
+
+Remaining identity work: MFA/TOTP and recovery codes, external OIDC federation,
+durable session/device inventory and per-session revocation, privileged step-up
+authentication, distributed edge/WAF throttling and account lockout. SMTP
+credentials, sender-domain authentication, deliverability monitoring and a
+durable retrying email outbox/worker still require deployment/operations work.
+The PKCE portal flow is not an OIDC provider or a Supabase Auth session, and this
+CI evidence is not a production deployment or security certification.
