@@ -119,6 +119,7 @@ def save_loyalty_reward_policy(payload:LoyaltyRewardPolicyIn,membership=Depends(
             setattr(row,key,value)
         row.updated_by=user.id
         row.updated_at=datetime.now(timezone.utc)
+    db.flush()
     _audit(db,user,membership.organization_id,"pos.loyalty.policy.updated",
         "pos_loyalty_reward_policy",row.id,
         f"earn:{payload.earn_points_per_100_units};points_per_unit:{payload.points_per_currency_unit};max_redemption:{payload.max_redemption_percent};active:{payload.is_active}")
