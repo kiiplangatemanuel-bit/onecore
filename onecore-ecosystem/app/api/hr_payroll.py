@@ -121,6 +121,10 @@ class HRShiftIn(BaseModel):
     def valid_shift(self):
         if self.start_time == self.end_time:
             raise ValueError("Shift start and end times must differ")
+        duration=(datetime.combine(date.today(),self.end_time)-datetime.combine(date.today(),self.start_time)).total_seconds()/60
+        if duration<=0: duration+=24*60
+        if self.break_minutes>=duration:
+            raise ValueError("Shift break must be shorter than the scheduled shift")
         return self
 
 
@@ -511,6 +515,10 @@ def create_hr_attendance(payload:AttendanceIn,membership=Depends(active_membersh
     require_hr_write(membership)
     employee=db.query(HREmployee).filter_by(id=payload.employee_id,organization_id=membership.organization_id).first()
     if not employee or not can_access_branch(membership,employee.branch_id): raise HTTPException(404,"Employee not found")
+    hired=employee.hire_date.date() if isinstance(employee.hire_date,datetime) else employee.hire_date
+    terminated=employee.termination_date.date() if isinstance(employee.termination_date,datetime) else employee.termination_date
+    if payload.attendance_date<hired or (terminated and payload.attendance_date>terminated):
+        raise HTTPException(422,"Attendance date must fall within the employee's employment dates")
     shift_id=payload.shift_id or employee.default_shift_id
     if not shift_id: raise HTTPException(422,"Assign a shift before recording attendance")
     shift=db.query(HRShift).filter_by(id=shift_id,organization_id=membership.organization_id,is_active=True).first()
