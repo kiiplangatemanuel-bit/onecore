@@ -19,7 +19,7 @@ def parse_clamav_response(response: bytes) -> bool:
 
 
 def scan_s3_attachment(storage, attachment) -> dict:
-    if not settings.clamav_host:
+    if not settings.support_attachment_scanning_enabled or not settings.clamav_host.strip():
         raise HTTPException(503, "Malware scanner is not configured; attachment remains quarantined")
     body = None
     try:

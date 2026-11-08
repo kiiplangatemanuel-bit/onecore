@@ -26,10 +26,86 @@ def create_access_token(user_id: int, auth_version: int = 0) -> str:
 def _apply_database_identity_context(session, transaction, connection):
     """Set transaction-local identity for PostgreSQL RLS policies."""
     user_id = session.info.get("onecore_user_id")
-    if user_id is not None and connection.dialect.name == "postgresql":
-        connection.execute(
+    organization_id = session.info.get("onecore_organization_id")
+    if connection.dialect.name == "postgresql":
+        if user_id is not None:
+            connection.execute(
+                text("SELECT set_config('app.user_id', :user_id, true)"),
+                {"user_id": str(user_id)},
+            )
+        if organization_id is not None:
+            connection.execute(
+                text("SELECT set_config('app.organization_id', :organization_id, true)"),
+                {"organization_id": str(organization_id)},
+            )
+
+
+def set_verified_user_context(db: Session, user_id: int) -> None:
+    """Bind a server-verified user identity to the current database transaction."""
+    value = int(user_id)
+    if value <= 0:
+        raise ValueError("A positive user ID is required")
+    db.info["onecore_user_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
             text("SELECT set_config('app.user_id', :user_id, true)"),
-            {"user_id": str(user_id)},
+            {"user_id": str(value)},
+        )
+
+
+def set_status_alert_fanout_context(db: Session, incident_record_id: int) -> None:
+    """Authorize a platform-admin incident transaction to enqueue subscriber rows."""
+    value = int(incident_record_id)
+    if value <= 0:
+        raise ValueError("A positive incident record ID is required")
+    db.info["onecore_status_alert_incident_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.status_alert_incident_id', :incident_id, true)"),
+            {"incident_id": str(value)},
+        )
+
+
+def set_verified_organization_context(db: Session, organization_id: int) -> None:
+    """Scope trusted integration/worker transactions to a previously verified tenant."""
+    value = int(organization_id)
+    if value <= 0:
+        raise ValueError("A positive organization ID is required")
+    db.info["onecore_organization_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.organization_id', :organization_id, true)"),
+            {"organization_id": str(value)},
+        )
+
+
+def set_provider_callback_token_context(db: Session, token_hash: str) -> None:
+    """Allow one callback-token-bound row lookup before its tenant is known."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.provider_callback_token_hash', :token_hash, true)"),
+            {"token_hash": token_hash},
+        )
+
+
+def set_crm_delivery_callback_context(db: Session, provider_message_id: str) -> None:
+    """Authorize one provider-message lookup after the callback secret is verified."""
+    value = str(provider_message_id).strip()
+    if not value or len(value) > 255:
+        raise ValueError("A valid provider message ID is required")
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.crm_delivery_provider_message_id', :message_id, true)"),
+            {"message_id": value},
+        )
+
+
+def set_crm_unsubscribe_token_context(db: Session, token_hash: str) -> None:
+    """Allow a public unsubscribe link to resolve only its token-bound delivery row."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.crm_unsubscribe_token_hash', :token_hash, true)"),
+            {"token_hash": token_hash},
         )
 
 

@@ -25,6 +25,7 @@ class Organization(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     industry: Mapped[str] = mapped_column(String(100), default="general")
     country: Mapped[str] = mapped_column(String(2), default="KE")
     currency: Mapped[str] = mapped_column(String(3), default="KES")
@@ -1680,6 +1681,10 @@ class SupportAttachment(Base):
     content_type: Mapped[str] = mapped_column(String(120))
     size_bytes: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    scan_engine: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    scan_result: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    scan_signature: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -1743,3 +1748,7 @@ class DeveloperWebhookDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     __table_args__ = (Index("uq_developer_webhook_endpoint_event", "endpoint_id", "event_id", unique=True),)
+
+
+# Re-export the Status outbox model for existing model import conventions.
+from app.core.models_status_alerts import StatusAlertDelivery  # noqa: E402,F401

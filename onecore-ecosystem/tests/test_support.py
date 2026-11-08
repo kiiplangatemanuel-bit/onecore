@@ -67,7 +67,7 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/complete" in paths
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/download" in paths
     assert "/api/v1/support/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan" in paths
-    assert "CLAMAV_HOST" in __import__("app.core.config", fromlist=["Settings"]).Settings.model_fields
+    assert any(route.path.endswith("/attachments/{attachment_id}/scan") and "POST" in route.methods for route in app.routes)
 
 
 def test_support_organization_ticket_owner_loses_access_when_membership_is_revoked():
@@ -178,18 +178,59 @@ def test_support_attachments_remain_quarantined_until_security_review():
     engine.dispose()
 
 
+def test_clamav_scan_response_parser_requires_explicit_verdict():
+    from app.api.support import _parse_clamav_response
+    assert _parse_clamav_response('stream: OK' + chr(0)) == ('clean', None)
+    assert _parse_clamav_response('stream: Eicar-Test-Signature FOUND' + chr(0)) == ('infected', 'Eicar-Test-Signature')
+    with pytest.raises(RuntimeError):
+        _parse_clamav_response('stream: ERROR' + chr(0))
+
+
+def test_support_attachment_scan_evidence_migration_follows_webhooks():
+    from pathlib import Path
+    migration = Path(__file__).parents[1] / 'migrations' / 'versions' / '0058_support_attachment_scan_evidence.py'
+    source = migration.read_text()
+    assert 'revision = "0058_support_attachment_scan_evidence"' in source
+    assert 'down_revision = "0057_developer_webhooks"' in source
+    for column in ('scan_engine', 'scan_result', 'scan_signature', 'scanned_at'):
+        assert column in source
+
+
+def test_clamav_configuration_requires_a_private_scanner_host():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    configured = Settings(_env_file=None, support_attachment_scanning_enabled=True,
+                          clamav_host="clamav.internal")
+    assert configured.clamav_host == "clamav.internal"
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, support_attachment_scanning_enabled=True, clamav_host="")
+
+
+def test_production_object_storage_requires_automated_attachment_scanning():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="SUPPORT_ATTACHMENT_SCANNING_ENABLED"):
+        Settings(
+            _env_file=None, app_env="production", debug=False,
+            secret_key="a" * 48, supabase_db_url="", database_url="postgresql://user:pass@db.project.supabase.co/app",
+            cors_origins="https://app.example.com", trusted_hosts="api.example.com",
+            force_https=True, portal_redirect_origins="https://support.example.com",
+            integration_object_storage_enabled=True,
+            support_attachment_scanning_enabled=False,
+        )
+
 
 def test_clamav_response_parser_accepts_clean_and_detects_infected_results():
     from app.services.support_scanner import parse_clamav_response
-
-    assert parse_clamav_response(b"stream: OK\x00") is False
-    assert parse_clamav_response(b"stream: Eicar-Test-Signature FOUND\x00") is True
+    assert parse_clamav_response(b"stream: OK\\x00") is False
+    assert parse_clamav_response(b"stream: Eicar-Test-Signature FOUND\\x00") is True
 
 
 def test_clamav_response_parser_fails_closed_on_errors():
     from app.services.support_scanner import parse_clamav_response
-
     with pytest.raises(ValueError):
-        parse_clamav_response(b"stream: ERROR\x00")
+        parse_clamav_response(b"stream: ERROR\\x00")
     with pytest.raises(ValueError):
         parse_clamav_response(b"unexpected response")

@@ -13,8 +13,8 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, User
-from app.core.security import current_user
+from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, StatusAlertDelivery, User
+from app.core.security import current_user, set_status_alert_fanout_context
 
 router = APIRouter(prefix="/api/v1/portals", tags=["public portals"])
 
@@ -81,6 +81,9 @@ MANAGER_ONLY = {
     ("partners", "partner_profile"), ("partners", "agreement"), ("partners", "partner_resource"),
 }
 STATUS_TRANSITIONS = {
+    ("status", "alert_subscription"): {
+        "active": {"disabled"}, "disabled": {"active"},
+    },
     ("trust", "security_report"): {
         "submitted": {"acknowledged"}, "acknowledged": {"investigating"},
         "investigating": {"resolved"}, "resolved": {"closed"},
@@ -171,6 +174,61 @@ def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if (row.portal_key, row.record_type) in MANAGER_ONLY:
         return membership.role in {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
     return membership.role in {"org_admin", "manager"}
+
+
+def _queue_status_alert_deliveries(db: Session, incident: PortalWorkflowRecord, event_key: str) -> None:
+    """Enqueue one idempotent email per active subscriber in the same DB transaction."""
+    payload = incident.payload or {}
+    service = str(payload.get("service") or "OneCore").strip()
+    title = str(payload.get("title") or "Service incident").strip()
+    severity = str(payload.get("severity") or "information").strip()
+    summary = str(payload.get("summary") or "").strip()
+    set_status_alert_fanout_context(db, incident.id)
+    subscriptions = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="status", record_type="alert_subscription", status="active"
+    ).all()
+    channel_preferences = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="status", record_type="notification_preference", status="active"
+    ).all()
+    email_opt_outs = set()
+    for preference in channel_preferences:
+        preference_payload = preference.payload or {}
+        preference_service = str(preference_payload.get("service") or "all").strip().casefold()
+        if (
+            str(preference_payload.get("channel") or "").strip().casefold() == "email"
+            and preference_payload.get("enabled") is False
+            and preference_service in {"*", "all", service.casefold()}
+        ):
+            email_opt_outs.add(preference.owner_user_id)
+    queued_users = set()
+    for subscription in subscriptions:
+        if subscription.owner_user_id in queued_users:
+            continue
+        preferences = subscription.payload or {}
+        subscribed_service = str(preferences.get("service") or "").strip().casefold()
+        if subscribed_service not in {"*", "all", service.casefold()}:
+            continue
+        if subscription.owner_user_id in email_opt_outs:
+            continue
+        recipient = db.query(User).filter_by(id=subscription.owner_user_id, is_active=True).first()
+        if recipient is None or not recipient.email:
+            continue
+        db.add(StatusAlertDelivery(
+            user_id=recipient.id,
+            incident_record_id=incident.id,
+            recipient_email=recipient.email,
+            event_key=f"status-incident-{incident.id}-{event_key}",
+            subject=f"OneCore Status: {title}"[:240],
+            body=(
+                f"Service: {service}\nSeverity: {severity}\n"
+                f"Incident: {title}\n\n{summary}\n\n"
+                "You received this message because you subscribed to OneCore Status alerts."
+            ),
+            status="pending",
+            attempts=0,
+            next_attempt_at=datetime.now(timezone.utc),
+        ))
+        queued_users.add(recipient.id)
 
 
 def _out(row: PortalWorkflowRecord) -> dict:
@@ -318,6 +376,30 @@ def list_portal_records(
     return [_out(row) for row in rows]
 
 
+@router.get("/status/alert-deliveries")
+def list_status_alert_deliveries(
+    limit: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Return only the signed-in user's Status alert delivery history."""
+    rows = db.query(StatusAlertDelivery).filter_by(
+        user_id=user.id
+    ).order_by(StatusAlertDelivery.created_at.desc(), StatusAlertDelivery.id.desc()).limit(limit).all()
+    return [
+        {
+            "id": row.id,
+            "incident_record_id": row.incident_record_id,
+            "status": row.status,
+            "attempts": row.attempts,
+            "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+            "created_at": row.created_at.isoformat(),
+            "last_error": row.last_error,
+        }
+        for row in rows
+    ]
+
+
 @router.post("/{portal}/records/{record_type}", status_code=201)
 def create_portal_record(
     portal: str, record_type: str, payload: PortalRecordCreate,
@@ -414,6 +496,10 @@ def update_portal_record(
         row.status = payload.status
     row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, row, f"portal.{portal}.{row.record_type}.updated")
+    if portal == "status" and row.record_type == "incident" and row.organization_id is None:
+        _queue_status_alert_deliveries(
+            db, row, f"updated-{int(row.updated_at.timestamp() * 1_000_000)}"
+        )
     if portal == "developers" and row.record_type in {"application", "sandbox_environment"}:
         from app.api.developer_webhooks import queue_organization_webhook_event
         event_type = "application.updated" if row.record_type == "application" else "sandbox.updated"
@@ -446,6 +532,8 @@ def publish_public_portal_content(
     db.add(row)
     db.flush()
     _audit(db, user, row, f"portal.{portal}.{record_type}.published")
+    if portal == "status" and record_type == "incident":
+        _queue_status_alert_deliveries(db, row, "published")
     db.commit()
     db.refresh(row)
     return _out(row)
