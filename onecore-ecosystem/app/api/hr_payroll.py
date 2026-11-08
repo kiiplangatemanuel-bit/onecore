@@ -516,7 +516,7 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
         return _run_out(existing)
     duplicate_period=db.query(PayrollRun).filter_by(organization_id=membership.organization_id,
         branch_id=payload.branch_id,period_start=datetime.combine(payload.period_start,time.min,tzinfo=timezone.utc),
-        period_end=datetime.combine(payload.period_end,time.max,tzinfo=timezone.utc)).first()
+        period_end=datetime.combine(payload.period_end,time.max,tzinfo=timezone.utc)).filter(PayrollRun.status!="cancelled").first()
     if duplicate_period: raise HTTPException(409,"A payroll run already exists for this branch and monthly period")
     start=datetime.combine(payload.period_start,time.min,tzinfo=timezone.utc)
     end=datetime.combine(payload.period_end,time.max,tzinfo=timezone.utc)
@@ -603,6 +603,9 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
     if row.approved_by==user.id: raise HTTPException(409,"The payroll approver cannot authorize its payment")
+    accounting_link=db.query(PayrollAccountingLink).filter_by(organization_id=membership.organization_id,payroll_run_id=row.id).first()
+    if not accounting_link or accounting_link.reversal_journal_id:
+        raise HTTPException(409,"Post the approved payroll to accounting before recording payment")
     row.status="paid"; row.paid_by=user.id; row.paid_at=datetime.now(timezone.utc); row.payment_reference=payload.payment_reference
     audit(db,user,membership.organization_id,"payroll.run.marked_paid","payroll_run",row.id,
           "Payment confirmation recorded; this endpoint does not initiate a bank or mobile-money transfer")
@@ -699,7 +702,8 @@ def put_payroll_accounting_mapping(payload: PayrollAccountingMappingIn,
         row=PayrollAccountingMapping(organization_id=membership.organization_id,**values,
                                      created_by=user.id,updated_by=user.id)
         db.add(row)
-    audit(db,user,membership.organization_id,"payroll.accounting_mapping.saved","payroll_accounting_mapping",row.id if row.id else "new")
+    db.flush()
+    audit(db,user,membership.organization_id,"payroll.accounting_mapping.saved","payroll_accounting_mapping",row.id)
     db.commit(); db.refresh(row)
     return _payroll_mapping_out(row)
 
@@ -830,6 +834,7 @@ def reverse_payroll_accounting_journal(run_id:int,payload:PayrollJournalReversal
             debit=line["debit"],credit=line["credit"]))
     link.reversal_journal_id=journal.id; link.reversed_by=user.id
     link.reversed_at=datetime.now(timezone.utc); link.reversal_reason=payload.reason
+    run.status="cancelled"
     audit(db,user,membership.organization_id,"payroll.run.accounting_journal_reversed","payroll_run",run.id,
           f"Reversal journal {journal.journal_number}: {payload.reason}")
     db.commit()
