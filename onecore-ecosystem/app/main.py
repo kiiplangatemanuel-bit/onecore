@@ -38,6 +38,7 @@ from app.api.supabase_auth import router as supabase_auth_router
 from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
+from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -239,6 +240,7 @@ def _verify_rls_database_boundary(connection):
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices",
+        "status_alert_deliveries",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""

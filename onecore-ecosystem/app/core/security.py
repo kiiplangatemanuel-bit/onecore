@@ -40,6 +40,32 @@ def _apply_database_identity_context(session, transaction, connection):
             )
 
 
+def set_verified_user_context(db: Session, user_id: int) -> None:
+    """Bind a server-verified user identity to the current database transaction."""
+    value = int(user_id)
+    if value <= 0:
+        raise ValueError("A positive user ID is required")
+    db.info["onecore_user_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"),
+            {"user_id": str(value)},
+        )
+
+
+def set_status_alert_fanout_context(db: Session, incident_record_id: int) -> None:
+    """Authorize a platform-admin incident transaction to enqueue subscriber rows."""
+    value = int(incident_record_id)
+    if value <= 0:
+        raise ValueError("A positive incident record ID is required")
+    db.info["onecore_status_alert_incident_id"] = value
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT set_config('app.status_alert_incident_id', :incident_id, true)"),
+            {"incident_id": str(value)},
+        )
+
+
 def set_verified_organization_context(db: Session, organization_id: int) -> None:
     """Scope trusted integration/worker transactions to a previously verified tenant."""
     value = int(organization_id)
