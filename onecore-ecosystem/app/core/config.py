@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
 
+    public_site_url: str = ""
     crm_public_base_url: str = ""
     crm_delivery_callback_secret: str = ""
     healthcare_phi_encryption_key: str = ""
