@@ -1,7 +1,7 @@
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 from app.core.config import settings
-from app.core.database import Base
+from app.core.database import Base, normalized_database_url
 from app.core import models  # noqa: F401 - register all mapped tables
 from app.core import inventory_models  # noqa: F401 - register extended inventory tables
 from app.core import procurement_workflow_models  # noqa: F401 - register procurement workflow tables
@@ -9,13 +9,14 @@ from app.core import pos_completion_models  # noqa: F401 - register POS completi
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+database_url = str(normalized_database_url(settings.database_connection_url))
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
 def run_migrations_offline():
     context.configure(
-        url=settings.database_url,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

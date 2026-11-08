@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:////app/data/onecore.db}
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-${SUPABASE_DB_URL:-sqlite:////app/data/onecore.db}}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
       - "127.0.0.1:${PORT:-8000}:8000"
@@ -29,7 +29,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${ONECORE_DATABASE_URL:-sqlite:////app/data/onecore.db}
+      DATABASE_URL: ${ONECORE_DATABASE_URL:-${SUPABASE_DB_URL:-sqlite:////app/data/onecore.db}}
     command: ["python", "-m", "app.workers.crm_scheduler"]
     volumes:
       - onecore_data:/app/data

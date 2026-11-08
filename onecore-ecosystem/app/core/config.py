@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = Field(default=5, ge=1, le=30)
     login_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600)
     database_url: str = "sqlite:///./onecore.db"
+    # Supabase-managed PostgreSQL is the production system of record. Keep DATABASE_URL
+    # for local development and legacy deployments; SUPABASE_DB_URL takes precedence.
+    supabase_db_url: str = ""
+    database_pool_size: int = Field(default=5, ge=1, le=30)
+    database_max_overflow: int = Field(default=5, ge=0, le=50)
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
     cors_origins: str = "http://localhost:3000,http://localhost:8000"
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
@@ -85,6 +91,10 @@ class Settings(BaseSettings):
     s3_region: str = ""
 
 
+    @property
+    def database_connection_url(self) -> str:
+        return (self.supabase_db_url or self.database_url).strip()
+
     @model_validator(mode="after")
     def validate_production_security(self):
         production = self.app_env.strip().lower() in {"production", "prod"}
@@ -93,8 +103,16 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG must be false in production")
             if self.secret_key == "unsafe-development-key-change-me" or len(self.secret_key) < 32:
                 raise ValueError("SECRET_KEY must be a unique random value of at least 32 characters in production")
-            if self.database_url.startswith("sqlite"):
-                raise ValueError("A managed PostgreSQL database is required in production")
+            from sqlalchemy.engine import make_url
+            try:
+                database = make_url(self.database_connection_url)
+            except Exception as exc:
+                raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be a valid SQLAlchemy URL") from exc
+            if database.get_backend_name() != "postgresql":
+                raise ValueError("Supabase PostgreSQL is required in production; configure SUPABASE_DB_URL")
+            host = (database.host or "").lower()
+            if not (host.endswith(".supabase.co") or host.endswith(".pooler.supabase.com")):
+                raise ValueError("Production database host must belong to Supabase (db.<project>.supabase.co or Supabase pooler)")
             origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
             if not origins or "*" in origins or any(not origin.startswith("https://") for origin in origins):
                 raise ValueError("CORS_ORIGINS must contain explicit HTTPS origins in production")

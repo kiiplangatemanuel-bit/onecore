@@ -66,7 +66,7 @@ def test_production_settings_require_secure_values():
         app_env="production",
         debug=False,
         secret_key="s" * 48,
-        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        supabase_db_url="postgresql://postgres:pass@db.project-ref.supabase.co:5432/postgres",
         cors_origins="https://app.example.com",
         trusted_hosts="api.example.com",
         force_https=True,
@@ -77,7 +77,7 @@ def test_production_settings_require_secure_values():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{**safe, "cors_origins": "*"})
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, **{**safe, "database_url": "sqlite:///./onecore.db"})
+        Settings(_env_file=None, **{**safe, "supabase_db_url": "sqlite:///./onecore.db"})
 
 
 def test_bootstrap_credentials_must_be_explicit_and_strong():
@@ -89,3 +89,64 @@ def test_bootstrap_credentials_must_be_explicit_and_strong():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, bootstrap_admin_email="admin@example.com",
                  bootstrap_admin_password="short")
+
+
+
+def test_production_requires_supabase_managed_postgresql():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    safe = dict(
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        cors_origins="https://app.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
+    with pytest.raises(ValidationError, match="Supabase"):
+        Settings(_env_file=None, **safe)
+
+
+def test_supabase_database_url_takes_precedence_over_local_database_url():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite:///./onecore.db",
+        supabase_db_url="postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert settings.database_connection_url.startswith("postgresql://")
+
+
+
+def test_supabase_connection_url_uses_psycopg_and_enforces_tls():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres"
+    )
+    assert url.drivername == "postgresql+psycopg"
+    assert url.query["sslmode"] == "require"
+
+
+def test_supabase_transaction_pooler_url_is_normalized():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres.project:secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+    )
+    assert url.drivername == "postgresql+psycopg"
+    assert url.port == 6543
+    assert url.query["sslmode"] == "require"
+
+
+
+def test_supabase_connection_refuses_ssl_disable():
+    from app.core.database import normalized_database_url
+
+    url = normalized_database_url(
+        "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres?sslmode=disable"
+    )
+    assert url.query["sslmode"] == "require"

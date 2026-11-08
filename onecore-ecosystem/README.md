@@ -9,7 +9,7 @@ It provides the shared platform foundation, a tenant-aware generic module API, i
 
 ## Stack
 - Python 3.12, FastAPI, SQLAlchemy 2, Pydantic settings
-- PostgreSQL in production; SQLite for local development
+- Supabase-managed PostgreSQL as the production system of record; SQLite for local development and tests\n- SQLAlchemy + psycopg 3 connects directly to Supabase Postgres; Alembic migrations and background workers use the same connection\n- Supabase credentials remain server-side; the React frontend accesses data only through authenticated OneCore APIs
 - JWT access tokens, Argon2 password hashing, tenant-aware authorization
 - Adapter interfaces for M-Pesa, KRA eTIMS, SHA/DHA AfyaLink, banks, messaging, AI and object storage
 - Docker Compose, pytest, OpenAPI
