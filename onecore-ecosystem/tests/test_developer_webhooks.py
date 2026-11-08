@@ -68,6 +68,8 @@ def test_developer_application_creation_automatically_enqueues_subscribed_webhoo
         webhook_record = _webhook(db, org, user)
         endpoint = DeveloperWebhookEndpoint(
             workflow_record_id=webhook_record.id, organization_id=org.id,
+            endpoint_url="https://hooks.example.com/onecore",
+            events=["application.created"],
             secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
         )
         db.add(endpoint)
