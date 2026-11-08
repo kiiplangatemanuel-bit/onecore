@@ -279,6 +279,9 @@ def test_payroll_payment_batch_and_statement_models_are_tenant_scoped():
     assert "uq_payroll_batch_item_org_reference" in {
         x.name for x in PayrollPaymentBatchItem.__table__.indexes
     }
+    assert "uq_payroll_batch_item_active_run" in {
+        x.name for x in PayrollPaymentBatchItem.__table__.indexes
+    }
     assert "uq_payroll_bank_statement_fingerprint" in {
         x.name for x in PayrollBankStatementLine.__table__.indexes
     }
@@ -289,6 +292,7 @@ def test_payroll_payment_batch_routes_are_registered():
     expected = {
         "/api/v1/payroll/payment-batches",
         "/api/v1/payroll/payment-batches/{batch_id}/submit",
+        "/api/v1/payroll/payment-batches/{batch_id}/cancel",
         "/api/v1/payroll/payment-batches/{batch_id}/approve",
         "/api/v1/payroll/payment-batches/{batch_id}/settlements",
         "/api/v1/payroll/bank-statements/import",
