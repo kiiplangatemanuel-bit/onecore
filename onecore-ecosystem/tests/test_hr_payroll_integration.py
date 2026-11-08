@@ -74,6 +74,7 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
                 "first_name": "Amina", "last_name": "Test",
                 "hire_date": "2026-11-01", "base_salary": "20000.00",
                 "currency": "KES", "pension_contribution": "1000.00",
+                "overtime_multiplier": "1.50",
                 "recurring_allowances": {"transport": "1000.00"},
                 "recurring_benefits": {"housing": "500.00"},
             })
@@ -151,8 +152,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             })
             assert run.status_code == 201, run.text
             run_id = run.json()["id"]
-            assert run.json()["gross_total"] == "21500.00"
-            assert run.json()["employer_cost_total"] == "23112.50"
+            assert run.json()["gross_total"] == "21644.23"
+            assert run.json()["employer_cost_total"] == "23267.54"
             assert client.post(f"/api/v1/payroll/runs/{run_id}/submit").status_code == 200
 
             actor["user"], actor["role"] = users[1], "payroll_approver"
@@ -164,7 +165,9 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert slips.status_code == 200, slips.text
             assert len(slips.json()) == 1
             assert slips.json()[0]["employee_id"] == employee_id
-            assert slips.json()[0]["net_pay"] == "17246.25"
+            assert slips.json()[0]["net_pay"] == "17361.28"
+            assert slips.json()[0]["snapshot"]["overtime_minutes"] == 60
+            assert slips.json()[0]["snapshot"]["overtime_earnings"] == "144.23"
 
             actor["user"], actor["role"] = users[3], "payroll_accounting"
             mapping = client.put("/api/v1/payroll/accounting-mapping", json={
@@ -181,8 +184,8 @@ def test_employee_to_approved_paid_payroll_flow_is_tenant_and_role_scoped():
             assert mapping.status_code == 200, mapping.text
             posted = client.post(f"/api/v1/payroll/runs/{run_id}/post-to-accounting")
             assert posted.status_code == 201, posted.text
-            assert posted.json()["debits"] == "23112.50"
-            assert posted.json()["credits"] == "23112.50"
+            assert posted.json()["debits"] == "23267.54"
+            assert posted.json()["credits"] == "23267.54"
 
             actor["user"], actor["role"] = users[2], "payroll_payment"
             paid = client.post(f"/api/v1/payroll/runs/{run_id}/mark-paid",

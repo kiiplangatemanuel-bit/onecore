@@ -216,3 +216,53 @@ def test_attendance_domain_model_and_overtime_duration_validation():
             clock_out="2026-11-08T08:00:00+03:00",
             idempotency_key="attendance-invalid2",
         )
+
+
+def test_payroll_applies_approved_overtime_and_unpaid_leave_adjustments():
+    employee = HREmployee(
+        id=9, organization_id=1, employee_number="EMP-009",
+        first_name="Grace", last_name="Worker",
+        hire_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        base_salary=Decimal("20000.00"),
+        recurring_allowances={"transport": "1000.00"},
+        recurring_benefits={"housing": "500.00"},
+        pension_contribution=Decimal("1000.00"),
+    )
+    employee.overtime_multiplier = Decimal("1.50")
+    employee.scheduled_minutes_per_day = 480
+    rules = {
+        "paye_bands": [{"lower_bound": "0", "upper_bound": None, "rate": "0.1"}],
+        "personal_relief": "1000",
+        "pension_tax_deductible_limit": "3000",
+        "nssf_tiers": [{"lower_bound": "0", "upper_bound": "100000", "employee_rate": "0.06", "employer_rate": "0.06"}],
+        "shif_rate": "0.0275",
+        "housing_levy_employee_rate": "0.015",
+        "housing_levy_employer_rate": "0.015",
+    }
+    result = _calculate(employee, rules, date(2026, 1, 1), date(2026, 1, 31),
+                        overtime_minutes=60, unpaid_leave_days=Decimal("2"))
+    assert result["overtime_minutes"] == 60
+    assert result["overtime_earnings"] == "144.23"
+    assert result["unpaid_leave_days"] == "2"
+    assert result["unpaid_leave_deduction"] == "1290.32"
+    assert result["gross_pay"] == "20353.91"
+
+
+def test_overtime_requires_explicit_employee_policy():
+    employee = HREmployee(
+        id=10, organization_id=1, employee_number="EMP-010",
+        first_name="Sam", last_name="Worker",
+        hire_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        base_salary=Decimal("20000.00"),
+    )
+    employee.overtime_multiplier = None
+    employee.scheduled_minutes_per_day = 480
+    rules = {
+        "paye_bands": [{"lower_bound": "0", "upper_bound": None, "rate": "0.1"}],
+        "personal_relief": "0", "pension_tax_deductible_limit": "0",
+        "nssf_tiers": [{"lower_bound": "0", "upper_bound": "100000", "employee_rate": "0", "employer_rate": "0"}],
+        "shif_rate": "0", "housing_levy_employee_rate": "0", "housing_levy_employer_rate": "0",
+    }
+    with pytest.raises(HTTPException) as error:
+        _calculate(employee, rules, date(2026, 1, 1), date(2026, 1, 31), overtime_minutes=30)
+    assert error.value.status_code == 409

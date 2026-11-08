@@ -99,6 +99,8 @@ class EmployeeIn(BaseModel):
     recurring_allowances: dict[str, Decimal] = Field(default_factory=dict)
     recurring_benefits: dict[str, Decimal] = Field(default_factory=dict)
     pension_contribution: Decimal = Field(default=ZERO, ge=0, max_digits=18, decimal_places=2)
+    scheduled_minutes_per_day: int = Field(default=480, ge=60, le=1440)
+    overtime_multiplier: Decimal | None = Field(default=None, ge=1, le=5, max_digits=5, decimal_places=2)
 
     @field_validator("recurring_allowances", "recurring_benefits")
     @classmethod
@@ -223,7 +225,8 @@ def employee_out(x):
             "employment_type": x.employment_type, "employment_status": x.employment_status,
             "hire_date": x.hire_date.date().isoformat(), "base_salary": str(x.base_salary),
             "currency": x.currency, "recurring_allowances": x.recurring_allowances,
-            "recurring_benefits": x.recurring_benefits, "pension_contribution": str(x.pension_contribution)}
+            "recurring_benefits": x.recurring_benefits, "pension_contribution": str(x.pension_contribution), "scheduled_minutes_per_day": x.scheduled_minutes_per_day,
+            "overtime_multiplier": str(x.overtime_multiplier) if x.overtime_multiplier is not None else None}
 
 
 def _progressive_tax(taxable, bands):
@@ -247,7 +250,7 @@ def _tiered_contribution(gross, tiers, rate_key):
     return rounded(total)
 
 
-def _calculate(employee, rules, period_start, period_end):
+def _calculate(employee, rules, period_start, period_end, overtime_minutes=0, unpaid_leave_days=ZERO):
     total_days = (period_end - period_start).days + 1
     hired = employee.hire_date.date() if isinstance(employee.hire_date, datetime) else employee.hire_date
     terminated = employee.termination_date.date() if isinstance(employee.termination_date, datetime) else employee.termination_date
@@ -260,7 +263,18 @@ def _calculate(employee, rules, period_start, period_end):
     allowances = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_allowances or {}).items()}
     benefits = {k: rounded(dec(v) * factor) for k, v in (employee.recurring_benefits or {}).items()}
     prorated_salary = rounded(dec(employee.base_salary) * factor)
-    gross = rounded(prorated_salary + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
+    unpaid_leave_days = dec(unpaid_leave_days)
+    if unpaid_leave_days > Decimal(eligible_days):
+        raise HTTPException(422, f"Unpaid leave exceeds eligible payroll days for employee {employee.employee_number}")
+    unpaid_leave_deduction = rounded(dec(employee.base_salary) * unpaid_leave_days / Decimal(total_days))
+    overtime_earnings = ZERO
+    if overtime_minutes:
+        if employee.overtime_multiplier is None:
+            raise HTTPException(409, f"Configure an approved overtime multiplier for employee {employee.employee_number}")
+        monthly_work_minutes = Decimal(26) * Decimal(employee.scheduled_minutes_per_day or 480)
+        minute_rate = dec(employee.base_salary) / monthly_work_minutes
+        overtime_earnings = rounded(minute_rate * Decimal(overtime_minutes) * dec(employee.overtime_multiplier))
+    gross = rounded(prorated_salary - unpaid_leave_deduction + overtime_earnings + sum(allowances.values(), ZERO) + sum(benefits.values(), ZERO))
     pension = rounded(dec(employee.pension_contribution) * factor)
     deductible_pension = min(pension, dec(rules["pension_tax_deductible_limit"]))
     taxable = max(ZERO, gross - deductible_pension)
@@ -278,6 +292,8 @@ def _calculate(employee, rules, period_start, period_end):
     return {"employee_id": employee.id, "employee_number": employee.employee_number,
             "employee_name": (employee.first_name + " " + employee.last_name).strip(),
             "gross_pay": str(gross), "taxable_pay": str(taxable), "paye": str(paye),
+            "overtime_minutes": int(overtime_minutes), "overtime_earnings": str(overtime_earnings),
+            "unpaid_leave_days": str(unpaid_leave_days), "unpaid_leave_deduction": str(unpaid_leave_deduction),
             "proration_days": eligible_days, "period_days": total_days, "proration_factor": str(factor), "base_salary_prorated": str(prorated_salary),
             "nssf_employee": str(nssf_employee), "nssf_employer": str(nssf_employer),
             "shif_employee": str(shif), "housing_levy_employee": str(housing_employee),
@@ -310,7 +326,8 @@ def create_employee(payload: EmployeeIn, membership=Depends(active_membership),
         base_salary=payload.base_salary, currency=payload.currency,
         recurring_allowances={k: str(v) for k,v in payload.recurring_allowances.items()},
         recurring_benefits={k: str(v) for k,v in payload.recurring_benefits.items()},
-        pension_contribution=payload.pension_contribution, created_by=user.id)
+        pension_contribution=payload.pension_contribution, scheduled_minutes_per_day=payload.scheduled_minutes_per_day,
+        overtime_multiplier=payload.overtime_multiplier, created_by=user.id)
     db.add(row)
     try:
         db.flush()
@@ -547,7 +564,36 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
     if any(not can_access_branch(membership,x.branch_id) for x in employees): raise HTTPException(404,"Employee not found")
     snapshots=[]
     for employee in employees:
-        item=_calculate(employee,rules.rules,payload.period_start,payload.period_end); item["rule_set_id"]=rules.id
+        attendance_rows = db.query(HRAttendanceRecord).filter(
+            HRAttendanceRecord.organization_id == membership.organization_id,
+            HRAttendanceRecord.employee_id == employee.id,
+            HRAttendanceRecord.status == "approved",
+            HRAttendanceRecord.work_date >= start,
+            HRAttendanceRecord.work_date <= end,
+        ).all()
+        overtime_minutes = sum(x.overtime_minutes for x in attendance_rows)
+        unpaid_rows = db.query(HRLeaveRequest).filter(
+            HRLeaveRequest.organization_id == membership.organization_id,
+            HRLeaveRequest.employee_id == employee.id,
+            HRLeaveRequest.status == "approved",
+            HRLeaveRequest.leave_type == "unpaid",
+            HRLeaveRequest.start_date <= end,
+            HRLeaveRequest.end_date >= start,
+        ).all()
+        unpaid_days = ZERO
+        for leave in unpaid_rows:
+            leave_start = leave.start_date.date()
+            leave_end = leave.end_date.date()
+            overlap_start = max(payload.period_start, leave_start)
+            overlap_end = min(payload.period_end, leave_end)
+            overlap_days = max(0, (overlap_end - overlap_start).days + 1)
+            leave_calendar_days = (leave_end - leave_start).days + 1
+            if overlap_days and leave_calendar_days:
+                unpaid_days += dec(leave.days) * Decimal(overlap_days) / Decimal(leave_calendar_days)
+        item = _calculate(employee, rules.rules, payload.period_start, payload.period_end,
+                          overtime_minutes=overtime_minutes, unpaid_leave_days=unpaid_days)
+        item["attendance_records_count"] = len(attendance_rows)
+        item["rule_set_id"] = rules.id
         snapshots.append(item)
     gross=sum((dec(x["gross_pay"]) for x in snapshots),ZERO)
     deductions=sum((dec(x["total_deductions"]) for x in snapshots),ZERO)
