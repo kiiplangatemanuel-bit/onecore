@@ -950,10 +950,39 @@ passed 241 tests (5 warnings), dependency audit, Alembic upgrade and
 downgrade/re-upgrade, Python compilation, the main frontend build and all ten
 independent portal builds.
 
-Remaining identity work: MFA/TOTP and recovery codes, external OIDC federation,
-durable session/device inventory and per-session revocation, privileged step-up
-authentication, distributed edge/WAF throttling and account lockout. SMTP
+Remaining identity work: mandatory MFA policy for root superadmins and other
+privileged roles, organization/role-level MFA policy, external OIDC federation,
+durable session/device inventory and per-session revocation, privileged step-up,
+distributed edge/WAF throttling and account lockout. SMTP
 credentials, sender-domain authentication, deliverability monitoring and a
 durable retrying email outbox/worker still require deployment/operations work.
 The PKCE portal flow is not an OIDC provider or a Supabase Auth session, and this
 CI evidence is not a production deployment or security certification.
+
+
+## Account MFA / TOTP foundation (8 November 2026)
+
+Implemented in PR #102 and rebased onto main commit cb6973f9be6ab7b1e2135e4984c943240b608fa2. The migration is 0053_user_mfa after 0052_portal_workflow_records. Rebased-head CI run 42473780009 passed.
+
+- Account-level RFC 6238 TOTP enrollment, confirmation and disablement. TOTP
+  seeds are encrypted at rest with a separately configured Fernet key; no
+  plaintext seed is persisted.
+- Password login for MFA-enabled users returns a five-minute, one-time
+  challenge rather than an access token. Challenges are digest-stored, limited
+  to five attempts and protected by the public-write rate limiter.
+- Replay prevention tracks the last accepted TOTP time-step. Ten one-time
+  recovery codes are generated; only SHA-256 digests are stored. Rotation
+  revokes prior codes; use is recorded.
+- Enabling or disabling MFA increments the account authentication version and
+  consumes outstanding portal authorization codes to invalidate existing
+  access tokens and pending portal handoffs.
+- Added account-security UI and a second-factor sign-in step to the main frontend.
+- Added tests and operator guidance in docs/IDENTITY_MFA.md and
+  docs/IDENTITY_INVITATIONS.md.
+
+CI run [42473780009](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42473780009) passed dependency audit, migration upgrade and downgrade/re-upgrade, Python compilation, pytest, the main frontend build and all ten independent portal builds. The subsequent tracker-update commit also passed the same workflow in [run 42473920144](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42473920144).
+
+The key must be supplied through MFA_ENCRYPTION_KEY in the deployment secret
+manager before users can enroll. Key custody/rotation, MFA policy enforcement,
+passkeys, OIDC, per-session revocation, privileged step-up, production UAT and
+security review remain open. This increment is not a security certification.
