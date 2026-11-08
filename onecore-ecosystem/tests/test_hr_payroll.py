@@ -55,7 +55,8 @@ def test_hr_payroll_domain_models_are_tenant_scoped_and_snapshotted():
 def test_hr_payroll_routes_are_registered():
     paths = app.openapi()["paths"]
     expected = {
-        "/api/v1/hr/employees", "/api/v1/hr/employees/{employee_id}/leave",
+        "/api/v1/hr/employees", "/api/v1/hr/employees/{employee_id}/employment-status",
+        "/api/v1/hr/employees/{employee_id}/leave",
         "/api/v1/hr/leave-requests", "/api/v1/hr/leave-requests/{request_id}/decision",
         "/api/v1/payroll/rule-sets", "/api/v1/payroll/rule-sets/{rule_set_id}/submit",
         "/api/v1/payroll/rule-sets/{rule_set_id}/approve", "/api/v1/payroll/runs",
@@ -86,6 +87,8 @@ def test_statutory_rule_sets_require_official_evidence_and_valid_bands():
             evidence("NSSF", "https://www.nssf.or.ke/"),
             evidence("SHA", "https://sha.go.ke/"),
         ]))
+    with pytest.raises(ValidationError):
+        RuleSetIn(**valid_rules(paye_bands=[{"lower_bound": "0", "upper_bound": "10000", "rate": "0.1"}]))
     with pytest.raises(ValidationError):
         RuleSetIn(**valid_rules(paye_bands=[
             {"lower_bound": "0", "upper_bound": "10000", "rate": "0.1"},
@@ -124,6 +127,10 @@ def test_payroll_calculation_uses_versioned_configured_rates_and_cent_rounding()
     assert result["gross_pay"] == "21500.00"
     assert result["proration_days"] == 31
     assert result["period_days"] == 31
+    employee.hire_date = datetime(2026, 1, 16, tzinfo=timezone.utc)
+    prorated = _calculate(employee, rules, date(2026, 1, 1), date(2026, 1, 31))
+    assert prorated["proration_days"] == 16
+    assert prorated["gross_pay"] == "11096.77"
     assert result["taxable_pay"] == "20500.00"
     assert result["nssf_employee"] == "120.00"
     assert result["nssf_employer"] == "120.00"
