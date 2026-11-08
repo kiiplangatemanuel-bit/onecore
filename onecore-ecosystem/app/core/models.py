@@ -543,6 +543,7 @@ class AccountingInvoice(Base):
     invoice_type: Mapped[str] = mapped_column(String(12))  # receivable or payable
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("procurement_suppliers.id"), nullable=True, index=True)
+    crm_sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True, index=True)
     invoice_number: Mapped[str] = mapped_column(String(60))
     issue_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -561,6 +562,7 @@ class AccountingInvoice(Base):
     __table_args__ = (
         Index("ix_accounting_invoice_org_number", "organization_id", "invoice_number", unique=True),
         Index("ix_accounting_invoice_org_status_due", "organization_id", "status", "due_date"),
+        Index("ix_accounting_invoice_org_crm_order", "organization_id", "crm_sales_order_id"),
     )
 
 
@@ -1470,13 +1472,14 @@ class CRMCampaignAttribution(Base):
     contact_id: Mapped[int] = mapped_column(ForeignKey("crm_contacts.id"))
     lead_id: Mapped[int | None] = mapped_column(ForeignKey("crm_leads.id"), nullable=True)
     sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True)
+    accounting_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("accounting_invoices.id"), nullable=True)
     event_type: Mapped[str] = mapped_column(String(20))
     revenue_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3))
     idempotency_key: Mapped[str] = mapped_column(String(100))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    __table_args__ = (Index("ix_crm_attribution_org_idempotency", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (Index("ix_crm_attribution_org_idempotency", "organization_id", "idempotency_key", unique=True),\n                      Index("uq_crm_attribution_org_invoice", "organization_id", "accounting_invoice_id", unique=True))
 
 class CRMWorkerHeartbeat(Base):
     __tablename__ = "crm_worker_heartbeats"
