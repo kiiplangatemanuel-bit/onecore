@@ -138,7 +138,7 @@ def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if not membership:
         return False
     if (row.portal_key, row.record_type) in MANAGER_ONLY:
-        return membership.role in {"org_admin", "partner_manager", "developer", "event_manager"}
+        return membership.role in {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
     return membership.role in {"org_admin", "manager"}
 
 
@@ -242,6 +242,8 @@ def create_portal_record(
     if payload.organization_id is not None:
         membership = _membership(db, user, payload.organization_id)
         allowed_roles = WRITE_ROLES.get(portal, {"org_admin", "manager", "staff"})
+        if (portal, record_type) in MANAGER_ONLY:
+            allowed_roles = {"org_admin", "manager", "school_admin", "partner_manager", "developer", "event_manager"}
         if membership.role not in allowed_roles:
             raise HTTPException(403, "Your organization role cannot create this portal resource")
     initial_status = {
