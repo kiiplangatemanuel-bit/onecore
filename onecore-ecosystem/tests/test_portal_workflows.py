@@ -277,3 +277,29 @@ def test_confidential_case_status_requires_valid_reviewer_transition_order():
         report = update_portal_record("trust", report["id"], PortalRecordUpdate(status="investigating"), reviewer, db)
         assert report["status"] == "investigating"
     engine.dispose()
+
+
+def test_revoked_organization_membership_removes_owner_access_to_tenant_records():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="A", slug="org-a")
+        db.add(org)
+        db.flush()
+        owner = _identity(db, "owner@example.com", org, "org_admin")
+        db.commit()
+        record = create_portal_record(
+            "community", "post",
+            PortalRecordCreate(organization_id=org.id, visibility="private",
+                               payload={"title": "Private tenant post", "body": "Only while a member"}),
+            owner, db,
+        )
+        membership = db.query(Membership).filter_by(user_id=owner.id, organization_id=org.id).one()
+        membership.is_active = False
+        db.commit()
+        with pytest.raises(HTTPException) as denied:
+            read_portal_record("community", record["id"], owner, db)
+        assert denied.value.status_code == 404
+        with pytest.raises(HTTPException) as denied_update:
+            update_portal_record("community", record["id"], PortalRecordUpdate(payload={"body": "changed"}), owner, db)
+        assert denied_update.value.status_code == 404
+    engine.dispose()
