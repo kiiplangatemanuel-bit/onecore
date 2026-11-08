@@ -298,7 +298,6 @@ def list_employees(membership=Depends(active_membership), db: Session=Depends(ge
 @router.post("/hr/employees", status_code=201)
 def create_employee(payload: EmployeeIn, membership=Depends(active_membership),
                     user: User=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "create")
     require_hr_write(membership)
     branch_or_404(db, membership, payload.branch_id)
     row = HREmployee(organization_id=membership.organization_id, branch_id=payload.branch_id,
@@ -339,7 +338,6 @@ class EmploymentChangeIn(BaseModel):
 def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
                              membership=Depends(active_membership), user: User=Depends(current_user),
                              db: Session=Depends(get_db)):
-    require_permission(membership, "update")
     require_hr_write(membership)
     row=db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership,row.branch_id):
@@ -358,7 +356,6 @@ def change_employment_status(employee_id: int, payload: EmploymentChangeIn,
 @router.post("/hr/employees/{employee_id}/leave", status_code=201)
 def request_leave(employee_id: int, payload: LeaveIn, membership=Depends(active_membership),
                   user: User=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "create")
     require_hr_write(membership)
     employee = db.query(HREmployee).filter_by(id=employee_id, organization_id=membership.organization_id).first()
     if not employee or not can_access_branch(membership, employee.branch_id):
@@ -400,7 +397,6 @@ def list_leave_requests(status: str | None=None, membership=Depends(active_membe
 @router.post("/hr/leave-requests/{request_id}/decision")
 def decide_leave(request_id: int, payload: LeaveDecisionIn, membership=Depends(active_membership),
                  user: User=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "update")
     require_hr_write(membership)
     row = db.query(HRLeaveRequest).filter_by(id=request_id, organization_id=membership.organization_id).first()
     if not row or not can_access_branch(membership, row.branch_id): raise HTTPException(404, "Leave request not found")
