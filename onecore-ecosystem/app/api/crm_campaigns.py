@@ -121,7 +121,7 @@ def delivery_event(payload:dict,x_crm_delivery_secret:str|None=Header(None),db:S
         x_crm_delivery_secret or "",settings.crm_delivery_callback_secret): raise HTTPException(401,"Invalid callback credentials")
     pid=str(payload.get("provider_message_id") or "").strip(); state=str(payload.get("status") or "").lower()
     if not pid or state not in {"delivered","failed"}: raise HTTPException(422,"Valid provider_message_id and status required")
-    set_crm_delivery_callback_context(db)
+    set_crm_delivery_callback_context(db, pid)
     d=db.query(CRMCampaignDelivery).filter_by(provider_message_id=pid).order_by(CRMCampaignDelivery.id.desc()).first()
     if not d: raise HTTPException(404,"Delivery not found")
     set_verified_organization_context(db,d.organization_id)
