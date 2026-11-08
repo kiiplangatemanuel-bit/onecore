@@ -18,7 +18,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
-from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total
+from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption
 from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/api/v1")
@@ -1706,39 +1706,11 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             raise HTTPException(409, "Loyalty redemption is not enabled for this organization")
         if customer.points_balance < loyalty_points_redeemed:
             raise HTTPException(422, "Customer does not have enough loyalty points")
-        loyalty_discount_total = money(
-            Decimal(loyalty_points_redeemed) / Decimal(loyalty_policy.points_per_currency_unit)
+        prepared, loyalty_discount_total, tax_total, total = apply_loyalty_redemption(
+            prepared, loyalty_points_redeemed, loyalty_policy.points_per_currency_unit,
+            Decimal(loyalty_policy.max_redemption_percent),
         )
-        discountable_base = money(sum(
-            (subtotal - discount for _, _, subtotal, discount, _, _, _, _ in prepared),
-            Decimal("0.00"),
-        ))
-        maximum_redemption = money(
-            discountable_base * Decimal(loyalty_policy.max_redemption_percent) / Decimal("100")
-        )
-        if loyalty_discount_total <= 0:
-            raise HTTPException(422, "The selected loyalty points are worth less than one cent")
-        if loyalty_discount_total > maximum_redemption:
-            raise HTTPException(422, "Loyalty redemption exceeds the configured per-sale percentage limit")
-        remaining_discount = loyalty_discount_total
-        adjusted = []
-        for index, (line, unit_price, subtotal, discount, tax_rate, tax, line_total, _) in enumerate(prepared):
-            taxable_base = money(subtotal - discount)
-            if index == len(prepared) - 1:
-                loyalty_share = remaining_discount
-            else:
-                loyalty_share = (loyalty_discount_total * taxable_base / discountable_base * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
-                loyalty_share = min(money(loyalty_share), remaining_discount, taxable_base)
-            remaining_discount = money(remaining_discount - loyalty_share)
-            new_discount = money(discount + loyalty_share)
-            new_taxable_base = money(subtotal - new_discount)
-            new_tax = money(new_taxable_base * tax_rate / Decimal("100"))
-            new_total = money(new_taxable_base + new_tax)
-            adjusted.append((line, unit_price, subtotal, discount, tax_rate, new_tax, new_total, loyalty_share))
-        prepared = adjusted
         discount_total = money(discount_total + loyalty_discount_total)
-        tax_total = money(sum((item[5] for item in prepared), Decimal("0.00")))
-        total = money(sum((item[6] for item in prepared), Decimal("0.00")))
     validate_payment_total(total, payload.payments)
     warehouse_allocations = {}
     branch_warehouses = db.query(InventoryWarehouse).filter_by(
