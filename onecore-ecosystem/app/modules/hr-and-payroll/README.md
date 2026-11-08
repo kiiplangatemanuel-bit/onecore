@@ -16,7 +16,7 @@ The API is registered in `app/main.py`; HR/payroll schema changes are managed by
 - Monthly payroll calculation with recurring salary, allowances, benefits, configured pension, hire/termination proration and immutable calculation/payslip snapshots.
 - Daily attendance submissions, derived worked/overtime minutes, idempotency and independent approval.
 - Approved overtime and approved unpaid leave included in payroll calculation snapshots.
-- One-off employee earnings and deductions with reason, effective date, idempotency, independent approval/rejection, once-only payroll assignment and immutable payslip detail.
+- One-off employee earnings and deductions with reason, effective date, idempotency, independent approval/rejection, once-only payroll assignment and immutable payslip detail. Applied adjustments are locked to their payroll run; reversing an unpaid accrual releases them for a corrected run.
 - Payroll preparation, submission, independent approval, external payment-reference confirmation and role separation.
 - Payroll accounting mapping, balanced accrual journal, settlement journal, pre-payment reversal and separate other-deductions liability mapping.
 - Audit events, tenant/branch authorization and concurrency controls on implemented lifecycle operations.
