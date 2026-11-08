@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_bucket: str = ""
     s3_region: str = ""
+    support_attachment_scanning_enabled: bool = False
+    clamav_host: str = ""
+    clamav_port: int = Field(default=3310, ge=1, le=65535)
+    clamav_timeout_seconds: int = Field(default=30, ge=5, le=120)
 
 
     @property
@@ -131,6 +135,10 @@ class Settings(BaseSettings):
             redirect_origins = [item.strip() for item in self.portal_redirect_origins.split(",") if item.strip()]
             if not redirect_origins or any(not item.startswith("https://") for item in redirect_origins):
                 raise ValueError("PORTAL_REDIRECT_ORIGINS must contain the exact HTTPS origins of the independently deployed portals")
+        if production and self.integration_object_storage_enabled and not self.support_attachment_scanning_enabled:
+            raise ValueError("SUPPORT_ATTACHMENT_SCANNING_ENABLED must be true when production Support object storage is enabled")
+        if self.support_attachment_scanning_enabled and not self.clamav_host.strip():
+            raise ValueError("CLAMAV_HOST is required when Support attachment scanning is enabled")
         if bool(self.supabase_url.strip()) != bool(self.supabase_anon_key.strip()):
             raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured together")
         if self.supabase_url and not self.supabase_url.strip().startswith("https://"):
