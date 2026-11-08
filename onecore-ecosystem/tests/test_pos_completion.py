@@ -1,3 +1,5 @@
+import pytest
+
 from app.main import app
 from app.core.pos_completion_models import POSDevice, POSOfflineConflict, POSCustomer, POSLoyaltyEntry, POSPeripheralCommand, POSCustomerSale
 
