@@ -1747,3 +1747,22 @@ class DeveloperWebhookDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     __table_args__ = (Index("uq_developer_webhook_endpoint_event", "endpoint_id", "event_id", unique=True),)
+
+
+class StatusAlertDelivery(Base):
+    """Durable email outbox for personal Status incident subscriptions."""
+    __tablename__ = "status_alert_deliveries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    incident_record_id: Mapped[int] = mapped_column(ForeignKey("portal_workflow_records.id", ondelete="CASCADE"))
+    recipient_email: Mapped[str] = mapped_column(String(320))
+    event_key: Mapped[str] = mapped_column(String(180))
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (Index("uq_status_alert_user_event", "user_id", "event_key", unique=True),)
