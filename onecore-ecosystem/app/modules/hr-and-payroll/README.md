@@ -1,19 +1,7 @@
-# HR and Payroll
+# HR and Payroll module
 
-Master specification category: **11**
+The module is no longer scaffold-only. The first database-backed employee, leave, statutory payroll, approval, payslip and accounting bridge implementation is documented in [HR_PAYROLL.md](../../docs/HR_PAYROLL.md).
 
-## Source scope
-Employee profiles, recruitment/ATS, onboarding/contracts, departments/positions, attendance/biometrics, shifts, leave/overtime/timesheets, payroll, allowances/deductions/payslips/payments, configurable PAYE/NSSF/SHIF/AHL statutory rules, tax reports, appraisals, training, discipline, self-service and analytics.
+Daily attendance submission, overtime-minute calculation and independent HR approval are included from migration 0040. The current attendance slice records and reviews time; it does not yet feed overtime or unpaid-leave adjustments into payroll calculations.
 
-## Implementation status
-Scaffold only. This folder reserves the domain boundary; it is not a claim of production implementation.
-
-## Required implementation
-- Define domain entities, constraints, indexes and migrations.
-- Add domain services and versioned API routes.
-- Enforce tenant, branch and role authorization at the service layer.
-- Add validation, approval workflows, audit events and idempotency where needed.
-- Build responsive user/admin workflows and accessible states.
-- Add unit, integration, security and end-to-end tests.
-- Add monitoring, retention, backup/restore and operational documentation.
-- Complete sandbox/UAT and release approval for external dependencies.
+Production activation still requires controlled Alembic migrations, verified statutory source publications and effective dates, payroll parallel runs, finance/HR UAT and sign-off. Do not treat source URL validation as statutory certification.
