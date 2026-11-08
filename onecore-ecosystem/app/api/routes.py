@@ -1,5 +1,5 @@
 import json, re, uuid, hashlib, secrets
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
@@ -1726,8 +1726,8 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
             if index == len(prepared) - 1:
                 loyalty_share = remaining_discount
             else:
-                loyalty_share = money(loyalty_discount_total * taxable_base / discountable_base)
-                loyalty_share = min(loyalty_share, remaining_discount, taxable_base)
+                loyalty_share = (loyalty_discount_total * taxable_base / discountable_base * Decimal("100")).to_integral_value(rounding=ROUND_DOWN) / Decimal("100")
+                loyalty_share = min(money(loyalty_share), remaining_discount, taxable_base)
             remaining_discount = money(remaining_discount - loyalty_share)
             new_discount = money(discount + loyalty_share)
             new_taxable_base = money(subtotal - new_discount)
