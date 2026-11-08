@@ -368,7 +368,8 @@ def approve_rule_set(rule_set_id:int,membership=Depends(active_membership),user:
     if row.status!="pending_approval": raise HTTPException(409,"Rule set is not awaiting approval")
     if row.submitted_by==user.id or row.created_by==user.id: raise HTTPException(409,"Rule-set creator and submitter cannot approve it")
     if db.query(PayrollRuleSet).filter(PayrollRuleSet.organization_id==membership.organization_id,
-        PayrollRuleSet.status=="active",PayrollRuleSet.effective_from<=row.effective_from,
+        PayrollRuleSet.status=="active",
+        ((row.effective_to.is_(None))|(PayrollRuleSet.effective_from<=row.effective_to)),
         ((PayrollRuleSet.effective_to.is_(None))|(PayrollRuleSet.effective_to>=row.effective_from))).first():
         raise HTTPException(409,"An active statutory rule set already overlaps this effective date")
     row.status="active"; row.approved_by=user.id; row.approved_at=datetime.now(timezone.utc)
@@ -400,6 +401,8 @@ def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership
                        user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"manage")
     branch_or_404(db,membership,payload.branch_id)
+    if payload.branch_id is None and branch_scope_ids(membership) is not None:
+        raise HTTPException(422,"Select a branch for payroll when your membership has a restricted branch scope")
     existing=db.query(PayrollRun).filter_by(organization_id=membership.organization_id,
         idempotency_key=payload.idempotency_key).first()
     if existing:
@@ -490,6 +493,7 @@ def mark_payroll_paid(run_id:int,payload:PaidIn,membership=Depends(active_member
     row=db.query(PayrollRun).filter_by(id=run_id,organization_id=membership.organization_id).with_for_update().first()
     if not row or not can_access_branch(membership,row.branch_id): raise HTTPException(404,"Payroll run not found")
     if row.status!="approved": raise HTTPException(409,"Only approved payroll can be marked paid")
+    if row.approved_by==user.id: raise HTTPException(409,"The payroll approver cannot authorize its payment")
     row.status="paid"; row.paid_by=user.id; row.paid_at=datetime.now(timezone.utc); row.payment_reference=payload.payment_reference
     audit(db,user,membership.organization_id,"payroll.run.marked_paid","payroll_run",row.id,
           "Payment confirmation recorded; this endpoint does not initiate a bank or mobile-money transfer")
