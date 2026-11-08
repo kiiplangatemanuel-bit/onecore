@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 import uuid
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -179,7 +180,8 @@ def _storage_client():
 
 def _safe_attachment_name(value: str) -> str:
     name = Path(value.replace("\\", "/")).name.strip()
-    if not name or name in {".", ".."} or any(ord(char) < 32 for char in name):
+    name = re.sub(r"[^A-Za-z0-9._ -]", "_", name)
+    if not name or name in {".", ".."}:
         raise HTTPException(422, "Invalid attachment filename")
     return name[:255]
 
