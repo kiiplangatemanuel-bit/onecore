@@ -4,7 +4,7 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,7 +14,6 @@ from app.core.database import get_db
 from app.core.models import AuditEvent, EmailVerification, Membership, Organization, User
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn
 from app.core.security import hash_password
-from app.core.public_rate_limit import enforce_public_write_limit
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -54,8 +53,7 @@ def _send_verification_email(email: str, full_name: str, token: str):
 
 
 @router.post("/register-organization", status_code=202)
-def register_organization(payload: OrganizationRegistrationIn, request: Request, db: Session = Depends(get_db)):
-    enforce_public_write_limit(request, "organization-registration")
+def register_organization(payload: OrganizationRegistrationIn, db: Session = Depends(get_db)):
     email = str(payload.email).lower()
     if db.query(User).filter(func.lower(User.email) == email).first():
         raise HTTPException(409, "An account with this email already exists. Sign in or contact support.")
@@ -110,8 +108,7 @@ def register_organization(payload: OrganizationRegistrationIn, request: Request,
 
 
 @router.post("/verify-email")
-def verify_email(payload: EmailVerificationIn, request: Request, db: Session = Depends(get_db)):
-    enforce_public_write_limit(request, "email-verification")
+def verify_email(payload: EmailVerificationIn, db: Session = Depends(get_db)):
     verification = db.query(EmailVerification).filter_by(
         token_hash=_token_hash(payload.token)
     ).with_for_update().first()
