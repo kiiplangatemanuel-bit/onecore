@@ -66,7 +66,7 @@ def test_production_settings_require_secure_values():
         app_env="production",
         debug=False,
         secret_key="s" * 48,
-        database_url="postgresql+psycopg://user:pass@db.example/onecore",
+        database_url="postgresql+psycopg://user:pass@db.example/onecore?sslmode=require",
         cors_origins="https://app.example.com",
         trusted_hosts="api.example.com",
         force_https=True,
