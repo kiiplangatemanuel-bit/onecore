@@ -36,7 +36,7 @@ PERSONAL_TYPES = {
 }
 ALLOWED_TYPES = {
     "status": {"alert_subscription", "notification_preference", "incident"},
-    "developers": {"application", "api_key", "webhook", "sandbox_environment"},
+    "developers": {"application", "webhook", "sandbox_environment"},
     "docs": {"organization_guide"},
     "community": {"post", "comment", "group", "profile"},
     "trust": {"security_report"},
@@ -48,7 +48,6 @@ REQUIRED_FIELDS = {
     ("status", "alert_subscription"): {"service"},
     ("status", "notification_preference"): {"channel"},
     ("developers", "application"): {"name"},
-    ("developers", "api_key"): {"name", "scopes"},
     ("developers", "webhook"): {"name", "endpoint_url", "events"},
     ("developers", "sandbox_environment"): {"name"},
     ("docs", "organization_guide"): {"title", "body"},
@@ -76,7 +75,7 @@ WRITE_ROLES = {
     "partners": {"org_admin", "partner_manager", "manager"},
 }
 MANAGER_ONLY = {
-    ("developers", "application"), ("developers", "api_key"), ("developers", "webhook"),
+    ("developers", "application"), ("developers", "webhook"),
     ("developers", "sandbox_environment"), ("docs", "organization_guide"),
     ("community", "group"), ("events", "attendance"),
     ("partners", "partner_profile"), ("partners", "agreement"), ("partners", "partner_resource"),
@@ -88,7 +87,6 @@ STATUS_TRANSITIONS = {
     ("events", "booking"): {"booked", "cancelled", "attended"},
     ("partners", "lead"): {"new", "qualified", "contacted", "converted", "rejected"},
     ("partners", "referral"): {"submitted", "accepted", "rejected", "converted"},
-    ("developers", "api_key"): {"active", "revoked"},
     ("developers", "webhook"): {"active", "disabled"},
 }
 
@@ -120,6 +118,10 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 def _can_read(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if row.owner_user_id == user.id:
         return True
+    if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
+        return True
+    if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
+        return True
     if row.visibility != "organization":
         return False
     if (row.portal_key, row.record_type) in PERSONAL_TYPES or row.portal_key == "trust" or row.portal_key == "careers":
@@ -133,6 +135,10 @@ def _can_read(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
 
 def _can_manage(row: PortalWorkflowRecord, user: User, db: Session) -> bool:
     if row.owner_user_id == user.id:
+        return True
+    if row.portal_key == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
+        return True
+    if row.portal_key == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
         return True
     if row.organization_id is None or row.portal_key in {"trust", "careers"}:
         return False
@@ -190,12 +196,6 @@ def _validate_payload(portal: str, record_type: str, payload: dict):
         endpoint = str(payload.get("endpoint_url", ""))
         if not endpoint.startswith("https://") or len(endpoint) > 2048:
             raise HTTPException(422, "Webhook endpoints must use HTTPS")
-    if portal == "developers" and record_type == "api_key":
-        scopes = payload.get("scopes")
-        if not isinstance(scopes, list) or not scopes or len(scopes) > 50 or any(not isinstance(x, str) or len(x) > 80 for x in scopes):
-            raise HTTPException(422, "API key scopes must be a non-empty list of at most 50 scope names")
-        if "secret" in payload or "token" in payload or "api_key" in payload:
-            raise HTTPException(422, "Credential secrets cannot be stored in portal record payloads")
 
 
 @router.get("/{portal}/public/{record_type}")
@@ -223,7 +223,11 @@ def list_portal_records(
     if portal not in PORTALS or record_type not in ALLOWED_TYPES.get(portal, set()):
         raise HTTPException(404, "Portal resource not found")
     query = db.query(PortalWorkflowRecord).filter_by(portal_key=portal, record_type=record_type)
-    if (portal, record_type) in PERSONAL_TYPES or portal in {"trust", "careers"}:
+    if portal == "trust" and user.platform_role in {"root_superadmin", "security_admin"}:
+        pass
+    elif portal == "careers" and user.platform_role in {"root_superadmin", "recruitment_admin"}:
+        pass
+    elif (portal, record_type) in PERSONAL_TYPES or portal in {"trust", "careers"}:
         query = query.filter_by(owner_user_id=user.id)
     else:
         memberships = db.query(Membership.organization_id).filter_by(
@@ -273,7 +277,6 @@ def create_portal_record(
         ("events", "booking"): "booked",
         ("status", "alert_subscription"): "active",
         ("status", "notification_preference"): "active",
-        ("developers", "api_key"): "active",
         ("developers", "webhook"): "active",
     }.get((portal, record_type), "draft")
     row = PortalWorkflowRecord(
