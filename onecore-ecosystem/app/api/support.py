@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.core.models import (
 )
 from app.core.schemas import SupportMessageIn, SupportStatusIn, SupportTicketCreateIn
 from app.core.security import current_user, require_platform_admin
+from app.core.public_rate_limit import enforce_public_write_limit
 
 router = APIRouter(prefix="/api/v1/support", tags=["support"])
 
@@ -118,7 +119,8 @@ def _create_ticket(payload: SupportTicketCreateIn, db: Session,
 
 
 @router.post("/public/tickets", status_code=201)
-def create_public_ticket(payload: SupportTicketCreateIn, db: Session = Depends(get_db)):
+def create_public_ticket(payload: SupportTicketCreateIn, request: Request, db: Session = Depends(get_db)):
+    enforce_public_write_limit(request, "support-ticket-create")
     access_token = secrets.token_urlsafe(36)
     ticket = _create_ticket(payload, db, guest_token_hash=_hash_token(access_token))
     return {**_ticket_out(ticket, db, include_messages=True), "access_token": access_token}
@@ -127,19 +129,22 @@ def create_public_ticket(payload: SupportTicketCreateIn, db: Session = Depends(g
 @router.get("/public/tickets/{ticket_number}")
 def read_public_ticket(
     ticket_number: str,
+    request: Request,
     x_support_access_token: str = Header(default="", alias="X-Support-Access-Token"),
     db: Session = Depends(get_db),
 ):
+    enforce_public_write_limit(request, "support-ticket-read")
     ticket = _guest_ticket(db, ticket_number, x_support_access_token)
     return _ticket_out(ticket, db, include_messages=True)
 
 
 @router.post("/public/tickets/{ticket_number}/messages", status_code=201)
 def reply_public_ticket(
-    ticket_number: str, payload: SupportMessageIn,
+    ticket_number: str, payload: SupportMessageIn, request: Request,
     x_support_access_token: str = Header(default="", alias="X-Support-Access-Token"),
     db: Session = Depends(get_db),
 ):
+    enforce_public_write_limit(request, "support-ticket-reply")
     ticket = _guest_ticket(db, ticket_number, x_support_access_token)
     if ticket.status in {"resolved", "closed"}:
         raise HTTPException(409, "This ticket is closed. Open a new ticket for further assistance.")
