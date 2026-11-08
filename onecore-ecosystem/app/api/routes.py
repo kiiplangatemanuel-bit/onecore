@@ -2527,12 +2527,17 @@ def list_accounting_invoices(invoice_type:str|None=None,status:str|None=None,
         if not allowed:return []
         q=q.filter((AccountingInvoice.branch_id==None)|(AccountingInvoice.branch_id.in_(allowed)))
     rows=q.order_by(AccountingInvoice.due_date,AccountingInvoice.id.desc()).limit(limit).all()
+    approval_rows = db.query(AccountingInvoiceApproval.invoice_id, AccountingInvoiceApproval.status).filter(
+        AccountingInvoiceApproval.organization_id == membership.organization_id,
+        AccountingInvoiceApproval.invoice_id.in_([row.id for row in rows]),
+    ).all() if rows else []
+    approval_status = {invoice_id: status for invoice_id, status in approval_rows}
     return [{"id":x.id,"invoice_number":x.invoice_number,"invoice_type":x.invoice_type,
         "contact_id":x.contact_id,"supplier_id":x.supplier_id,"issue_date":x.issue_date.date().isoformat(),
         "due_date":x.due_date.date().isoformat(),"currency":x.currency,"subtotal":str(x.subtotal),
         "tax_total":str(x.tax_total),"total":str(x.total),"amount_paid":str(x.amount_paid),
         "balance":str(x.total-x.amount_paid),"status":x.status,"branch_id":x.branch_id,
-        "crm_sales_order_id":x.crm_sales_order_id} for x in rows]
+        "crm_sales_order_id":x.crm_sales_order_id,"approval_status":approval_status.get(x.id)} for x in rows]
 
 
 @router.post("/accounting/invoices/{invoice_id}/cancel")
