@@ -1594,3 +1594,28 @@ class PortalAuthorizationCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PortalResource(Base):
+    """Tenant- or user-owned records for public ecosystem portals.
+
+    Public publication is explicit and limited to allow-listed resource types.
+    Private rows are never returned by the public listing endpoint.
+    """
+    __tablename__ = "portal_resources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portal: Mapped[str] = mapped_column(String(24), index=True)
+    resource_type: Mapped[str] = mapped_column(String(48), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    summary: Mapped[str] = mapped_column(String(500), default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    visibility: Mapped[str] = mapped_column(String(12), default="private", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (
+        Index("ix_portal_resource_public", "portal", "resource_type", "visibility", "status"),
+        Index("ix_portal_resource_tenant_owner", "organization_id", "owner_user_id", "portal"),
+    )
