@@ -1041,7 +1041,7 @@ class ProcurementApprovalAction(Base):
     action: Mapped[str] = mapped_column(String(16))
     note: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("ix_procurement_approval_action_org_entity_level", "organization_id", "entity_type", "entity_id", "approval_level", unique=True),)
+    __table_args__ = (Index("ix_procurement_approval_action_org_entity_level", "organization_id", "entity_type", "entity_id", "approval_level", "approval_version", unique=True),)
 
 
 class ProcurementRFQ(Base):
