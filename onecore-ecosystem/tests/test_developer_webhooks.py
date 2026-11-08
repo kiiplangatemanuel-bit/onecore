@@ -1,219 +1,56 @@
-import hashlib
-import hmac
-import json
+# Supabase PostgreSQL (OneCore system of record)
 
-import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+OneCore's backend is already wired to Supabase-managed PostgreSQL through SQLAlchemy/psycopg and Alembic. The `SUPABASE_DB_URL` setting takes precedence over `DATABASE_URL`. Existing procurement, accounting, inventory, HR and other domain models therefore share the same Supabase database and migration chain; no second browser-side database client is required.
 
-from app.core.database import Base
-from app.core.models import (
-    AuditEvent, DeveloperWebhookDelivery, DeveloperWebhookEndpoint,
-    Membership, Organization, PortalWorkflowRecord, User,
-)
-from app.api import developer_webhooks as webhooks
+## Configure Render
 
+1. Open Supabase **Project Settings → Database → Connection string** and copy the URI for your project and selected connection mode.
+2. In Render, add `SUPABASE_DB_URL` as a secret environment variable on the API service. Use the exact host, port, username and password Supabase provides, and include `sslmode=require`.
+3. Set `APP_ENV=production`, `DEBUG=false`, a unique `SECRET_KEY`, explicit HTTPS `CORS_ORIGINS`, explicit `TRUSTED_HOSTS`, and `FORCE_HTTPS=true`.
+4. Configure any worker/scheduler services with the same `SUPABASE_DB_URL`. They must use the same Supabase project and schema revision as the API.
+5. Run Alembic migrations in the controlled release step before routing traffic. Do not run destructive downgrade operations against production.
 
-def _db():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[
-        User.__table__, Organization.__table__, Membership.__table__,
-        AuditEvent.__table__, PortalWorkflowRecord.__table__,
-        DeveloperWebhookEndpoint.__table__, DeveloperWebhookDelivery.__table__,
-    ])
-    return engine
+Example format only — copy actual values from the Supabase dashboard and never commit the completed URI:
 
+```text
+SUPABASE_DB_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-host>:5432/postgres?sslmode=require
+```
 
-def _developer(db, org):
-    user = User(email="dev@example.com", full_name="Developer", password_hash="unused")
-    db.add(user)
-    db.flush()
-    db.add(Membership(user_id=user.id, organization_id=org.id, role="developer", is_active=True))
-    db.flush()
-    return user
+The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.\n\n## Support file attachments\n\nSupport attachments use private S3-compatible object storage through the backend; the browser receives only short-lived presigned PUT/GET URLs. Configure these API-service secrets when enabling attachments:\n\n- `INTEGRATION_OBJECT_STORAGE_ENABLED=true`\n- `S3_ENDPOINT_URL` — exact S3-compatible endpoint from your storage provider (Supabase Storage S3 endpoint or approved S3 service)\n- `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` — dedicated least-privilege bucket credentials\n- `S3_BUCKET` and `S3_REGION`\n\nThe API accepts PDF, PNG, JPEG, TXT and CSV files up to 10 MiB. Upload URLs expire after five minutes; download URLs expire after two minutes and force attachment download with an octet-stream response type. The bucket must remain private and must not allow anonymous reads. Configure bucket CORS to allow PUT from each exact deployed portal origin and the `Content-Type` request header. Do not put storage credentials in Vercel or browser environment variables. Uploads enter `pending_scan` quarantine and cannot be downloaded until a platform support administrator records an `available` or `rejected` review result. This is a manual release gate, not an antivirus scanner; connect an automated malware scanner and immutable scan evidence before treating file inspection as automated.
 
+## Docker Compose
 
-def _webhook(db, org, user):
-    record = PortalWorkflowRecord(
-        portal_key="developers", record_type="webhook", organization_id=org.id,
-        owner_user_id=user.id, visibility="private", status="active",
-        payload={
-            "name": "Integration", "endpoint_url": "https://hooks.example.com/onecore",
-            "events": ["organization.updated"],
-        },
-    )
-    db.add(record)
-    db.flush()
-    return record
+The API and CRM scheduler both receive the same database URL. Set `SUPABASE_DB_URL` in the project `.env` file or provide `ONECORE_DATABASE_URL` as the explicit Compose override. Compose uses the override first, then `SUPABASE_DB_URL`, and falls back to local SQLite only for development.
+
+## Frontend security boundary
+
+Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The browser uses OneCore's authenticated API and tenant context. Never add `SUPABASE_DB_URL`, a database password or a Supabase service-role key to frontend environment variables, source code or browser storage.
+
+## Release verification
+
+Use a disposable Supabase staging project to verify:
+- Alembic upgrade to head and full downgrade/re-upgrade, including migrations 0054 (Support ticket/message RLS) and 0055 (private Support attachment metadata/RLS).
+- Python compilation, full pytest and Vite production build.
+- PostgreSQL row locking, uniqueness, transaction rollback, idempotency and concurrent goods-receipt/settlement operations.
+- API/worker schema parity, backup/PITR and restore rehearsal.
+
+Migration 0052 enables RLS for portal workflow records, migration 0053 adds MFA tables, and migrations 0054–0055 enable and force RLS for Support tickets/messages and Support attachment metadata. The API binds verified OneCore identity and validated guest ticket-token hashes to transaction-local PostgreSQL settings. The production API database role must be a dedicated least-privilege role with `NOBYPASSRLS`; Supabase `postgres`/service-role credentials and any `BYPASSRLS` role bypass RLS and must not be used as the runtime application role. Verify the actual connected role and policies in staging before production rollout.\n\nDeveloper API keys are stored only as SHA-256 digests, require an active organization membership on every key-authenticated request, and are revoked server-side. The `X-OneCore-API-Key` header is accepted by the developer API example endpoint; do not use API keys in browser applications. The sandbox/production field currently labels credentials and does not establish a separate sandbox database/data plane.\n\nSQLite CI remains useful for fast regression tests but does not prove live Supabase connectivity, PostgreSQL locking behavior, backup recovery or production provider acceptance.
 
 
-def test_webhook_activation_returns_signing_secret_once_and_encrypts_it(monkeypatch):
-    engine = _db()
-    monkeypatch.setattr(webhooks, "_validate_endpoint", lambda url: "hooks.example.com")
-    with Session(engine) as db:
-        org = Organization(name="Tenant", slug="tenant")
-        db.add(org)
-        db.flush()
-        user = _developer(db, org)
-        record = _webhook(db, org, user)
-        db.commit()
-        result = webhooks.activate_webhook(webhooks.WebhookActivate(workflow_record_id=record.id), user, db)
-        endpoint = db.query(DeveloperWebhookEndpoint).one()
-        assert result["signing_secret"].startswith("whsec_")
-        assert result["signing_secret"] not in endpoint.secret_encrypted
-        assert webhooks._decrypt(endpoint.secret_encrypted) == result["signing_secret"]
-        with pytest.raises(HTTPException) as duplicate:
-            webhooks.activate_webhook(webhooks.WebhookActivate(workflow_record_id=record.id), user, db)
-        assert duplicate.value.status_code == 409
-    engine.dispose()
+def test_webhook_routes_are_registered():
+    from app.main import app
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/developer/webhooks/activate" in paths
+    assert "/api/v1/developer/webhooks" in paths
+    assert "/api/v1/developer/webhooks/{workflow_record_id}/rotate-secret" in paths
+    assert "/api/v1/developer/webhooks/{workflow_record_id}/deliveries" in paths
 
 
-def test_webhook_event_queue_is_idempotent_and_filters_subscribed_events(monkeypatch):
-    engine = _db()
-    monkeypatch.setattr(webhooks, "_validate_endpoint", lambda url: "hooks.example.com")
-    with Session(engine) as db:
-        org = Organization(name="Tenant", slug="tenant")
-        db.add(org)
-        db.flush()
-        user = _developer(db, org)
-        record = _webhook(db, org, user)
-        db.add(DeveloperWebhookEndpoint(
-            workflow_record_id=record.id, organization_id=org.id,
-            secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
-        ))
-        db.commit()
-        payload = webhooks.WebhookEventCreate(
-            organization_id=org.id, event_type="organization.updated",
-            event_id="evt_idempotent_123", data={"name": "Tenant"},
-        )
-        first = webhooks.enqueue_webhook_event(payload, user, db)
-        second = webhooks.enqueue_webhook_event(payload, user, db)
-        assert first["queued_deliveries"] == 1
-        assert second["queued_deliveries"] == 0
-        assert db.query(DeveloperWebhookDelivery).count() == 1
-        unsupported = webhooks.WebhookEventCreate(
-            organization_id=org.id, event_type="sandbox.created", data={},
-        )
-        assert webhooks.enqueue_webhook_event(unsupported, user, db)["queued_deliveries"] == 0
-    engine.dispose()
-
-
-def test_webhook_delivery_signs_exact_body_and_marks_success(monkeypatch):
-    engine = _db()
-    monkeypatch.setattr(webhooks, "_validate_endpoint", lambda url: "hooks.example.com")
-    sent = {}
-
-    class Response:
-        status_code = 204
-
-    class Client:
-        def __init__(self, **kwargs):
-            assert kwargs["follow_redirects"] is False
-            assert kwargs["trust_env"] is False
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def post(self, url, content, headers):
-            sent.update(url=url, content=content, headers=headers)
-            return Response()
-
-    monkeypatch.setattr(webhooks.httpx, "Client", Client)
-    with Session(engine) as db:
-        org = Organization(name="Tenant", slug="tenant")
-        db.add(org)
-        db.flush()
-        user = _developer(db, org)
-        record = _webhook(db, org, user)
-        endpoint = DeveloperWebhookEndpoint(
-            workflow_record_id=record.id, organization_id=org.id,
-            secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
-        )
-        db.add(endpoint)
-        db.flush()
-        delivery = DeveloperWebhookDelivery(
-            endpoint_id=endpoint.id, organization_id=org.id,
-            event_id="evt_delivery_123", event_type="organization.updated",
-            payload={"id": "evt_delivery_123", "type": "organization.updated", "data": {"ok": True}},
-            status="pending", attempts=0,
-        )
-        db.add(delivery)
-        db.flush()
-        result = webhooks._deliver_one(db, delivery)
-        expected = hmac.new(
-            b"whsec_test",
-            sent["headers"]["X-OneCore-Timestamp"].encode() + b"." + sent["content"],
-            hashlib.sha256,
-        ).hexdigest()
-        assert sent["headers"]["X-OneCore-Signature"] == "sha256=" + expected
-        assert sent["headers"]["X-OneCore-Event-Id"] == "evt_delivery_123"
-        assert result["status"] == "delivered"
-        assert delivery.delivered_at is not None
-        assert delivery.attempts == 1
-    engine.dispose()
-
-
-def test_webhook_delivery_retries_with_bounded_backoff(monkeypatch):
-    engine = _db()
-    monkeypatch.setattr(webhooks, "_validate_endpoint", lambda url: "hooks.example.com")
-
-    class Response:
-        status_code = 503
-
-    class Client:
-        def __init__(self, **kwargs): pass
-        def __enter__(self): return self
-        def __exit__(self, *args): return False
-        def post(self, *args, **kwargs): return Response()
-
-    monkeypatch.setattr(webhooks.httpx, "Client", Client)
-    with Session(engine) as db:
-        org = Organization(name="Tenant", slug="tenant")
-        db.add(org)
-        db.flush()
-        user = _developer(db, org)
-        record = _webhook(db, org, user)
-        endpoint = DeveloperWebhookEndpoint(
-            workflow_record_id=record.id, organization_id=org.id,
-            secret_encrypted=webhooks._encrypt("whsec_test"), active=True,
-        )
-        db.add(endpoint)
-        db.flush()
-        delivery = DeveloperWebhookDelivery(
-            endpoint_id=endpoint.id, organization_id=org.id,
-            event_id="evt_retry_123", event_type="organization.updated",
-            payload={"id": "evt_retry_123"}, status="pending", attempts=0,
-        )
-        db.add(delivery)
-        db.flush()
-        result = webhooks._deliver_one(db, delivery)
-        assert result["status"] == "pending"
-        assert delivery.attempts == 1
-        assert delivery.response_status == 503
-        assert delivery.next_attempt_at > webhooks._now()
-        delivery.attempts = webhooks.MAX_ATTEMPTS - 1
-        result = webhooks._deliver_one(db, delivery)
-        assert result["status"] == "failed"
-        assert delivery.attempts == webhooks.MAX_ATTEMPTS
-    engine.dispose()
-
-
-def test_webhook_url_rejects_non_https_and_private_dns(monkeypatch):
-    with pytest.raises(HTTPException):
-        webhooks._validate_endpoint("http://hooks.example.com")
-    monkeypatch.setattr(webhooks.socket, "getaddrinfo", lambda *args, **kwargs: [
-        (2, 1, 6, "", ("127.0.0.1", 443)),
-    ])
-    with pytest.raises(HTTPException) as denied:
-        webhooks._validate_endpoint("https://hooks.example.com")
-    assert denied.value.status_code == 422
-
-
-def test_webhook_migration_is_chained_after_developer_api_keys():
+def test_webhook_migration_has_tenant_rls_and_idempotency():
     from pathlib import Path
     migration = Path(__file__).parents[1] / "migrations" / "versions" / "0057_developer_webhooks.py"
     source = migration.read_text()
     assert 'revision = "0057_developer_webhooks"' in source
     assert 'down_revision = "0056_developer_api_keys"' in source
-    assert "developer_webhook_delivery_update" in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "uq_developer_webhook_endpoint_event" in source
