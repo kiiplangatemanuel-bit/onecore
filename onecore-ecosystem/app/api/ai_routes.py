@@ -172,7 +172,7 @@ def ai_usage(membership=Depends(active_membership),user:User=Depends(current_use
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_permission(membership,"create")
-    session=_session_query(db,membership.organization_id,user.id,session_id)
+    session=_session_query(db,membership,user.id,session_id)
     rows=db.query(Record).filter_by(organization_id=membership.organization_id,module_key=MODULE,record_type="ai_message").all()
     for row in rows:
         if (row.data or {}).get("session_id")==session_id and (row.data or {}).get("user_id")==user.id: db.delete(row)
