@@ -16,6 +16,11 @@ ROLE_PERMISSIONS = {
     "teacher": {"read", "create", "update"},
     "guardian": {"read"},
     "school_admin": {"read", "create", "update", "delete", "manage"},
+    "hr_admin": {"read"},
+    "hr_manager": {"read"},
+    "payroll_manager": {"read"},
+    "payroll_approver": {"read"},
+    "payroll_payment": {"read"},
 }
 
 def require_permission(membership, action: str) -> None:
