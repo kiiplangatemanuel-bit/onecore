@@ -61,6 +61,8 @@ app.state.login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=settings.login_rate_limit_window_seconds,
 )
+app.state.public_write_rate_limiter = LoginRateLimiter(max_attempts=5, window_seconds=300)
+
 app.include_router(router)
 app.include_router(inventory_completion_router)
 app.include_router(pos_completion_router)
@@ -160,9 +162,17 @@ async def platform_security_middleware(request, call_next):
 
     client_ip = request.client.host if request.client else "unknown"
     login_request = request.url.path == "/api/v1/auth/login" and request.method == "POST"
+    public_write_request = request.method == "POST" and request.url.path in {
+        "/api/v1/auth/register-organization", "/api/v1/support/public/tickets"
+    }
     response = None
     if settings.force_https and request.url.scheme != "https":
         response = JSONResponse({"detail": "HTTPS is required", "request_id": request_id}, status_code=400)
+    elif public_write_request and not request.app.state.public_write_rate_limiter.allow(client_ip):
+        response = JSONResponse(
+            {"detail": "Too many public submissions. Try again later.", "request_id": request_id},
+            status_code=429, headers={"Retry-After": "300"},
+        )
     elif login_request and not request.app.state.login_rate_limiter.allow(client_ip):
         response = JSONResponse(
             {"detail": "Too many login attempts. Try again later.", "request_id": request_id},
