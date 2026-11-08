@@ -26,10 +26,9 @@ def upgrade():
         sa.Column("guest_token_hash", sa.String(64), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.UniqueConstraint("ticket_number", name="uq_support_ticket_number"),
         sa.UniqueConstraint("guest_token_hash", name="uq_support_ticket_guest_token_hash"),
     )
-    op.create_index("ix_support_tickets_ticket_number", "support_tickets", ["ticket_number"])
+    op.create_index("ix_support_tickets_ticket_number", "support_tickets", ["ticket_number"], unique=True)
     op.create_index("ix_support_tickets_status", "support_tickets", ["status"])
     op.create_index("ix_support_tickets_contact_email", "support_tickets", ["contact_email"])
     op.create_index("ix_support_tickets_organization_id", "support_tickets", ["organization_id"])
