@@ -791,7 +791,7 @@ def list_purchase_orders(membership=Depends(active_membership), db: Session = De
     rows = q.order_by(ProcurementPurchaseOrder.id.desc()).limit(limit).all()
     return [{"id": x.id, "order_number": x.order_number, "supplier_id": x.supplier_id,
              "branch_id": x.branch_id, "status": x.status, "currency": x.currency,
-             "notes": x.notes} for x in rows]
+             "amendment_version": x.amendment_version, "notes": x.notes} for x in rows]
 
 
 @router.post("/procurement/orders", status_code=201)
@@ -818,12 +818,22 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
     )
     db.add(order)
     db.flush()
+    initial_lines = []
     for line in payload.lines:
-        db.add(ProcurementPurchaseOrderLine(
+        row = ProcurementPurchaseOrderLine(
             organization_id=membership.organization_id, purchase_order_id=order.id,
             product_id=line.product_id, quantity_ordered=line.quantity,
             quantity_received=Decimal("0"), unit_cost=line.unit_cost
-        ))
+        )
+        db.add(row)
+        initial_lines.append({"product_id": line.product_id, "quantity_ordered": str(line.quantity),
+                              "quantity_received": "0", "unit_cost": str(line.unit_cost)})
+    db.flush()
+    db.add(ProcurementPurchaseOrderVersion(organization_id=membership.organization_id,
+        purchase_order_id=order.id, version_number=1, change_reason="Initial purchase order",
+        supporting_notes=payload.notes, snapshot={"order": {"supplier_id": order.supplier_id,
+        "branch_id": order.branch_id, "currency": order.currency, "notes": order.notes,
+        "status": order.status}, "lines": initial_lines}, changed_by=user.id))
     db.commit()
     db.refresh(order)
     audit(db, user.id, membership.organization_id, "procurement.order.created",
