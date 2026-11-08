@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app.api.hr_payroll import (
     LeaveIn, PayrollRunIn, RuleSetIn, _calculate, _progressive_tax, _tiered_contribution, require_payroll_action,
 )
-from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, HRAttendanceRecord
+from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip, PayrollAccountingMapping, PayrollAccountingLink, HRAttendanceRecord, PayrollPaymentBatch, PayrollPaymentBatchItem, PayrollBankStatementLine
 from app.main import app
 
 
@@ -266,3 +266,53 @@ def test_overtime_requires_explicit_employee_policy():
     with pytest.raises(HTTPException) as error:
         _calculate(employee, rules, date(2026, 1, 1), date(2026, 1, 31), overtime_minutes=30)
     assert error.value.status_code == 409
+
+
+
+def test_payroll_payment_batch_and_statement_models_are_tenant_scoped():
+    assert PayrollPaymentBatch.__tablename__ == "payroll_payment_batches"
+    assert PayrollPaymentBatchItem.__tablename__ == "payroll_payment_batch_items"
+    assert PayrollBankStatementLine.__tablename__ == "payroll_bank_statement_lines"
+    assert "uq_payroll_payment_batch_org_idempotency" in {
+        x.name for x in PayrollPaymentBatch.__table__.indexes
+    }
+    assert "ix_payroll_batch_item_org_reference" in {
+        x.name for x in PayrollPaymentBatchItem.__table__.indexes
+    }
+    assert "uq_payroll_bank_statement_fingerprint" in {
+        x.name for x in PayrollBankStatementLine.__table__.indexes
+    }
+
+
+def test_payroll_payment_batch_routes_are_registered():
+    paths = app.openapi()["paths"]
+    expected = {
+        "/api/v1/payroll/payment-batches",
+        "/api/v1/payroll/payment-batches/{batch_id}/submit",
+        "/api/v1/payroll/payment-batches/{batch_id}/approve",
+        "/api/v1/payroll/payment-batches/{batch_id}/settlements",
+        "/api/v1/payroll/bank-statements/import",
+        "/api/v1/payroll/bank-statements",
+        "/api/v1/payroll/bank-statements/{line_id}/resolve",
+    }
+    assert expected.issubset(paths)
+
+
+def test_payment_batch_payloads_reject_duplicates_and_invalid_amounts():
+    payload = PayrollPaymentBatchIn(
+        payroll_run_ids=[11, 12], idempotency_key="batch-november-2026"
+    )
+    assert payload.payroll_run_ids == [11, 12]
+    with pytest.raises(ValidationError):
+        PayrollPaymentBatchIn(
+            payroll_run_ids=[11, 11], idempotency_key="batch-november-2026"
+        )
+    with pytest.raises(ValidationError):
+        PayrollBatchSettlementIn(items=[
+            {"payroll_run_id": 11, "payment_reference": "BANK-001"},
+            {"payroll_run_id": 11, "payment_reference": "BANK-002"},
+        ])
+    with pytest.raises(ValidationError):
+        PayrollStatementImportIn(lines=[
+            {"transaction_date": "2026-11-08", "reference": "BANK-001", "amount": "-1"}
+        ])
