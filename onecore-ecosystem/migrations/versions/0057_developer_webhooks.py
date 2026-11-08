@@ -3,7 +3,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0057_developer_webhooks"
-down_revision = "0056_developer_api_keys"
+down_revision = "0057_supabase_auth_identity"
 branch_labels = None
 depends_on = None
 
