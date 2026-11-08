@@ -70,6 +70,7 @@ def upgrade():
             OR (
                 created_by_user_id IS NULL AND organization_id IS NULL
                 AND guest_token_hash IS NOT NULL
+                AND guest_token_hash = NULLIF(current_setting('app.support_guest_token_hash', true), '')
             )
         )
     """)
