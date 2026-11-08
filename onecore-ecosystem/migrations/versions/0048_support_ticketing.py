@@ -26,9 +26,9 @@ def upgrade():
         sa.Column("guest_token_hash", sa.String(64), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.UniqueConstraint("guest_token_hash", name="uq_support_ticket_guest_token_hash"),
     )
     op.create_index("ix_support_tickets_ticket_number", "support_tickets", ["ticket_number"], unique=True)
+    op.create_index("uq_support_ticket_guest_token_hash", "support_tickets", ["guest_token_hash"], unique=True)
     op.create_index("ix_support_tickets_status", "support_tickets", ["status"])
     op.create_index("ix_support_tickets_contact_email", "support_tickets", ["contact_email"])
     op.create_index("ix_support_tickets_organization_id", "support_tickets", ["organization_id"])
@@ -53,6 +53,7 @@ def downgrade():
     op.drop_index("ix_support_message_ticket_created", table_name="support_messages")
     op.drop_index("ix_support_messages_ticket_id", table_name="support_messages")
     op.drop_table("support_messages")
+    op.drop_index("uq_support_ticket_guest_token_hash", table_name="support_tickets")
     op.drop_index("ix_support_tickets_assigned_to_user_id", table_name="support_tickets")
     op.drop_index("ix_support_tickets_created_by_user_id", table_name="support_tickets")
     op.drop_index("ix_support_tickets_organization_id", table_name="support_tickets")
