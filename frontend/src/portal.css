@@ -22,3 +22,7 @@
 .portal-site button:focus-visible,.portal-site a:focus-visible,.portal-site input:focus-visible,.portal-site select:focus-visible,.portal-site textarea:focus-visible{outline:3px solid #75b9eb;outline-offset:2px}
 @media(max-width:900px){.portal-content-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:650px){.portal-content-grid{grid-template-columns:1fr}.portal-header nav{gap:14px}.portal-header nav a{white-space:nowrap}}
+
+.portal-faq-list details{border-top:1px solid #e5ebf2;padding:14px 0}
+.portal-faq-list summary{font-weight:750;color:#24425e;cursor:pointer}
+.portal-faq-list details p{color:#5e7186;line-height:1.65;margin-bottom:0}
