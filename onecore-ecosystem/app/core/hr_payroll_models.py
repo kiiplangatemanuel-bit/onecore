@@ -203,3 +203,28 @@ class PayrollAccountingLink(Base):
     reversal_reason: Mapped[str] = mapped_column(String(500), default="")
     __table_args__ = (Index("uq_payroll_accounting_reversal_journal", "reversal_journal_id", unique=True),
                       Index("uq_payroll_accounting_settlement_journal", "settlement_journal_id", unique=True))
+
+
+class PayrollAdjustment(Base):
+    """Immutable, independently approved one-off employee earning or deduction."""
+    __tablename__ = "payroll_adjustments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    adjustment_type: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    effective_date: Mapped[datetime] = mapped_column(Date)
+    description: Mapped[str] = mapped_column(String(160))
+    reason: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payroll_run_id: Mapped[int | None] = mapped_column(ForeignKey("payroll_runs.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("uq_payroll_adjustment_org_idempotency", "organization_id", "idempotency_key", unique=True),
+        Index("ix_payroll_adjustment_period_queue", "organization_id", "employee_id", "status", "effective_date"),
+    )
