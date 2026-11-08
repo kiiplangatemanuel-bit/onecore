@@ -210,3 +210,10 @@ Branch: `feature/procurement-settlement-governance`; migration `0033_procurement
 - Supplier delivery updates are supplier-reported events, not GPS/carrier tracking. Email delivery of remittance advice and automated supplier notifications require configured outbound messaging and are not claimed here.
 - Invoice discrepancy records support auditable exception resolution; they do not silently rewrite supplier invoices or override price/quantity/tax controls.
 - Run migration upgrade, downgrade/re-upgrade, Python compilation, the full pytest suite, PostgreSQL concurrency tests and end-to-end provider/bank UAT before merge/deployment. Do not regard the branch as verified until its latest CI checks pass.
+
+
+### Versioned purchase-order amendments
+- `POST /api/v1/procurement/orders/{order_id}/amend` records a pre-change snapshot, mandatory reason and supporting notes, then applies revised lines under an incremented amendment version. `GET /api/v1/procurement/orders/{order_id}/versions` returns immutable snapshots newest-first.
+- Amendments are manager/org-admin only, tenant- and branch-scoped, and row-locked. Every amendment returns the order to `draft`; approval actions are version-scoped so approvals from an earlier version cannot approve the changed order.
+- A line with received or invoiced quantities cannot be removed, change product, or be reduced below the greater of its received or invoiced quantity. Existing received/invoiced quantities remain on the line; new lines start at zero received.
+- Frontend amendment controls accept line JSON with existing `line_id` values to retain lines and omit only uncommitted lines to remove them; new lines omit `line_id`. Verify migration upgrade/downgrade and PostgreSQL concurrent receipt/amendment tests before production rollout.

@@ -44,6 +44,11 @@ def test_procurement_models_and_routes_are_registered():
     assert "/api/v1/procurement/orders" in paths
     assert "/api/v1/procurement/orders/{order_id}/approve" in paths
     assert "/api/v1/procurement/orders/{order_id}/cancel" in paths
+    assert "/api/v1/procurement/orders/{order_id}/amend" in paths
+    assert "/api/v1/procurement/orders/{order_id}/versions" in paths
+    assert "/api/v1/procurement/orders/{order_id}/lines" in paths
+    assert "/api/v1/procurement/orders/{order_id}/amend" in paths
+    assert "/api/v1/procurement/orders/{order_id}/versions" in paths
     assert "/api/v1/procurement/orders/{order_id}/receive" in paths
     assert "/api/v1/procurement/orders/{order_id}" in paths
     assert "/procurement" in paths
@@ -220,3 +225,11 @@ def test_accounted_supplier_invoice_quantities_remain_reserved_against_double_bi
     code = source.read_text(encoding="utf-8")
     assert 'ProcurementSupplierInvoice.status.in_(["pending_match","matched","accounted"])' in code
 
+
+
+def test_purchase_order_amendment_contract_validates_reason_and_lines():
+    from app.core.schemas import PurchaseOrderAmendmentIn
+    payload = PurchaseOrderAmendmentIn(reason="Supplier price correction", supporting_notes="Revised quote Q-17", lines=[{"line_id": 1, "product_id": 2, "quantity": "12", "unit_cost": "50.00"}])
+    assert payload.lines[0].quantity == Decimal("12")
+    with pytest.raises(ValidationError):
+        PurchaseOrderAmendmentIn(reason="  ", lines=[{"product_id": 2, "quantity": "1", "unit_cost": "5"}])

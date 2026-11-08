@@ -298,6 +298,7 @@ class ProcurementPurchaseOrder(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    amendment_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_procurement_po_org_number", "organization_id", "order_number", unique=True),)
 
@@ -312,6 +313,20 @@ class ProcurementPurchaseOrderLine(Base):
     quantity_received: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=Decimal("0"))
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ProcurementPurchaseOrderVersion(Base):
+    __tablename__ = "procurement_purchase_order_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_orders.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    change_reason: Mapped[str] = mapped_column(String(500))
+    supporting_notes: Mapped[str] = mapped_column(String(2000), default="")
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    changed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (Index("uq_procurement_po_version", "organization_id", "purchase_order_id", "version_number", unique=True),)
 
 
 class POSShift(Base):
@@ -1021,11 +1036,12 @@ class ProcurementApprovalAction(Base):
     entity_type: Mapped[str] = mapped_column(String(24))
     entity_id: Mapped[int] = mapped_column()
     approval_level: Mapped[int] = mapped_column()
+    approval_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     approver_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(16))
     note: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("ix_procurement_approval_action_org_entity_level", "organization_id", "entity_type", "entity_id", "approval_level", unique=True),)
+    __table_args__ = (Index("ix_procurement_approval_action_org_entity_level", "organization_id", "entity_type", "entity_id", "approval_level", "approval_version", unique=True),)
 
 
 class ProcurementRFQ(Base):

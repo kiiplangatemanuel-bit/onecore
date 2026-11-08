@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.inventory_models import InventoryWarehouse, InventoryReservation
 from app.core.pos_completion_models import POSCustomer, POSCustomerSale, POSLoyaltyEntry, POSLoyaltyRewardPolicy
-from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
-from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
+from app.core.models import User, Organization, Membership, Branch, Record, AuditEvent, InventoryProduct, InventoryStockMovement, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingInvoice, AccountingInvoiceLine, AccountingInvoicePayment, AccountingFiscalPeriod, AccountingBudget, AccountingBudgetLine, AccountingFixedAsset, AccountingDepreciationEntry, AccountingBankStatement, AccountingBankStatementLine, AccountingInvoiceApproval, AccountingCreditNote, AccountingCreditNoteLine, CRMContact, CRMLead, CRMActivity, CRMQuote, CRMQuoteLine, CRMSalesOrder, CRMSalesOrderLine, CRMContactConsent, CRMCampaign, CRMCampaignRecipient, CRMCampaignAttribution, ProcurementSupplier, ProcurementPurchaseOrder, ProcurementPurchaseOrderLine, ProcurementPurchaseOrderVersion, ProcurementRequisition, ProcurementRequisitionLine, ProcurementGoodsReceipt, ProcurementGoodsReceiptLine, ProcurementApprovalRule, ProcurementApprovalAction, ProcurementRFQ, ProcurementRFQLine, ProcurementRFQInvitation, ProcurementRFQQuote, ProcurementRFQQuoteLine, ProcurementSupplierInvoice, ProcurementSupplierInvoiceLine, ProcurementSupplierReturn, ProcurementSupplierReturnLine, POSShift, POSCashMovement, POSSale, POSSaleLine, POSPayment, POSReturn, POSReturnLine, POSRefund, SchoolClass, SchoolLearner, SchoolSubject, SchoolAssessment, SchoolMark, SchoolGradeBand, SchoolAttendance, SchoolEnrollmentHistory
+from app.core.schemas import OrganizationIn, RecordIn, BranchIn, InventoryProductIn, InventoryProductTaxRateIn, InventoryMovementIn, AccountingAccountIn, AccountingJournalIn, AccountingInvoiceIn, AccountingInvoicePaymentIn, AccountingFiscalPeriodIn, AccountingBudgetIn, AccountingFixedAssetIn, AccountingDepreciationIn, AccountingBankStatementIn, AccountingBankMatchIn, AccountingInvoiceApprovalDecisionIn, AccountingCreditNoteIn, CRMContactIn, CRMLeadIn, CRMLeadStageIn, CRMActivityIn, CRMQuoteIn, CRMQuoteConvertIn, CRMContactConsentIn, CRMCampaignIn, ProcurementSupplierIn, PurchaseOrderIn, PurchaseOrderAmendmentIn, PurchaseOrderReceiptIn, ProcurementRequisitionIn, ProcurementRequisitionReviewIn, GoodsReceiptIn, GoodsReceiptInspectionIn, RequisitionConvertIn, ProcurementApprovalRuleIn, ProcurementRFQIn, ProcurementRFQQuoteIn, SupplierInvoiceIn, SupplierReturnIn, POSShiftOpenIn, POSShiftCloseIn, POSCashMovementIn, POSShiftReviewIn, POSSaleSyncIn, POSReturnIn, SchoolClassIn, SchoolLearnerIn, SchoolSubjectIn, SchoolAssessmentIn, SchoolMarksIn, SchoolGradeBandIn, SchoolAttendanceIn, SchoolLearnerPlacementIn
 from app.core.security import current_user, verify_password, create_access_token, require_platform_admin
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
@@ -791,7 +791,7 @@ def list_purchase_orders(membership=Depends(active_membership), db: Session = De
     rows = q.order_by(ProcurementPurchaseOrder.id.desc()).limit(limit).all()
     return [{"id": x.id, "order_number": x.order_number, "supplier_id": x.supplier_id,
              "branch_id": x.branch_id, "status": x.status, "currency": x.currency,
-             "notes": x.notes} for x in rows]
+             "amendment_version": x.amendment_version, "notes": x.notes} for x in rows]
 
 
 @router.post("/procurement/orders", status_code=201)
@@ -818,17 +818,136 @@ def create_purchase_order(payload: PurchaseOrderIn, membership=Depends(active_me
     )
     db.add(order)
     db.flush()
+    initial_lines = []
+    initial_rows = []
     for line in payload.lines:
-        db.add(ProcurementPurchaseOrderLine(
+        row = ProcurementPurchaseOrderLine(
             organization_id=membership.organization_id, purchase_order_id=order.id,
             product_id=line.product_id, quantity_ordered=line.quantity,
             quantity_received=Decimal("0"), unit_cost=line.unit_cost
-        ))
+        )
+        db.add(row)
+        initial_rows.append(row)
+    db.flush()
+    initial_lines = [{"line_id": row.id, "product_id": row.product_id,
+        "quantity_ordered": str(row.quantity_ordered), "quantity_received": "0",
+        "unit_cost": str(row.unit_cost)} for row in initial_rows]
+    db.add(ProcurementPurchaseOrderVersion(organization_id=membership.organization_id,
+        purchase_order_id=order.id, version_number=1, change_reason="Initial purchase order",
+        supporting_notes=payload.notes, snapshot={"order": {"supplier_id": order.supplier_id,
+        "branch_id": order.branch_id, "currency": order.currency, "notes": order.notes,
+        "status": order.status}, "lines": initial_lines}, changed_by=user.id))
     db.commit()
     db.refresh(order)
     audit(db, user.id, membership.organization_id, "procurement.order.created",
           "purchase_order", order.id, order.order_number)
     return {"id": order.id, "order_number": order.order_number, "status": order.status}
+
+
+@router.get("/procurement/orders/{order_id}/lines")
+def list_purchase_order_lines(order_id: int, membership=Depends(active_membership),
+                              db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    order = db.query(ProcurementPurchaseOrder).filter_by(
+        id=order_id, organization_id=membership.organization_id).first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Purchase order not found")
+    rows = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).order_by(ProcurementPurchaseOrderLine.id).all()
+    return [{"line_id": x.id, "product_id": x.product_id,
+             "quantity": str(x.quantity_ordered), "quantity_received": str(x.quantity_received),
+             "unit_cost": str(x.unit_cost)} for x in rows]
+
+
+@router.get("/procurement/orders/{order_id}/versions")
+def list_purchase_order_versions(order_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    order = db.query(ProcurementPurchaseOrder).filter_by(id=order_id, organization_id=membership.organization_id).first()
+    if not order or not can_access_branch(membership, order.branch_id):
+        raise HTTPException(404, "Purchase order not found")
+    rows = db.query(ProcurementPurchaseOrderVersion).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id
+    ).order_by(ProcurementPurchaseOrderVersion.version_number.desc()).all()
+    return [{"id": x.id, "version_number": x.version_number, "reason": x.change_reason,
+             "supporting_notes": x.supporting_notes, "snapshot": x.snapshot,
+             "changed_by": x.changed_by, "created_at": x.created_at.isoformat()} for x in rows]
+
+
+@router.post("/procurement/orders/{order_id}/amend")
+def amend_purchase_order(order_id: int, payload: PurchaseOrderAmendmentIn,
+                         membership=Depends(active_membership), user: User = Depends(current_user),
+                         db: Session = Depends(get_db)):
+    if (membership.role or "").lower() not in {"org_admin", "manager"}:
+        raise HTTPException(403, "Only procurement managers or organization administrators can amend purchase orders")
+    q = db.query(ProcurementPurchaseOrder).filter_by(id=order_id, organization_id=membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        q = q.filter(ProcurementPurchaseOrder.branch_id.in_(allowed)) if allowed else q.filter(ProcurementPurchaseOrder.id == -1)
+    order = q.with_for_update().first()
+    if not order:
+        raise HTTPException(404, "Purchase order not found")
+    if order.status not in {"draft", "approved", "partially_received"}:
+        raise HTTPException(409, "This purchase order status cannot be amended")
+    current = db.query(ProcurementPurchaseOrderLine).filter_by(
+        organization_id=membership.organization_id, purchase_order_id=order.id).with_for_update().all()
+    by_id = {x.id: x for x in current}
+    ids = [x.line_id for x in payload.lines if x.line_id is not None]
+    if len(ids) != len(set(ids)) or any(x not in by_id for x in ids):
+        raise HTTPException(422, "Amendment line IDs must be unique and belong to this purchase order")
+    receipt_rows = db.query(ProcurementGoodsReceiptLine.purchase_order_line_id,
+        func.coalesce(func.sum(ProcurementGoodsReceiptLine.quantity_received), 0)).filter(
+        ProcurementGoodsReceiptLine.organization_id == membership.organization_id,
+        ProcurementGoodsReceiptLine.purchase_order_line_id.in_(list(by_id) or [-1])
+    ).group_by(ProcurementGoodsReceiptLine.purchase_order_line_id).all()
+    received_or_pending = {k: Decimal(str(v)) for k, v in receipt_rows}
+    invoice_rows = db.query(ProcurementSupplierInvoiceLine.purchase_order_line_id,
+        func.coalesce(func.sum(ProcurementSupplierInvoiceLine.quantity), 0)).filter(
+        ProcurementSupplierInvoiceLine.organization_id == membership.organization_id,
+        ProcurementSupplierInvoiceLine.purchase_order_line_id.in_(list(by_id) or [-1])
+    ).group_by(ProcurementSupplierInvoiceLine.purchase_order_line_id).all()
+    invoiced = {k: Decimal(str(v)) for k, v in invoice_rows}
+    requested = {x.line_id: x for x in payload.lines if x.line_id is not None}
+    for line_id, old in by_id.items():
+        committed = max(Decimal(old.quantity_received), received_or_pending.get(line_id, Decimal("0")), invoiced.get(line_id, Decimal("0")))
+        new = requested.get(line_id)
+        if committed > 0 and (new is None or new.product_id != old.product_id or new.quantity < committed):
+            raise HTTPException(409, f"Line {line_id} is locked by received/invoiced quantity {committed}")
+    product_ids = {x.product_id for x in payload.lines}
+    products = db.query(InventoryProduct).filter(InventoryProduct.organization_id == membership.organization_id,
+        InventoryProduct.is_active == True, InventoryProduct.id.in_(product_ids)).all()
+    if {x.id for x in products} != product_ids:
+        raise HTTPException(404, "One or more products were not found")
+    snapshot = {"order": {"supplier_id": order.supplier_id, "branch_id": order.branch_id,
+        "currency": order.currency, "notes": order.notes, "status": order.status},
+        "lines": [{"line_id": x.id, "product_id": x.product_id, "quantity_ordered": str(x.quantity_ordered),
+            "quantity_received": str(x.quantity_received), "unit_cost": str(x.unit_cost)} for x in current]}
+    version = int(order.amendment_version or 1) + 1
+    db.add(ProcurementPurchaseOrderVersion(organization_id=membership.organization_id,
+        purchase_order_id=order.id, version_number=version, change_reason=payload.reason,
+        supporting_notes=payload.supporting_notes, snapshot=snapshot, changed_by=user.id))
+    for line_id, old in by_id.items():
+        if line_id not in requested:
+            db.delete(old)
+    for item in payload.lines:
+        if item.line_id is not None:
+            old = by_id[item.line_id]
+            old.product_id = item.product_id
+            old.quantity_ordered = item.quantity
+            old.unit_cost = item.unit_cost
+        else:
+            db.add(ProcurementPurchaseOrderLine(organization_id=membership.organization_id,
+                purchase_order_id=order.id, product_id=item.product_id, quantity_ordered=item.quantity,
+                quantity_received=Decimal("0"), unit_cost=item.unit_cost))
+    order.amendment_version = version
+    order.status = "draft"
+    order.approved_by = None
+    order.approved_at = None
+    db.flush()
+    audit(db, user.id, membership.organization_id, "procurement.order.amended", "purchase_order",
+        order.id, f"version:{version};reason:{payload.reason};notes:{payload.supporting_notes[:500]}")
+    return {"id": order.id, "order_number": order.order_number, "status": order.status,
+            "amendment_version": version, "reapproval_required": True}
 
 
 @router.post("/procurement/orders/{order_id}/cancel")
@@ -886,20 +1005,20 @@ def approve_purchase_order(order_id: int, membership=Depends(active_membership),
         next_rule=None
         for rule in required:
             prior=db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
-                entity_type="purchase_order",entity_id=order.id,approval_level=rule.approval_level).first()
+                entity_type="purchase_order",entity_id=order.id,approval_level=rule.approval_level,approval_version=order.amendment_version).first()
             if not prior:next_rule=rule;break
         if next_rule is None:raise HTTPException(409,"All configured approval levels have already acted")
         if (membership.role or "").lower()!=next_rule.approver_role:
             raise HTTPException(403,"This approval level requires role: "+next_rule.approver_role)
         if db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
-            entity_type="purchase_order",entity_id=order.id,approver_user_id=user.id).first():
+            entity_type="purchase_order",entity_id=order.id,approver_user_id=user.id,approval_version=order.amendment_version).first():
             raise HTTPException(409,"A user may approve only one level of the same purchase order")
         action=ProcurementApprovalAction(organization_id=membership.organization_id,entity_type="purchase_order",
-            entity_id=order.id,approval_level=next_rule.approval_level,approver_user_id=user.id,
+            entity_id=order.id,approval_level=next_rule.approval_level,approval_version=order.amendment_version,approver_user_id=user.id,
             action="approved",note="")
         db.add(action);db.flush()
         completed=db.query(ProcurementApprovalAction).filter_by(organization_id=membership.organization_id,
-            entity_type="purchase_order",entity_id=order.id,action="approved").count()
+            entity_type="purchase_order",entity_id=order.id,action="approved",approval_version=order.amendment_version).count()
         if completed==len(required):
             order.status="approved";order.approved_by=user.id;order.approved_at=datetime.now(timezone.utc)
         audit(db,user.id,membership.organization_id,"procurement.order.approval_level_approved",

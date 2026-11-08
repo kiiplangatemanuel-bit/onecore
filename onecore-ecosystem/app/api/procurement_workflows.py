@@ -690,7 +690,7 @@ def escalate_purchase_order_approval(order_id: int, payload: ApprovalEscalationI
     ).order_by(ProcurementApprovalRule.approval_level).all()
     rules = [x for x in rules if x.maximum_amount is None or amount <= x.maximum_amount]
     actions = db.query(ProcurementApprovalAction).filter_by(
-        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
+        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id, approval_version=order.amendment_version
     ).all()
     approved = {x.approval_level for x in actions if x.action == "approved"}
     next_rule = next((x for x in rules if x.approval_level not in approved), None)
@@ -766,7 +766,8 @@ def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
     if delegation.principal_user_id == order.created_by:
         raise HTTPException(403, "The purchase-order creator cannot delegate approval of their own order")
     actions = db.query(ProcurementApprovalAction).filter_by(
-        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id
+        organization_id=membership.organization_id, entity_type="purchase_order", entity_id=order.id,
+        approval_version=order.amendment_version
     ).all()
     action_levels = {x.approval_level for x in actions if x.action == "approved"}
     next_rule = next((x for x in rules if x.approval_level not in action_levels), None)
@@ -777,13 +778,14 @@ def approve_purchase_order_as_delegate(order_id: int, delegation_id: int,
         raise HTTPException(403, "Delegation principal is not eligible for the current approval level")
     if db.query(ProcurementApprovalAction).filter_by(
         organization_id=membership.organization_id, entity_type="purchase_order",
-        entity_id=order.id, approval_level=next_rule.approval_level
+        entity_id=order.id, approval_level=next_rule.approval_level,
+        approval_version=order.amendment_version
     ).first():
         raise HTTPException(409, "This approval level has already been decided")
     db.add(ProcurementApprovalAction(
         organization_id=membership.organization_id, entity_type="purchase_order",
         entity_id=order.id, approval_level=next_rule.approval_level,
-        approver_user_id=user.id, action="approved", note=f"Delegated for user {delegation.principal_user_id}",
+        approval_version=order.amendment_version, approver_user_id=user.id, action="approved", note=f"Delegated for user {delegation.principal_user_id}",
     ))
     approved_levels = action_levels | {next_rule.approval_level}
     if all(rule.approval_level in approved_levels for rule in rules):
