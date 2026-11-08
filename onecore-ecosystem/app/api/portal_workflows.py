@@ -92,16 +92,15 @@ def _membership(db: Session, user: User, organization_id: int) -> Membership:
 
 
 def _visible_resource(db: Session, user: User, resource: PortalResource) -> Membership | None:
-    if resource.owner_user_id == user.id:
-        return None
-    if resource.organization_id is None:
+    # Re-check membership even for the creator: revocation must revoke tenant access.
+    if resource.organization_id is not None:
+        membership = _membership(db, user, resource.organization_id)
+        if not _role_allowed(resource, user, membership):
+            raise HTTPException(404, "Portal resource not found")
+        return membership
+    if resource.owner_user_id != user.id:
         raise HTTPException(404, "Portal resource not found")
-    membership = _membership(db, user, resource.organization_id)
-    if resource.resource_type in SENSITIVE_TYPES and membership.role not in {
-        "org_admin", "security_admin", "compliance_officer"
-    }:
-        raise HTTPException(404, "Portal resource not found")
-    return membership
+    return None
 
 
 def _role_allowed(row: PortalResource, user: User, membership: Membership | None) -> bool:
@@ -182,7 +181,7 @@ def list_private_resources(
     rows = query.order_by(PortalResource.updated_at.desc()).limit(limit).all()
     result = []
     for row in rows:
-        if row.resource_type in SENSITIVE_TYPES and row.organization_id is not None:
+        if row.organization_id is not None:
             membership = next((m for m in memberships if m.organization_id == row.organization_id), None)
             if not _role_allowed(row, user, membership):
                 continue
