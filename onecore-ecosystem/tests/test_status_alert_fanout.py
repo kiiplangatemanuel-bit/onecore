@@ -58,6 +58,7 @@ class _UserQuery(_Query):
 def test_public_status_incident_fanout_targets_only_matching_active_subscribers():
     subscriptions = [
         SimpleNamespace(owner_user_id=1, payload={"service": "API"}),
+        SimpleNamespace(owner_user_id=1, payload={"service": "all"}),
         SimpleNamespace(owner_user_id=2, payload={"service": "all"}),
         SimpleNamespace(owner_user_id=3, payload={"service": "Payments"}),
     ]
