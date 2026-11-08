@@ -962,7 +962,7 @@ CI evidence is not a production deployment or security certification.
 
 ## Account MFA / TOTP foundation (8 November 2026)
 
-Implemented in PR #102 and rebased onto main commit cb6973f9be6ab7b1e2135e4984c943240b608fa2. The migration is 0053_user_mfa after 0052_portal_workflow_records. Rebased-head CI run 42473780009 passed.
+Implemented in PR #102 and squash-merged into main as commit dd4276653ba52cc837fa3fc8e79de5ae5a2aad78. The migration is 0053_user_mfa after 0052_portal_workflow_records. The PR-head and post-merge main CI runs both passed.
 
 - Account-level RFC 6238 TOTP enrollment, confirmation and disablement. TOTP
   seeds are encrypted at rest with a separately configured Fernet key; no
@@ -980,7 +980,7 @@ Implemented in PR #102 and rebased onto main commit cb6973f9be6ab7b1e2135e4984c9
 - Added tests and operator guidance in docs/IDENTITY_MFA.md and
   docs/IDENTITY_INVITATIONS.md.
 
-CI run [42473780009](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42473780009) passed dependency audit, migration upgrade and downgrade/re-upgrade, Python compilation, pytest, the main frontend build and all ten independent portal builds. The subsequent tracker-update commit also passed the same workflow in [run 42473920144](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42473920144).
+PR-head CI [run 42474040729](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42474040729) passed **264 tests, 5 warnings**, dependency audit, migration upgrade and downgrade/re-upgrade, Python compilation, the main frontend build and all ten independent portal builds. Post-merge main CI [run 42474601078](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42474601078) also passed **264 tests, 5 warnings** and all the same jobs on merge commit `dd4276653ba52cc837fa3fc8e79de5ae5a2aad78`. Vercel status checks still report the account's `build-rate-limit` quota; these source checks do not establish a successful production deployment.
 
 The key must be supplied through MFA_ENCRYPTION_KEY in the deployment secret
 manager before users can enroll. Key custody/rotation, MFA policy enforcement,
