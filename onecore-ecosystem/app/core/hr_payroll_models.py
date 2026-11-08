@@ -245,7 +245,7 @@ class PayrollPaymentBatchItem(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
-        Index("uq_payroll_batch_item_org_reference", "organization_id", "payment_reference", unique=True),
+        Index("ix_payroll_batch_item_org_reference", "organization_id", "payment_reference"),
     )
 
 
