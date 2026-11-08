@@ -98,7 +98,7 @@ def test_developer_api_key_authentication_records_usage_and_rejects_revoked_keys
         })
         key = current_developer_api_key(request, created["secret"], db)
         response = developer_api_organization(request, key, db)
-        assert response["organization"]["id"] == org.id
+        assert response["organization"]["id"] == "sandbox-organization"
         assert db.query(DeveloperApiKeyUsage).filter_by(api_key_id=key.id).count() == 1
         revoked = revoke_developer_api_key(key.id, developer, db)
         assert revoked["revoked"] is True
@@ -191,4 +191,85 @@ def test_developer_api_key_stops_working_when_issuing_user_is_deactivated():
         with pytest.raises(HTTPException) as denied:
             current_developer_api_key(request, created["secret"], db)
         assert denied.value.status_code == 401
+    engine.dispose()
+
+
+
+def _api_request():
+    return Request({
+        "type": "http", "method": "GET", "path": "/api/v1/developer/v1/organization",
+        "headers": [], "query_string": b"", "scheme": "https",
+        "server": ("api.example.com", 443), "client": ("127.0.0.1", 1234),
+    })
+
+
+def test_sandbox_api_key_reads_only_synthetic_organization_data():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(
+            name="CONFIDENTIAL Production Tenant", slug="private-production-tenant",
+            industry="healthcare", country="KE", currency="KES",
+        )
+        db.add(org)
+        db.flush()
+        developer = _user(db, org, "sandbox-dev@example.com")
+        db.commit()
+        created = create_developer_api_key(
+            DeveloperApiKeyCreate(
+                organization_id=org.id, name="Sandbox integration",
+                environment="sandbox", scopes=["organization:read"],
+            ), developer, db,
+        )
+        request = _api_request()
+        key = current_developer_api_key(request, created["secret"], db)
+        response = developer_api_organization(request, key, db)
+        assert response["organization"]["id"] == "sandbox-organization"
+        assert response["organization"]["name"] == "OneCore Sandbox Organization"
+        assert response["organization"]["slug"] == "onecore-sandbox"
+        assert "CONFIDENTIAL" not in str(response)
+        assert response["api_key"]["data_mode"] == "synthetic"
+    engine.dispose()
+
+
+def test_production_api_key_reads_only_its_authorized_organization():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(
+            name="Production Tenant", slug="production-tenant",
+            industry="retail", country="KE", currency="KES",
+        )
+        db.add(org)
+        db.flush()
+        developer = _user(db, org, "production-admin@example.com", role="org_admin")
+        db.commit()
+        created = create_developer_api_key(
+            DeveloperApiKeyCreate(
+                organization_id=org.id, name="Production integration",
+                environment="production", scopes=["organization:read"],
+            ), developer, db,
+        )
+        request = _api_request()
+        key = current_developer_api_key(request, created["secret"], db)
+        response = developer_api_organization(request, key, db)
+        assert response["organization"]["id"] == org.id
+        assert response["organization"]["name"] == "Production Tenant"
+        assert response["api_key"]["data_mode"] == "live"
+    engine.dispose()
+
+
+def test_developer_role_cannot_issue_production_api_keys():
+    engine = _db()
+    with Session(engine) as db:
+        org = Organization(name="Tenant", slug="tenant")
+        db.add(org)
+        db.flush()
+        developer = _user(db, org, "developer-only@example.com", role="developer")
+        with pytest.raises(HTTPException) as denied:
+            create_developer_api_key(
+                DeveloperApiKeyCreate(
+                    organization_id=org.id, name="Production credential",
+                    environment="production", scopes=["organization:read"],
+                ), developer, db,
+            )
+        assert denied.value.status_code == 403
     engine.dispose()

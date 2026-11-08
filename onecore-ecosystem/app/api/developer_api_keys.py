@@ -70,7 +70,9 @@ def create_developer_api_key(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    _membership(db, user, payload.organization_id)
+    membership = _membership(db, user, payload.organization_id)
+    if payload.environment == "production" and membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator may issue production API keys")
     invalid = sorted(set(payload.scopes) - ALLOWED_SCOPES)
     if invalid:
         raise HTTPException(422, {"message": "Unsupported API key scopes", "scopes": invalid})
@@ -208,9 +210,25 @@ def developer_api_organization(
 ):
     if "organization:read" not in (key.scopes or []):
         raise HTTPException(403, "API key does not grant organization:read")
-    organization = db.query(Organization).filter_by(id=key.organization_id, is_active=True).first()
-    if not organization:
-        raise HTTPException(404, "Organization not found")
+    if key.environment == "sandbox":
+        # Sandbox credentials must never read or serialize the real tenant record.
+        organization_data = {
+            "id": "sandbox-organization",
+            "name": "OneCore Sandbox Organization",
+            "slug": "onecore-sandbox",
+            "industry": "sandbox",
+            "country": "KE",
+            "currency": "KES",
+        }
+    else:
+        organization = db.query(Organization).filter_by(id=key.organization_id, is_active=True).first()
+        if not organization:
+            raise HTTPException(404, "Organization not found")
+        organization_data = {
+            "id": organization.id, "name": organization.name,
+            "slug": organization.slug, "industry": organization.industry,
+            "country": organization.country, "currency": organization.currency,
+        }
     db.add(DeveloperApiKeyUsage(
         api_key_id=key.id, organization_id=key.organization_id,
         endpoint=request.url.path[:255], method=request.method,
@@ -219,10 +237,10 @@ def developer_api_organization(
     key.last_used_at = _now()
     db.commit()
     return {
-        "organization": {
-            "id": organization.id, "name": organization.name,
-            "slug": organization.slug, "industry": organization.industry,
-            "country": organization.country, "currency": organization.currency,
+        "organization": organization_data,
+        "api_key": {
+            "prefix": key.key_prefix,
+            "environment": key.environment,
+            "data_mode": "synthetic" if key.environment == "sandbox" else "live",
         },
-        "api_key": {"prefix": key.key_prefix, "environment": key.environment},
     }
