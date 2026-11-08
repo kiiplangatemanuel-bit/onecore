@@ -1479,7 +1479,8 @@ class CRMCampaignAttribution(Base):
     idempotency_key: Mapped[str] = mapped_column(String(100))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    __table_args__ = (Index("ix_crm_attribution_org_idempotency", "organization_id", "idempotency_key", unique=True),\n                      Index("uq_crm_attribution_org_invoice", "organization_id", "accounting_invoice_id", unique=True))
+    __table_args__ = (Index("ix_crm_attribution_org_idempotency", "organization_id", "idempotency_key", unique=True),
+                      Index("uq_crm_attribution_org_invoice", "organization_id", "accounting_invoice_id", unique=True))
 
 class CRMWorkerHeartbeat(Base):
     __tablename__ = "crm_worker_heartbeats"
