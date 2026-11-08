@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.authorization import require_permission, branch_scope_ids, can_access_branch
 from app.core.database import get_db
 from app.core.hr_payroll_models import HREmployee, HRLeaveRequest, PayrollRuleSet, PayrollRun, PayrollPayslip
-from app.core.models import AuditEvent, Branch, User
+from app.core.models import AuditEvent, Branch, Organization, User
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 
@@ -427,6 +427,7 @@ def list_rule_sets(membership=Depends(active_membership), db: Session=Depends(ge
 def create_rule_set(payload: RuleSetIn, membership=Depends(active_membership),
                     user: User=Depends(current_user), db: Session=Depends(get_db)):
     require_payroll_action(membership,"prepare")
+    db.query(Organization.id).filter_by(id=membership.organization_id).with_for_update().first()
     version=(db.query(PayrollRuleSet.version).filter_by(organization_id=membership.organization_id)
              .order_by(PayrollRuleSet.version.desc()).first())
     rules={"paye_bands":[{k:str(v) if v is not None else None for k,v in b.items()} for b in payload.paye_bands],
@@ -458,6 +459,7 @@ def submit_rule_set(rule_set_id:int,membership=Depends(active_membership),user:U
 @router.post("/payroll/rule-sets/{rule_set_id}/approve")
 def approve_rule_set(rule_set_id:int,membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_payroll_action(membership,"approve")
+    db.query(Organization.id).filter_by(id=membership.organization_id).with_for_update().first()
     row=db.query(PayrollRuleSet).filter_by(id=rule_set_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Payroll rule set not found")
     if row.status!="pending_approval": raise HTTPException(409,"Rule set is not awaiting approval")
@@ -496,6 +498,7 @@ def list_payroll_runs(membership=Depends(active_membership),db:Session=Depends(g
 def create_payroll_run(payload:PayrollRunIn,membership=Depends(active_membership),
                        user:User=Depends(current_user),db:Session=Depends(get_db)):
     require_payroll_action(membership,"prepare")
+    db.query(Organization.id).filter_by(id=membership.organization_id).with_for_update().first()
     branch_or_404(db,membership,payload.branch_id)
     if payload.branch_id is None and branch_scope_ids(membership) is not None:
         raise HTTPException(422,"Select a branch for payroll when your membership has a restricted branch scope")
