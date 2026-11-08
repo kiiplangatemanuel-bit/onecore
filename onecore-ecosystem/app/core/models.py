@@ -543,7 +543,7 @@ class AccountingInvoice(Base):
     invoice_type: Mapped[str] = mapped_column(String(12))  # receivable or payable
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("crm_contacts.id"), nullable=True, index=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("procurement_suppliers.id"), nullable=True, index=True)
-    crm_sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True, index=True)
+    crm_sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_sales_orders.id"), nullable=True)
     invoice_number: Mapped[str] = mapped_column(String(60))
     issue_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
