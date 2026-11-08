@@ -360,6 +360,14 @@ def create_portal_record(
     db.add(row)
     db.flush()
     _audit(db, user, row, f"portal.{portal}.{record_type}.created")
+    if portal == "developers" and record_type in {"application", "sandbox_environment"}:
+        from app.api.developer_webhooks import queue_organization_webhook_event
+        event_type = "application.created" if record_type == "application" else "sandbox.created"
+        queue_organization_webhook_event(
+            db, row.organization_id, event_type,
+            {"record_id": row.id, "name": (row.payload or {}).get("name", ""), "status": row.status},
+            event_id=f"evt_{record_type}_{row.id}_created",
+        )
     db.commit()
     db.refresh(row)
     return _out(row)
@@ -404,6 +412,14 @@ def update_portal_record(
         row.status = payload.status
     row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, row, f"portal.{portal}.{row.record_type}.updated")
+    if portal == "developers" and row.record_type in {"application", "sandbox_environment"}:
+        from app.api.developer_webhooks import queue_organization_webhook_event
+        event_type = "application.updated" if row.record_type == "application" else "sandbox.updated"
+        queue_organization_webhook_event(
+            db, row.organization_id, event_type,
+            {"record_id": row.id, "name": (row.payload or {}).get("name", ""), "status": row.status},
+            event_id=f"evt_{row.record_type}_{row.id}_{int(row.updated_at.timestamp())}_updated",
+        )
     db.commit()
     db.refresh(row)
     return _out(row)
