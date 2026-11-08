@@ -133,14 +133,11 @@ function cartTotals(){
    if(loyaltyDiscount<=0)warning='Selected points are worth less than one cent.';
    else if(loyaltyDiscount>cap)warning='Redemption exceeds the configured '+loyaltyPolicy.max_redemption_percent+'% pre-tax sale limit (maximum '+cap.toFixed(2)+' '+(loyaltyPolicy.currency||'KES')+').';
    else{
-    let remaining=loyaltyDiscount;
-    lines.forEach((line,index)=>{
-     let share=index===lines.length-1?remaining:Math.min(Math.floor((loyaltyDiscount*line.base/baseTotal)*100+1e-8)/100,remaining,line.base);
-     share=Math.round(share*100)/100;remaining=Math.round((remaining-share)*100)/100;
-     line.loyalty=share;const newBase=Math.round((line.base-share)*100)/100;
-     line.tax=Math.round(newBase*line.rate)/100;line.total=Math.round((newBase+line.tax)*100)/100;
-    });
-    tax=lines.reduce((n,x)=>n+x.tax,0);total=lines.reduce((n,x)=>n+x.total,0);
+    const shares=lines.map(line=>Math.min(Math.floor((loyaltyDiscount*line.base/baseTotal)*100+1e-8)/100,line.base));
+    let remaining=Math.round((loyaltyDiscount-shares.reduce((n,x)=>n+x,0))*100)/100;
+    for(let index=shares.length-1;index>=0;index--){const capacity=Math.round((lines[index].base-shares[index])*100)/100,extra=Math.min(remaining,capacity);shares[index]=Math.round((shares[index]+extra)*100)/100;remaining=Math.round((remaining-extra)*100)/100;if(remaining<=0)break;}
+    if(remaining>0)warning='Loyalty discount cannot be allocated safely across these sale lines.';
+    else{lines.forEach((line,index)=>{line.loyalty=shares[index];const newBase=Math.round((line.base-line.loyalty)*100)/100;line.tax=Math.round(newBase*line.rate)/100;line.total=Math.round((newBase+line.tax)*100)/100;});tax=lines.reduce((n,x)=>n+x.tax,0);total=lines.reduce((n,x)=>n+x.total,0);}
    }
   }
  }
