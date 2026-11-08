@@ -66,6 +66,7 @@ def test_support_routes_are_registered():
     assert "/api/v1/support/tickets/{ticket_number}/attachments" in paths
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/complete" in paths
     assert "/api/v1/support/tickets/{ticket_number}/attachments/{attachment_id}/download" in paths
+    assert "/api/v1/support/admin/tickets/{ticket_number}/attachments/{attachment_id}/scan" in paths
 
 
 def test_support_organization_ticket_owner_loses_access_when_membership_is_revoked():
@@ -132,3 +133,15 @@ def test_support_attachment_metadata_constraints_and_safe_filename():
         )
     with pytest.raises(Exception):
         _safe_attachment_name("../")
+
+
+def test_support_attachment_migration_follows_support_rls_and_quarantines_metadata():
+    from pathlib import Path
+
+    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0054_support_attachments.py"
+    source = migration.read_text()
+    assert 'revision = "0054_support_attachments"' in source
+    assert 'down_revision = "0053_support_row_level_security"' in source
+    assert "support_attachment_select" in source
+    assert "support_attachment_insert" in source
+    assert "support_attachment_update" in source
