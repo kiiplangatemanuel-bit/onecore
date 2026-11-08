@@ -53,7 +53,8 @@ def _ticket_out(ticket: SupportTicket, db: Session, include_messages: bool = Fal
     ).all()
     result["attachments"] = [{
         "id": item.id, "file_name": item.file_name, "content_type": item.content_type,
-        "size_bytes": item.size_bytes, "status": item.status,
+        "size_bytes": item.size_bytes, "status": item.status, "scan_engine": item.scan_engine,
+        "scan_result": item.scan_result, "scanned_at": item.scanned_at.isoformat() if item.scanned_at else None,
         "created_at": item.created_at.isoformat(),
     } for item in attachments]
     if include_messages:
