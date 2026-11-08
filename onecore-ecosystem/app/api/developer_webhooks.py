@@ -166,21 +166,20 @@ def rotate_webhook_secret(
     return {"endpoint_id": endpoint.id, "signing_secret": secret}
 
 
-def enqueue_webhook_event(
-    payload: WebhookEventCreate,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    _active_developer(db, user, payload.organization_id)
-    if payload.event_type not in ALLOWED_EVENTS:
-        raise HTTPException(422, "Unsupported webhook event type")
-    if len(json.dumps(payload.data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > MAX_BODY_BYTES:
-        raise HTTPException(413, "Webhook event payload exceeds 256 KB")
-    event_id = payload.event_id or "evt_" + secrets.token_urlsafe(24)
+def queue_organization_webhook_event(
+    db: Session, organization_id: int, event_type: str, data: dict,
+    event_id: str | None = None,
+) -> dict:
+    """Enqueue a domain event from a trusted backend workflow in the current transaction."""
+    if event_type not in ALLOWED_EVENTS:
+        raise ValueError("Unsupported webhook event type")
+    if len(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > MAX_BODY_BYTES:
+        raise ValueError("Webhook event payload exceeds 256 KB")
+    event_id = event_id or "evt_" + secrets.token_urlsafe(24)
     endpoints = db.query(DeveloperWebhookEndpoint).join(
         PortalWorkflowRecord, PortalWorkflowRecord.id == DeveloperWebhookEndpoint.workflow_record_id
     ).filter(
-        DeveloperWebhookEndpoint.organization_id == payload.organization_id,
+        DeveloperWebhookEndpoint.organization_id == organization_id,
         DeveloperWebhookEndpoint.active.is_(True),
         PortalWorkflowRecord.portal_key == "developers",
         PortalWorkflowRecord.record_type == "webhook",
@@ -188,7 +187,7 @@ def enqueue_webhook_event(
     created = 0
     for endpoint in endpoints:
         record = db.query(PortalWorkflowRecord).filter_by(id=endpoint.workflow_record_id).first()
-        if payload.event_type not in ((record.payload or {}).get("events") or []):
+        if event_type not in ((record.payload or {}).get("events") or []):
             continue
         existing = db.query(DeveloperWebhookDelivery).filter_by(
             endpoint_id=endpoint.id, event_id=event_id
@@ -196,16 +195,30 @@ def enqueue_webhook_event(
         if existing:
             continue
         db.add(DeveloperWebhookDelivery(
-            endpoint_id=endpoint.id, organization_id=payload.organization_id,
-            event_id=event_id, event_type=payload.event_type,
-            payload={"id": event_id, "type": payload.event_type, "created_at": _now().isoformat(), "data": payload.data},
+            endpoint_id=endpoint.id, organization_id=organization_id,
+            event_id=event_id, event_type=event_type,
+            payload={"id": event_id, "type": event_type, "created_at": _now().isoformat(), "data": data},
             status="pending", attempts=0, next_attempt_at=_now(),
         ))
         created += 1
-    db.commit()
     return {"event_id": event_id, "queued_deliveries": created}
 
 
+@router.post("/events", status_code=202)
+def enqueue_webhook_event(
+    payload: WebhookEventCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    _active_developer(db, user, payload.organization_id)
+    try:
+        result = queue_organization_webhook_event(
+            db, payload.organization_id, payload.event_type, payload.data, payload.event_id
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    db.commit()
+    return result
 
 @router.get("/webhooks")
 def list_developer_webhooks(
