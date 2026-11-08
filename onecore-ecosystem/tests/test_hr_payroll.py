@@ -151,6 +151,8 @@ def test_hr_payroll_authorization_supports_maker_checker_roles():
     assert "manage" not in ROLE_PERMISSIONS["payroll_manager"]
     assert "manage" not in ROLE_PERMISSIONS["payroll_approver"]
     assert "manage" not in ROLE_PERMISSIONS["payroll_payment"]
+    assert "create" not in ROLE_PERMISSIONS["payroll_manager"]
+    assert "create" not in ROLE_PERMISSIONS["hr_manager"]
     assert "create" not in ROLE_PERMISSIONS["payroll_approver"]
 
 
