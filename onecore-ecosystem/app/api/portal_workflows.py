@@ -13,7 +13,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, User
+from app.core.models import AuditEvent, Membership, PortalWorkflowRecord, StatusAlertDelivery, User
 from app.core.security import current_user
 
 router = APIRouter(prefix="/api/v1/portals", tags=["public portals"])
@@ -189,6 +189,56 @@ def _audit(db: Session, user: User, row: PortalWorkflowRecord, action: str):
         detail=f"{row.portal_key}:{row.record_type}:{row.status}",
     ))
 
+
+
+
+
+def _queue_status_incident_alerts(db: Session, incident: PortalWorkflowRecord) -> int:
+    """Queue idempotent email alerts for matching active personal subscriptions."""
+    service = str((incident.payload or {}).get("service", "")).strip()
+    title = str((incident.payload or {}).get("title", "Service incident")).strip()
+    severity = str((incident.payload or {}).get("severity", "update")).strip()
+    summary = str((incident.payload or {}).get("summary", "")).strip()
+    if not service:
+        return 0
+    subscriptions = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="status", record_type="alert_subscription", status="active"
+    ).all()
+    event_key = f"status-incident-{incident.id}-published"
+    created = 0
+    for subscription in subscriptions:
+        preferences = db.query(PortalWorkflowRecord).filter_by(
+            portal_key="status", record_type="notification_preference",
+            owner_user_id=subscription.owner_user_id, status="active",
+        ).all()
+        if preferences and not any(
+            str((item.payload or {}).get("channel", "")).lower() == "email"
+            for item in preferences
+        ):
+            continue
+        subscribed_service = str((subscription.payload or {}).get("service", "")).strip()
+        if subscribed_service not in {"*", service}:
+            continue
+        recipient = db.get(User, subscription.owner_user_id)
+        if not recipient or not recipient.is_active or not recipient.email:
+            continue
+        exists = db.query(StatusAlertDelivery.id).filter_by(
+            user_id=recipient.id, event_key=event_key
+        ).first()
+        if exists:
+            continue
+        db.add(StatusAlertDelivery(
+            user_id=recipient.id, incident_record_id=incident.id,
+            recipient_email=recipient.email, event_key=event_key,
+            subject=f"OneCore status: {service} - {title}"[:255],
+            body=(
+                f"OneCore service incident update\n\nService: {service}\n"
+                f"Severity: {severity}\nTitle: {title}\n\n{summary}\n"
+            ),
+            status="pending", attempts=0, next_attempt_at=datetime.now(timezone.utc),
+        ))
+        created += 1
+    return created
 
 
 
@@ -446,6 +496,8 @@ def publish_public_portal_content(
     db.add(row)
     db.flush()
     _audit(db, user, row, f"portal.{portal}.{record_type}.published")
+    if portal == "status" and record_type == "incident":
+        _queue_status_incident_alerts(db, row)
     db.commit()
     db.refresh(row)
     return _out(row)
