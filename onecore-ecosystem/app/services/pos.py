@@ -43,7 +43,9 @@ def canonical_request_hash(payload) -> str:
     }
     if getattr(payload,"customer_id",None) is not None:
         body["customer_id"] = payload.customer_id
-    body["loyalty_points_redeemed"] = int(getattr(payload, "loyalty_points_redeemed", 0) or 0)
+    loyalty_points_redeemed = int(getattr(payload, "loyalty_points_redeemed", 0) or 0)
+    if loyalty_points_redeemed:
+        body["loyalty_points_redeemed"] = loyalty_points_redeemed
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
