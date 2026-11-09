@@ -36,6 +36,11 @@ def _payload_hash(payload):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _require_finance(membership):
+    if (membership.role or "").lower() not in {"org_admin","accountant"}:
+        raise HTTPException(403,"Foreign-currency accounting requires an organization administrator or accountant")
+
+
 def _audit(db, user, org_id, action, kind, rid, detail=""):
     db.add(AuditEvent(actor_user_id=user.id, organization_id=org_id, action=action,
                       resource_type=kind, resource_id=str(rid), detail=detail))
@@ -141,14 +146,14 @@ class StatutoryPaymentIn(BaseModel):
 
 @router.get("/api/v1/accounting/fx/rates")
 def list_fx_rates(membership=Depends(active_membership), db: Session=Depends(get_db)):
-    require_permission(membership, "read")
+    _require_finance(membership)
     rows = db.query(AccountingFxRate).filter_by(organization_id=membership.organization_id).order_by(AccountingFxRate.rate_date.desc(), AccountingFxRate.id.desc()).limit(250).all()
     return [{"id":x.id,"currency":x.currency,"rate_date":x.rate_date.date().isoformat(),"units_per_base":str(x.units_per_base),"source":x.source,"reference":x.reference} for x in rows]
 
 
 @router.post("/api/v1/accounting/fx/rates", status_code=201)
 def create_fx_rate(payload: FxRateIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "create")
+    _require_finance(membership)
     org = db.query(Organization).filter_by(id=membership.organization_id, is_active=True).first()
     if not org:
         raise HTTPException(404, "Organization not found")
@@ -167,7 +172,7 @@ def create_fx_rate(payload: FxRateIn, membership=Depends(active_membership), use
 
 @router.post("/api/v1/accounting/fx/postings", status_code=201)
 def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "create")
+    _require_finance(membership)
     prior=db.query(AccountingFxPosting).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     request_hash=_payload_hash(payload)
     if prior:
@@ -198,7 +203,7 @@ def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membersh
 
 @router.post("/api/v1/accounting/fx/revaluations", status_code=201)
 def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
-    require_permission(membership, "create")
+    _require_finance(membership)
     request_hash=_payload_hash(payload)
     prior=db.query(AccountingFxRevaluation).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if prior:
@@ -371,6 +376,6 @@ def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=
 
 @router.get("/api/v1/payroll/statutory-batches/{batch_id}/return")
 def statutory_return(batch_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
-    if (membership.role or "").lower() not in {"org_admin","payroll_manager","payroll_approver","payroll_payment","accountant"}: raise HTTPException(403,"Payroll statutory access is restricted")
+    if (membership.role or "").lower() not in {"org_admin","payroll_manager","payroll_approver","payroll_payment","accountant","hr_admin"}: raise HTTPException(403,"Payroll statutory access is restricted")
     row=_load_statutory_batch(db,membership,batch_id)
     return {"schema_version":"onecore.statutory-return.v1","batch":_statutory_payload(row),"employee_lines":row.employee_lines,"filing_status":"not_filed","provider_submission_id":None,"notice":"Export is a calculation schedule, not a statutory filing receipt. Submit through the approved authority channel and record the resulting reference."}
