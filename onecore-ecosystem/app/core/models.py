@@ -302,6 +302,7 @@ class ProcurementPurchaseOrder(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    amendment_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_procurement_po_org_number", "organization_id", "order_number", unique=True),)
 
