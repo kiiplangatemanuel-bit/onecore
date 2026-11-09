@@ -78,6 +78,23 @@ def upgrade():
                     OR public.onecore_is_platform_admin()
                 )
             """)
+        # The dedicated API role is provisioned before migrations in production.
+        # Grant only the CRUD and sequence rights required by these two tables.
+        op.execute("""
+            DO $
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
+                    GRANT SELECT, INSERT, UPDATE ON TABLE
+                        public.mpesa_settlement_batches, public.mpesa_settlement_lines
+                        TO onecore_api;
+                    GRANT USAGE, SELECT ON SEQUENCE
+                        public.mpesa_settlement_batches_id_seq,
+                        public.mpesa_settlement_lines_id_seq
+                        TO onecore_api;
+                END IF;
+            END
+            $
+        """)
 
 
 def downgrade():
