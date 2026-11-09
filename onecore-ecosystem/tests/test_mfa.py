@@ -1,4 +1,5 @@
 import hashlib
+import jwt
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -258,7 +259,11 @@ def test_privileged_password_login_is_restricted_until_mfa_is_enabled(monkeypatc
     engine.dispose()
 
 
-@pytest.mark.parametrize("platform_role", ["root_superadmin", "platform_admin"])
+@pytest.mark.parametrize("platform_role", [
+    "root_superadmin", "platform_admin", "security_admin", "cms_admin",
+    "support_admin", "developer_api_admin", "maintenance_admin",
+    "incident_commander", "release_manager", "analytics_admin", "recruitment_admin",
+])
 def test_privileged_role_rejects_legacy_access_token_without_mfa(platform_role):
     engine = _engine()
     with Session(engine) as db:
@@ -321,3 +326,10 @@ def test_setup_only_token_can_reach_only_mfa_setup_routes(monkeypatch):
             MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
         ])
         engine.dispose()
+
+
+
+def test_mfa_setup_token_expires_within_ten_minutes():
+    token = create_access_token(1, 0, mfa_setup_only=True)
+    payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    assert 0 < payload["exp"] - time.time() <= 600
