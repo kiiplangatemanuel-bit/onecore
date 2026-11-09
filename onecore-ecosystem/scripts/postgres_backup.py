@@ -67,6 +67,8 @@ def verify(args):
     if not target.is_file() or not manifest_path.is_file():
         raise SystemExit("Backup archive or checksum manifest is missing")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("format") != "onecore-postgresql-custom-v1":
+        raise SystemExit("Unsupported or invalid backup manifest format")
     actual = sha256(target)
     if actual != manifest.get("sha256") or target.stat().st_size != manifest.get("size_bytes"):
         raise SystemExit("Backup integrity check failed: checksum or size mismatch")
@@ -83,8 +85,13 @@ def restore(args):
         raise SystemExit("--confirm-target must exactly match the database name in ONECORE_RESTORE_DATABASE_URL")
     archive = Path(args.archive).resolve()
     verify(argparse.Namespace(archive=str(archive)))
-    # Deliberately do not use --clean/--if-exists: restore into a newly-created,
-    # isolated empty database so a typo cannot drop or overwrite existing objects.
+    # Deliberately do not use --clean/--if-exists. Check the destination first
+    # and only restore into an empty, isolated database.
+    probe = subprocess.run(["psql", *conn, "--tuples-only", "--no-align", "--command",
+        "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')"],
+        env=env, check=True, capture_output=True, text=True)
+    if int(probe.stdout.strip() or "0") != 0:
+        raise SystemExit("Restore target is not empty; refusing to overwrite existing data")
     run(["pg_restore", "--exit-on-error", "--no-owner", "--no-acl", "--dbname", database,
          "--host", conn[1], "--port", conn[3], "--username", conn[5], str(archive)], env)
     print(json.dumps({"restored":True,"target_database":database,
