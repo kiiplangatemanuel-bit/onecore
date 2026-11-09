@@ -64,7 +64,7 @@ def _assert_fx_journal_branch(db,membership,journal_id):
 
 def _accounts(db, org_id, ids):
     rows = db.query(AccountingAccount).filter(
-        AccountingAccount.organization_id == org_id, AccountingAccount.id.in_(set(ids))
+        AccountingAccount.organization_id == org_id, AccountingAccount.is_active == True, AccountingAccount.id.in_(set(ids))
     ).all()
     result = {x.id: x for x in rows}
     if len(result) != len(set(ids)):
