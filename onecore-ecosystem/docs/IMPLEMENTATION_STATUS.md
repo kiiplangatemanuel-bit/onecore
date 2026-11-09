@@ -44,11 +44,13 @@ monitoring, documentation and user acceptance testing.
 
 Shared platform work still outstanding includes:
 
-- Production SMTP/email deliverability and domain authentication; MFA/TOTP and
-  recovery codes; external OIDC identity federation; durable session/device
-  inventory and per-session revocation; distributed throttling and account lockout.
-  Registration email verification and password recovery flows are implemented,
-  but live delivery depends on deployment SMTP configuration.
+- Production SMTP/email deliverability and domain authentication; organization/role-
+  level MFA policy, passkeys/WebAuthn and external OIDC identity federation;
+  distributed throttling and account lockout. Account-level TOTP/recovery codes,
+  mandatory privileged-role MFA and durable session/device inventory with
+  per-session revocation are implemented. Registration email verification and
+  password recovery flows are implemented, but live delivery depends on SMTP
+  deployment configuration.
 - A dedicated organization/branch administration frontend and verified branch
   existence in branch-scope assignment/invitation UX.
 - Domain ingress provisioning, automated certificate issuance/renewal, primary-domain
@@ -820,11 +822,11 @@ HTTPS-only CORS validation, environment documentation and container build exclus
 verify the latest PR-head run before merge.
 
 Remaining operational/security release gates: distributed ingress/WAF throttling
-(the application limiter is per worker), MFA/TOTP and recovery, external OIDC
-identity federation, durable session/device inventory and per-session revocation,
-automated secret rotation, centralized tamper-evident audit, backup/PITR restore
-drills, metrics/tracing/alerts, production ingress/database/secret-manager and
-SMTP/deliverability configuration, penetration testing, load testing, privacy
+(the application limiter is per worker), organization/role-level MFA policy,
+passkeys/WebAuthn, external OIDC identity federation, automated secret rotation,
+centralized tamper-evident audit, backup/PITR restore drills, metrics/tracing/alerts,
+production ingress/database/secret-manager and SMTP/deliverability configuration,
+penetration testing, load testing, privacy
 review and production UAT. This baseline
 is not a security certification or evidence of a live production deployment.
 
@@ -951,9 +953,9 @@ downgrade/re-upgrade, Python compilation, the main frontend build and all ten
 independent portal builds.
 
 Remaining identity work: organization/role-level MFA policy, passkeys/WebAuthn,
-external OIDC federation, durable session/device inventory and per-session
-revocation, privileged step-up/approval for high-impact actions, distributed
-edge/WAF throttling and account lockout. SMTP
+external OIDC federation, privileged step-up/dual approval for high-impact actions,
+distributed edge/WAF throttling and account lockout. Durable tracked sessions and
+per-session revocation are implemented in PR #126 below. SMTP
 credentials, sender-domain authentication, deliverability monitoring and a
 durable retrying email outbox/worker still require deployment/operations work.
 The PKCE portal flow is not an OIDC provider or a Supabase Auth session, and this
@@ -1013,7 +1015,7 @@ PR #125 merged as commit 70c805b6adaa247eafa4e1e76237e1842f526e86. It enforces M
 
 PR-head CI [run 42603183029](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603183029) and post-merge main CI [run 42603604559](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603604559) both passed **393 tests, 8 warnings**, pip-audit (no known vulnerabilities), Alembic upgrade/downgrade/re-upgrade, Python compilation, main frontend build and all ten portal builds. The source CI is green on the merge commit; Vercel deployment checks still fail with the account build-rate-limit quota and no successful production deployment is established.
 
-The deployment must set MFA_ENCRYPTION_KEY in its secret manager before privileged users can enroll. Organization-level MFA policy, passkeys/WebAuthn, external OIDC, durable per-device sessions and revocation, and privileged step-up/dual approval for high-impact actions remain open. This is not production UAT or a security certification.
+The deployment must set MFA_ENCRYPTION_KEY in its secret manager before privileged users can enroll. Organization-level MFA policy, passkeys/WebAuthn, external OIDC, and privileged step-up/dual approval for high-impact actions remain open. Durable per-device sessions and revocation are delivered in PR #126 below. This is not production UAT or a security certification.
 
 
 ## Durable account sessions and device revocation (PR #126; merged 9 November 2026)
