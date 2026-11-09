@@ -70,7 +70,7 @@ def backup(args):
     print(json.dumps(manifest, indent=2))
 
 
-def verify(args):
+def verify(args, *, emit=True):
     target = Path(args.archive).resolve()
     manifest_path = target.with_suffix(target.suffix + ".manifest.json")
     if not target.is_file() or not manifest_path.is_file():
@@ -82,7 +82,10 @@ def verify(args):
     if actual != manifest.get("sha256") or target.stat().st_size != manifest.get("size_bytes"):
         raise SystemExit("Backup integrity check failed: checksum or size mismatch")
     subprocess.run(["pg_restore", "--list", str(target)], check=True, capture_output=True, text=True)
-    print(json.dumps({"verified":True,"archive":str(target),"sha256":actual,"size_bytes":target.stat().st_size}))
+    result = {"verified":True,"archive":str(target),"sha256":actual,"size_bytes":target.stat().st_size}
+    if emit:
+        print(json.dumps(result))
+    return result
 
 
 def restore(args):
@@ -93,7 +96,9 @@ def restore(args):
     if args.confirm_target != database:
         raise SystemExit("--confirm-target must exactly match the database name in ONECORE_RESTORE_DATABASE_URL")
     archive = Path(args.archive).resolve()
-    verify(argparse.Namespace(archive=str(archive)))
+    # Keep restore output machine-readable: verification is an internal gate,
+    # not a second JSON document on stdout.
+    verify(argparse.Namespace(archive=str(archive)), emit=False)
     # Deliberately do not use --clean/--if-exists. Check the destination first
     # and only restore into an empty, isolated database.
     probe = subprocess.run(["psql", *conn, "--tuples-only", "--no-align", "--command",
