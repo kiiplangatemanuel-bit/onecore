@@ -333,3 +333,8 @@ This does not initiate bank or M-Pesa transfers. Historical invoice backfill and
 
 
 Draft receivable invoices created from CRM sales orders can be cancelled before posting. Cancellation also closes any pending/approved invoice approval request, and cancelled drafts no longer consume the sales order's uninvoiced balance. Posted or partially paid invoices cannot use the draft-cancellation path; corrections must use the credit-note/refund controls.
+
+
+## Foreign-currency posting and revaluation (PR #123)
+
+The FX extension adds tenant-owned dated exchange-rate records, foreign-currency transaction metadata, base-currency double-entry journals, strict idempotency and period-end monetary asset/liability revaluation. The rate convention is foreign currency units per one base-currency unit. Revaluation posts balanced unrealized FX gain/loss journals and preserves the submitted position snapshot. Finance must reconcile each supplied foreign balance to its source subledger; this increment does not yet automatically derive open-item balances from every AR/AP/bank/loan subsystem, nor does it provide provider-fed rates or automatic foreign-currency settlement for all subledgers. Apply migration 0063_fx_statutory_remittances and run the finance integration tests before enabling the workflow.
