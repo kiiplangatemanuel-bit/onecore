@@ -7,6 +7,8 @@ NSSF, SHA or initiate bank transfers.
 """
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import hashlib
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
@@ -27,6 +29,11 @@ RATE_QUANTUM = Decimal("0.0000000001")
 
 def money(v):
     return Decimal(str(v)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _payload_hash(payload):
+    canonical=json.dumps(payload.model_dump(mode="json"),sort_keys=True,separators=(",",":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _audit(db, user, org_id, action, kind, rid, detail=""):
@@ -86,6 +93,13 @@ class FxRevaluationIn(BaseModel):
     positions: list[FxPosition] = Field(min_length=1, max_length=200)
     idempotency_key: str = Field(min_length=8, max_length=100)
     branch_id: str | None = None
+
+    @model_validator(mode="after")
+    def unique_positions(self):
+        ids=[x.account_id for x in self.positions]
+        if len(ids)!=len(set(ids)):
+            raise ValueError("Each foreign-currency ledger account may appear only once per revaluation")
+        return self
 
 
 class StatutoryBatchIn(BaseModel):
@@ -147,7 +161,9 @@ def create_fx_rate(payload: FxRateIn, membership=Depends(active_membership), use
 def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "create")
     prior=db.query(AccountingFxPosting).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    request_hash=_payload_hash(payload)
     if prior:
+        if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different FX posting payload")
         return {"id":prior.id,"journal_id":prior.journal_id,"currency":prior.currency,"foreign_amount":str(prior.foreign_amount),"base_amount":str(prior.base_amount),"replayed":True}
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     rate=db.query(AccountingFxRate).filter_by(id=payload.rate_id,organization_id=membership.organization_id).first()
@@ -166,7 +182,7 @@ def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membersh
          {"account_id":payload.credit_account_id,"description":f"Credit {payload.foreign_amount} {rate.currency}","debit":0,"credit":base_amount}],payload.branch_id)
     row=AccountingFxPosting(organization_id=org.id,journal_id=journal.id,rate_id=rate.id,
         currency=rate.currency,foreign_amount=payload.foreign_amount,base_amount=base_amount,
-        idempotency_key=payload.idempotency_key,reference=payload.reference,created_by=user.id)
+        idempotency_key=payload.idempotency_key,payload_hash=request_hash,reference=payload.reference,created_by=user.id)
     db.add(row); db.flush()
     _audit(db,user,org.id,"accounting.fx_posted","accounting_fx_posting",row.id,f"{payload.foreign_amount} {rate.currency} at {rate.units_per_base}; base {base_amount} {org.currency}")
     db.commit()
@@ -176,8 +192,10 @@ def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membersh
 @router.post("/api/v1/accounting/fx/revaluations", status_code=201)
 def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
     require_permission(membership, "create")
+    request_hash=_payload_hash(payload)
     prior=db.query(AccountingFxRevaluation).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if prior:
+        if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different FX revaluation payload")
         return {"id":prior.id,"journal_id":prior.journal_id,"total_gain":str(prior.total_gain),"total_loss":str(prior.total_loss),"replayed":True}
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     if not org or payload.currency==org.currency:
@@ -217,7 +235,7 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
     journal=_accounting_make_journal(db,membership,user,payload.valuation_date,f"FX-REVAL-{payload.currency}-{payload.valuation_date.isoformat()}","Foreign currency period-end revaluation",lines,payload.branch_id)
     row=AccountingFxRevaluation(organization_id=org.id,journal_id=journal.id,currency=payload.currency,
         valuation_date=datetime.combine(payload.valuation_date,time.min,tzinfo=timezone.utc),closing_rate=payload.closing_rate,
-        total_gain=total_gain,total_loss=total_loss,position_snapshot=snapshot,idempotency_key=payload.idempotency_key,created_by=user.id)
+        total_gain=total_gain,total_loss=total_loss,position_snapshot=snapshot,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
     db.add(row);db.flush()
     _audit(db,user,org.id,"accounting.fx_revaluation.posted","accounting_fx_revaluation",row.id,f"gain {total_gain}; loss {total_loss}")
     db.commit()
@@ -241,8 +259,11 @@ def list_statutory_batches(membership=Depends(active_membership),db:Session=Depe
 def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_manager"}:
         raise HTTPException(403,"Only payroll managers can prepare statutory remittances")
+    request_hash=_payload_hash(payload)
     prior=db.query(PayrollStatutoryBatch).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
-    if prior: return {**_statutory_payload(prior),"replayed":True}
+    if prior:
+        if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different statutory batch payload")
+        return {**_statutory_payload(prior),"replayed":True}
     runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(payload.payroll_run_ids)).with_for_update().all()
     if len(runs)!=len(payload.payroll_run_ids) or any(x.status!="approved" or not can_access_branch(membership,x.branch_id) for x in runs):
         raise HTTPException(409,"Every source payroll run must exist in this tenant, be within branch scope and be approved")
@@ -261,7 +282,7 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
         employee_lines.append({"employee_id":slip.employee_id,"employee_number":slip.employee_number,"employee_name":slip.employee_name,**{key:str(money(value)) for key,value in values.items()}})
     totals={k:str(money(v)) for k,v in totals.items()}
     start=min(x.period_start for x in runs); end=max(x.period_end for x in runs)
-    batch=PayrollStatutoryBatch(organization_id=membership.organization_id,period_start=start,period_end=end,currency=next(iter(currencies)),totals=totals,employee_lines=employee_lines,source_run_ids=payload.payroll_run_ids,idempotency_key=payload.idempotency_key,created_by=user.id)
+    batch=PayrollStatutoryBatch(organization_id=membership.organization_id,period_start=start,period_end=end,currency=next(iter(currencies)),totals=totals,employee_lines=employee_lines,source_run_ids=payload.payroll_run_ids,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
     db.add(batch);db.flush();_audit(db,user,membership.organization_id,"payroll.statutory_batch.created","payroll_statutory_batch",batch.id,str(totals));db.commit()
     return {**_statutory_payload(batch),"replayed":False}
 
