@@ -1,5 +1,9 @@
 name: OneCore API checks
 
+concurrency:
+  group: onecore-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 on:
   push:
     paths:
