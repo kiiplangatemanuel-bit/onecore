@@ -15,11 +15,23 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 # Platform administrators can reach customer data, tenant configuration and
 # operational controls. Require a second factor before granting ordinary API
 # sessions to these roles; enrollment tokens are restricted to MFA setup routes.
-MFA_REQUIRED_PLATFORM_ROLES = frozenset({"root_superadmin", "platform_admin"})
+MFA_REQUIRED_PLATFORM_ROLES = frozenset({
+    "root_superadmin",
+    "platform_admin",
+    "security_admin",
+    "cms_admin",
+    "support_admin",
+    "developer_api_admin",
+    "maintenance_admin",
+    "incident_commander",
+    "release_manager",
+    "analytics_admin",
+    "recruitment_admin",
+})
 
 
 def platform_role_requires_mfa(platform_role: str) -> bool:
-    return platform_role in MFA_REQUIRED_PLATFORM_ROLES
+    return str(platform_role or "").strip().lower() in MFA_REQUIRED_PLATFORM_ROLES
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -34,7 +46,8 @@ def create_access_token(
     mfa_verified: bool = False,
     mfa_setup_only: bool = False,
 ) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime_minutes = min(settings.access_token_expire_minutes, 10) if mfa_setup_only else settings.access_token_expire_minutes
+    exp = datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)
     claims = {"sub": str(user_id), "exp": exp, "ver": int(auth_version)}
     if mfa_verified:
         claims["mfa_verified"] = True
