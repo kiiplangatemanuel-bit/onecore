@@ -1,5 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
+import uuid
 
 import pytest
 from fastapi import HTTPException
@@ -10,6 +11,7 @@ import app.api.auth_workflows as workflows
 from app.api.auth_workflows import confirm_password_reset, request_password_reset
 from app.core.database import Base
 from app.core.models import AuditEvent, PasswordResetToken, PortalAuthorizationCode, User
+from app.core.identity_models import UserSession
 from app.core.schemas import PasswordResetConfirmIn, PasswordResetRequestIn
 from app.core.security import create_access_token, current_user, verify_password
 
@@ -17,7 +19,7 @@ from app.core.security import create_access_token, current_user, verify_password
 def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, AuditEvent.__table__,
+        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, UserSession.__table__, AuditEvent.__table__,
     ])
     return engine
 
@@ -73,6 +75,14 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
         db.add(user)
         db.commit()
         old_token = create_access_token(user.id, user.auth_version)
+        now = datetime.now(timezone.utc)
+        tracked_session = UserSession(
+            id=str(uuid.uuid4()), user_id=user.id, auth_version=user.auth_version,
+            auth_method="password", mfa_verified=False, device_name="Test device",
+            user_agent="Test client", created_at=now, last_seen_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+        db.add(tracked_session)
         raw = "r" * 48
         row = PasswordResetToken(
             user_id=user.id,
@@ -97,7 +107,10 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
         db.refresh(user)
         db.refresh(row)
         db.refresh(portal_code)
+        db.refresh(tracked_session)
         assert result["status"] == "password_reset"
+        assert tracked_session.revoked_at is not None
+        assert tracked_session.revoked_reason == "password_reset"
         assert row.consumed_at is not None
         assert portal_code.consumed_at is not None
         assert user.auth_version == 1

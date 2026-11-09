@@ -10,11 +10,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import app.api.auth_mfa as mfa
-from app.api.auth_mfa import MFAChallengeIn, MFAConfirmIn, MFAEnrollIn, MFASensitiveActionIn
+from app.api.auth_mfa import MFAChallengeIn, MFAConfirmIn, MFAEnrollIn, MFASensitiveActionIn, mfa_status
 from app.api.auth_mfa import _totp_code, complete_mfa_challenge, confirm_mfa_enrollment, disable_mfa, issue_mfa_challenge, start_mfa_enrollment
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, MFAChallenge, MFARecoveryCode, PortalAuthorizationCode, User, UserMFAFactor
+from app.core.identity_models import UserSession
 from app.core.security import current_user, current_user_for_mfa_setup, create_access_token, hash_password
 from app.api.routes import login
 
@@ -23,7 +24,7 @@ def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
-        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__, UserSession.__table__,
     ])
     return engine
 
@@ -87,6 +88,10 @@ def test_password_login_returns_challenge_and_only_second_factor_mints_access_to
         ), db)
         assert result["token_type"] == "bearer"
         assert current_user(token=result["access_token"], db=db).id == user.id
+        session = db.query(UserSession).filter_by(user_id=user.id).one()
+        assert session.auth_method == "totp"
+        assert session.mfa_verified is True
+        assert jwt.decode(result["access_token"], settings.secret_key, algorithms=["HS256"])["sid"] == session.id
         row = db.query(MFAChallenge).filter_by(user_id=user.id).one()
         assert row.consumed_at is not None
     engine.dispose()
@@ -162,11 +167,19 @@ def test_disable_requires_password_and_second_factor_and_revokes_access(monkeypa
         user = _user(db)
         fixed_now = mfa._now()
         monkeypatch.setattr(mfa, "_now", lambda: fixed_now)
-        _enable(db, user)
-        old_access_token = mfa.create_access_token(user.id, user.auth_version)
+        _, enabled = _enable(db, user)
         factor = db.query(UserMFAFactor).filter_by(user_id=user.id).one()
-        code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp() + 30)
-        result = disable_mfa(MFASensitiveActionIn(password="correct-password", code=code), user, db)
+        login_challenge = issue_mfa_challenge(db, user)
+        login_code = _totp_code(mfa._decrypt_secret(factor), fixed_now.timestamp() + 30)
+        login_result = complete_mfa_challenge(MFAChallengeIn(
+            challenge_token=login_challenge["challenge_token"], code=login_code
+        ), db)
+        old_access_token = login_result["access_token"]
+        tracked_session = db.query(UserSession).filter_by(user_id=user.id).one()
+        disable_now = fixed_now + timedelta(seconds=60)
+        monkeypatch.setattr(mfa, "_now", lambda: disable_now)
+        disable_code = _totp_code(mfa._decrypt_secret(factor), disable_now.timestamp())
+        result = disable_mfa(MFASensitiveActionIn(password="correct-password", code=disable_code), user, db)
         db.refresh(user)
         assert result["status"] == "disabled"
         assert user.auth_version == 2
@@ -174,6 +187,9 @@ def test_disable_requires_password_and_second_factor_and_revokes_access(monkeypa
         assert db.query(MFARecoveryCode).filter_by(user_id=user.id).filter(
             MFARecoveryCode.revoked_at.is_(None)
         ).count() == 0
+        db.refresh(tracked_session)
+        assert tracked_session.revoked_at is not None
+        assert tracked_session.revoked_reason == "mfa_security_change"
         with pytest.raises(HTTPException) as revoked:
             current_user(token=old_access_token, db=db)
         assert revoked.value.status_code == 401
@@ -254,7 +270,7 @@ def test_privileged_password_login_is_restricted_until_mfa_is_enabled(monkeypatc
         with pytest.raises(HTTPException) as expired_setup:
             current_user_for_mfa_setup(token=result["access_token"], db=db)
         assert expired_setup.value.status_code == 401
-        fresh_token = create_access_token(user.id, user.auth_version)
+        fresh_token = create_access_token(user.id, user.auth_version, mfa_verified=True)
         assert current_user(token=fresh_token, db=db).id == user.id
     engine.dispose()
 
@@ -333,3 +349,16 @@ def test_mfa_setup_token_expires_within_ten_minutes():
     token = create_access_token(1, 0, mfa_setup_only=True)
     payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
     assert 0 < payload["exp"] - time.time() <= 600
+
+
+def test_mfa_status_discloses_when_setup_only_token_cannot_manage_sessions():
+    engine = _engine()
+    with Session(engine) as db:
+        user = _user(db)
+        db.info["onecore_mfa_setup_only"] = True
+        restricted = mfa_status(user=user, db=db)
+        assert restricted["session_management_available"] is False
+        db.info["onecore_mfa_setup_only"] = False
+        normal = mfa_status(user=user, db=db)
+        assert normal["session_management_available"] is True
+    engine.dispose()

@@ -8,6 +8,7 @@ from app.core import procurement_workflow_models  # noqa: F401 - register procur
 from app.core import pos_completion_models  # noqa: F401 - register POS completion tables
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import finance_ops_models  # noqa: F401 - register FX and statutory remittance tables
+from app.core import identity_models  # noqa: F401 - register account session and portal assurance tables
 
 config = context.config
 database_url = str(normalized_database_url(settings.database_connection_url))

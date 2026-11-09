@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -19,6 +19,7 @@ from app.integrations.registry import public_provider_status
 from app.services.inventory import validate_stock_delta, resulting_balance
 from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
+from app.services.user_sessions import create_user_session
 from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption, calculate_loyalty_return_adjustments
 from datetime import date, datetime, time, timezone
 
@@ -35,7 +36,11 @@ def validate_module_key(module_key: str):
         raise HTTPException(400, "Invalid module key")
 
 @router.post("/auth/login")
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
     user = db.query(User).filter(User.email == form.username.lower()).first()
     if not user or not verify_password(form.password, user.password_hash) or not user.is_active:
         raise HTTPException(401, "Incorrect email or password")
@@ -49,7 +54,14 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
             "access_token": create_access_token(user.id, user.auth_version, mfa_setup_only=True),
             "token_type": "bearer",
         }
-    return {"access_token": create_access_token(user.id, user.auth_version), "token_type": "bearer"}
+    session = create_user_session(db, user, request, auth_method="password")
+    db.commit()
+    return {
+        "access_token": create_access_token(
+            user.id, user.auth_version, session_id=session.id, expires_at=session.expires_at
+        ),
+        "token_type": "bearer",
+    }
 
 @router.get("/auth/me")
 def me(user: User = Depends(current_user)):

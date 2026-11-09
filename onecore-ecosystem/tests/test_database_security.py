@@ -48,7 +48,7 @@ def _tables():
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings",
         "accounting_fx_revaluations", "accounting_fx_settlements",
-        "payroll_statutory_batches",
+        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
@@ -100,7 +100,7 @@ def test_production_database_boundary_rejects_missing_critical_rls_table():
     "payroll_payment_batch_items", "payroll_bank_statement_lines",
     "accounting_fx_rates", "accounting_fx_postings",
     "accounting_fx_revaluations", "accounting_fx_settlements",
-    "payroll_statutory_batches",
+    "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
 ])
 def test_production_readiness_rejects_each_missing_critical_tenant_rls_table(table_name):
     from app.main import _verify_rls_database_boundary

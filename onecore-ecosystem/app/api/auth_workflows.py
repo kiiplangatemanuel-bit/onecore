@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, EmailVerification, Membership, Organization, PasswordResetToken, PortalAuthorizationCode, User
+from app.core.identity_models import UserSession
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn, PasswordResetRequestIn, PasswordResetConfirmIn
 from app.core.security import hash_password, set_verified_user_context
 
@@ -233,9 +234,17 @@ def confirm_password_reset(payload: PasswordResetConfirmIn, db: Session = Depend
     if not user or not user.is_active:
         raise HTTPException(400, "Password reset link is invalid or has expired.")
 
+    set_verified_user_context(db, user.id)
     user.password_hash = hash_password(payload.new_password)
     user.auth_version = int(user.auth_version or 0) + 1
     row.consumed_at = now
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.revoked_at.is_(None),
+    ).update(
+        {UserSession.revoked_at: now, UserSession.revoked_reason: "password_reset"},
+        synchronize_session=False,
+    )
     db.query(PortalAuthorizationCode).filter(
         PortalAuthorizationCode.user_id == user.id,
         PortalAuthorizationCode.consumed_at.is_(None),

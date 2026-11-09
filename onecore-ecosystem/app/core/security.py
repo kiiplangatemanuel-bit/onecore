@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import User, UserMFAFactor
+from app.core.identity_models import UserSession
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -45,14 +46,18 @@ def create_access_token(
     *,
     mfa_verified: bool = False,
     mfa_setup_only: bool = False,
+    session_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> str:
     lifetime_minutes = min(settings.access_token_expire_minutes, 10) if mfa_setup_only else settings.access_token_expire_minutes
-    exp = datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)
+    exp = expires_at or (datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes))
     claims = {"sub": str(user_id), "exp": exp, "ver": int(auth_version)}
     if mfa_verified:
         claims["mfa_verified"] = True
     if mfa_setup_only:
         claims["mfa_setup_only"] = True
+    if session_id:
+        claims["sid"] = str(session_id)
     return jwt.encode(claims, settings.secret_key, algorithm="HS256")
 
 @event.listens_for(Session, "after_begin")
@@ -159,12 +164,45 @@ def _resolve_current_user(token: str, db: Session, *, allow_mfa_setup_only: bool
     if setup_only and not allow_mfa_setup_only:
         raise error
 
-    # SQLAlchemy applies this identity on every new PostgreSQL transaction, including
-    # after an endpoint commits and starts another transaction in the same request.
-    db.info["onecore_user_id"] = user_id
+    # Bind the signed subject before reading account-owned RLS tables.
+    try:
+        set_verified_user_context(db, user_id)
+    except ValueError:
+        raise error
     user = db.get(User, user_id)
     if not user or not user.is_active or int(user.auth_version) != token_version:
         raise error
+
+    session_id = payload.get("sid")
+    db.info["onecore_session_id"] = None
+    db.info["onecore_mfa_setup_only"] = setup_only
+    db.info["onecore_mfa_verified"] = payload.get("mfa_verified") is True
+    if session_id is not None:
+        if not isinstance(session_id, str) or len(session_id) != 36:
+            raise error
+        session = db.query(UserSession).filter_by(id=session_id, user_id=user.id).first()
+        if not session or session.revoked_at is not None:
+            raise error
+        # The database session record is the authoritative assurance record for
+        # tracked tokens. A mismatch indicates an inconsistent or stale token.
+        session_mfa_verified = bool(session.mfa_verified)
+        if session_mfa_verified != (payload.get("mfa_verified") is True):
+            raise error
+        db.info["onecore_mfa_verified"] = session_mfa_verified
+        session_expiry = session.expires_at
+        if session_expiry.tzinfo is None:
+            session_expiry = session_expiry.replace(tzinfo=timezone.utc)
+        if session_expiry <= datetime.now(timezone.utc) or int(session.auth_version) != token_version:
+            raise error
+        db.info["onecore_session_id"] = session.id
+        last_seen = session.last_seen_at
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if last_seen <= datetime.now(timezone.utc) - timedelta(minutes=5):
+            session.last_seen_at = datetime.now(timezone.utc)
+            # Authentication runs before endpoint code. Persist only the bounded
+            # activity timestamp, then the transaction-start hook reapplies RLS.
+            db.commit()
 
     if setup_only:
         # A setup token is deliberately accepted only by the three MFA setup
@@ -181,15 +219,10 @@ def _resolve_current_user(token: str, db: Session, *, allow_mfa_setup_only: bool
         return user
 
     if platform_role_requires_mfa(user.platform_role) and payload.get("mfa_verified") is not True:
-        factor = db.query(UserMFAFactor).filter(
-            UserMFAFactor.user_id == user.id,
-            UserMFAFactor.enabled_at.isnot(None),
-        ).first()
-        if not factor:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Multi-factor authentication is required for privileged platform access.",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Multi-factor authentication with a verified second factor is required for privileged platform access.",
+        )
     return user
 
 
