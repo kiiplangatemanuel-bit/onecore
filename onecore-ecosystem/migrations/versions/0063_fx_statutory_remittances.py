@@ -80,6 +80,7 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("uq_payroll_statutory_batch_org_key","payroll_statutory_batches",["organization_id","idempotency_key"],unique=True)
+    op.create_index("uq_payroll_statutory_batch_org_payment_reference","payroll_statutory_batches",["organization_id","payment_reference"],unique=True,sqlite_where=sa.text("payment_reference <> ''"),postgresql_where=sa.text("payment_reference <> ''"))
     bind=op.get_bind()
     if bind.dialect.name=="postgresql":
         for table in ("accounting_fx_rates","accounting_fx_postings","accounting_fx_revaluations","payroll_statutory_batches"):
