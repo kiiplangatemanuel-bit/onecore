@@ -50,7 +50,7 @@ def backup(args):
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise SystemExit(f"Refusing to overwrite existing backup: {target}")
-    run(["pg_dump", *conn, "--format=custom", "--no-owner", "--no-acl", "--file", str(target)], env)
+    run(["pg_dump", *conn, "--format=custom", "--no-owner", "--file", str(target)], env)
     run(["pg_restore", "--list", str(target)], env)
     digest = sha256(target)
     manifest = {"format":"onecore-postgresql-custom-v1","database":database,
@@ -92,7 +92,7 @@ def restore(args):
         env=env, check=True, capture_output=True, text=True)
     if int(probe.stdout.strip() or "0") != 0:
         raise SystemExit("Restore target is not empty; refusing to overwrite existing data")
-    run(["pg_restore", "--exit-on-error", "--no-owner", "--no-acl", "--dbname", database,
+    run(["pg_restore", "--exit-on-error", "--no-owner", "--dbname", database,
          "--host", conn[1], "--port", conn[3], "--username", conn[5], str(archive)], env)
     print(json.dumps({"restored":True,"target_database":database,
                       "warning":"Run post-restore validation and keep the target isolated until approved."}))
