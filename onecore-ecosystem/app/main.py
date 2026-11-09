@@ -19,6 +19,7 @@ from app.api.accounting_statements import router as accounting_statements_router
 from app.api.accounting_completion import router as accounting_completion_router
 from app.api.accounting_pos import router as accounting_pos_router
 from app.api.mpesa import router as mpesa_router
+from app.api.mpesa_settlements import router as mpesa_settlements_router
 from app.api.crm_campaigns import router as crm_campaigns_router
 from app.api.crm_automation import router as crm_automation_router
 from app.api.crm_analytics import router as crm_analytics_router
@@ -39,6 +40,7 @@ from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
+from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa settlement models
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -79,6 +81,7 @@ app.include_router(accounting_statements_router)
 app.include_router(accounting_completion_router)
 app.include_router(accounting_pos_router)
 app.include_router(mpesa_router)
+app.include_router(mpesa_settlements_router)
 app.include_router(crm_campaigns_router)
 app.include_router(crm_automation_router)
 app.include_router(crm_analytics_router)
@@ -233,7 +236,8 @@ def _verify_rls_database_boundary(connection):
         "portal_workflow_records", "support_tickets", "support_messages",
         "support_attachments", "developer_api_keys", "developer_api_key_usages",
         "memberships", "audit_events", "mpesa_payment_intents",
-        "mpesa_refund_intents", "procurement_settlements", "crm_campaign_deliveries",
+        "mpesa_refund_intents", "mpesa_settlement_batches", "mpesa_settlement_lines",
+        "procurement_settlements", "crm_campaign_deliveries",
         "developer_webhook_endpoints", "developer_webhook_deliveries",
         "records", "branches", "inventory_products", "inventory_stock_movements",
         "accounting_accounts", "accounting_journals", "accounting_journal_lines",
