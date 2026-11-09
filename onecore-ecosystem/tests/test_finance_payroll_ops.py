@@ -67,7 +67,7 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
             assert conflicting_replay.status_code==409
 
             revaluation=client.post("/api/v1/accounting/fx/revaluations",json={
-                "currency":"USD","valuation_date":"2026-11-09","closing_rate":"0.008",
+                "currency":"USD","valuation_date":"2026-11-09","closing_rate":"0.008","closing_rate_source":"Central Bank of Kenya","closing_rate_reference":"CBK-2026-11-09",
                 "fx_gain_account_id":account_ids[2],"fx_loss_account_id":account_ids[3],
                 "positions":[
                     {"account_id":account_ids[0],"position_type":"asset","foreign_balance":"100.00","carrying_base_amount":"12000.00"},
@@ -90,7 +90,7 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
                 session.close()
             asset_settlement=client.post("/api/v1/accounting/fx/settlements",json={
                 "currency":"USD","settlement_date":"2026-11-09","position_type":"asset",
-                "foreign_amount":"100.00","carrying_base_amount":"12000.00","settlement_rate":"0.008",
+                "foreign_amount":"100.00","carrying_base_amount":"12000.00","settlement_rate":"0.008","settlement_rate_source":"CBK","settlement_rate_reference":"CBK-2026-11-09",
                 "position_account_id":account_ids[0],"bank_account_id":account_ids[4],
                 "fx_gain_account_id":account_ids[2],"fx_loss_account_id":account_ids[3],
                 "reference":"USD-RECEIPT-001","idempotency_key":"fx-settle-asset-001"})
@@ -113,7 +113,7 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
             assert changed_settlement.status_code==409
             liability_settlement=client.post("/api/v1/accounting/fx/settlements",json={
                 "currency":"USD","settlement_date":"2026-11-09","position_type":"liability",
-                "foreign_amount":"100.00","carrying_base_amount":"13000.00","settlement_rate":"0.007",
+                "foreign_amount":"100.00","carrying_base_amount":"13000.00","settlement_rate":"0.007","settlement_rate_source":"CBK","settlement_rate_reference":"CBK-2026-11-09",
                 "position_account_id":account_ids[1],"bank_account_id":account_ids[4],
                 "fx_gain_account_id":account_ids[2],"fx_loss_account_id":account_ids[3],
                 "reference":"USD-PAYMENT-001","idempotency_key":"fx-settle-liability-001"})
