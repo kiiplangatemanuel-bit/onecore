@@ -71,7 +71,7 @@ def test_statutory_batch_approval_remittance_and_ledger_settlement():
             assert approved.status_code==200 and approved.json()["status"]=="approved"
             actor.update(user=user_map["payer"],role="payroll_payment")
             payment=client.post(f"/api/v1/payroll/statutory-batches/{batch_id}/record-payment",json={
-                "payment_reference":"BANK-STAT-001","payment_date":"2026-11-09","paid_amount":"3500.00",
+                "payment_reference":"BANK-STAT-001","payment_date":"2026-11-09","paid_amount":"3500.00","paid_amount":"3500.00",
                 "bank_account_id":account_ids[0],"paye_payable_account_id":account_ids[1],
                 "nssf_payable_account_id":account_ids[2],"shif_payable_account_id":account_ids[3],
                 "housing_levy_payable_account_id":account_ids[4],"pension_payable_account_id":account_ids[5]})
