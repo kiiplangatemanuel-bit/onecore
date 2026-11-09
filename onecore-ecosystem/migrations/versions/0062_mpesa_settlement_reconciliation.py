@@ -81,7 +81,7 @@ def upgrade():
         # The dedicated API role is provisioned before migrations in production.
         # Grant only the CRUD and sequence rights required by these two tables.
         op.execute("""
-            DO $
+            DO $mpesa$
             BEGIN
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
                     GRANT SELECT, INSERT, UPDATE ON TABLE
@@ -93,7 +93,7 @@ def upgrade():
                         TO onecore_api;
                 END IF;
             END
-            $
+            $mpesa$
         """)
 
 
