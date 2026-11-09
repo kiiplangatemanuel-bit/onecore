@@ -47,4 +47,28 @@ The session expiry is aligned with that configured lifetime. Production
 PostgreSQL/RLS rehearsal, security review and user acceptance testing remain
 release requirements.
 
+## Account security interface
+
+The shared account-security screen at `/account/security` lists the latest 50
+tracked sessions, including device label, user-agent description, authentication
+method, MFA assurance, last-seen and expiry timestamps. A user can revoke an
+individual session or revoke every other live session while retaining the
+current device. Revoking the current device clears its local bearer token and
+requires a new sign-in. Session data is rendered as text; client-supplied
+device labels and user-agent strings are descriptive only.
+
+A privileged setup-only token can read MFA enrollment status but cannot list or
+revoke sessions. The status response explicitly tells the interface when
+session management is unavailable until enrollment is completed. Legacy tokens
+without a session ID can still revoke a specific listed session, but must be
+replaced by a new tracked sign-in before the bulk revoke-others operation.
+
+The PostgreSQL policies for both identity tables are owner-only: access is
+restricted to the verified `app.user_id` transaction context, with no
+platform-administrator bypass. The API uses soft revocation and does not grant
+DELETE on these tables to the runtime role. The MFA assurance copied to a
+portal handoff is stored separately and checked during exchange; the signed
+token's MFA claim must match its durable session record on every authenticated
+request.
+
 Powered by OneCore Technologies Ltd
