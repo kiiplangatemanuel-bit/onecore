@@ -33,7 +33,7 @@ Supabase-managed PITR, automated snapshots, cross-region replication and retenti
 
 - `GET /health` is a process liveness check only.
 - `GET /ready` checks database connectivity. In production it also rejects a superuser/BYPASSRLS runtime role and checks the forced RLS policies on the protected tenant tables, including the new FX and statutory batch tables.
-- The scheduled workflow `.github/workflows/onecore-production-monitor.yml` probes `/health`, `/ready` and the OpenAPI FX/payroll routes every 15 minutes. Configure the repository secret `ONECORE_HEALTHCHECK_URL` to the deployed API base URL and enable GitHub Actions failure notifications for the operators.
+- The scheduled workflow `.github/workflows/onecore-production-monitor.yml` probes `/health`, `/ready` and the OpenAPI FX/payroll routes every 15 minutes. Configure the repository secret `ONECORE_HEALTHCHECK_URL` to the deployed API base URL and enable GitHub Actions failure notifications for the operators. Optionally set `ONECORE_MONITOR_TOKEN` to a scoped monitoring user's bearer token; the monitor then checks that every enabled provider has its required environment configuration. This is a configuration check, not a live provider transaction or connectivity certification.
 - Configure the hosting platform to probe `/ready`, alert on non-2xx responses, and retain request/error logs. Alert on failed backups, checksum mismatches, migration failures, payment/provider callback backlog, unremitted statutory batches and restore-drill expiry.
 - A green readiness response is not a backup restore test, provider certification, statutory filing confirmation or production UAT sign-off.
 
