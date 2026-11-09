@@ -42,6 +42,7 @@ jobs:
               "/api/v1/accounting/fx/rates",
               "/api/v1/accounting/fx/postings",
               "/api/v1/accounting/fx/revaluations",
+              "/api/v1/accounting/fx/settlements",
               "/api/v1/payroll/statutory-batches",
           }
           missing = sorted(required - set(spec.get("paths", {})))
