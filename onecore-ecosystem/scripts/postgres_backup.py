@@ -28,7 +28,7 @@ def connection_args(raw_url):
             "--username", url.username or "", "--dbname", url.database or "postgres"]
     query = dict(url.query)
     if query.get("sslmode"):
-        args.extend(["--sslmode", query["sslmode"]])
+        env["PGSSLMODE"] = query["sslmode"]
     return args, env, url.database or "postgres"
 
 
