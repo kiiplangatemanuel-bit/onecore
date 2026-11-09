@@ -293,7 +293,7 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     if len(runs)!=len(payload.payroll_run_ids) or any(x.status!="approved" or not can_access_branch(membership,x.branch_id) for x in runs):
         raise HTTPException(409,"Every source payroll run must exist in this tenant, be within branch scope and be approved")
     links=db.query(PayrollAccountingLink).filter(PayrollAccountingLink.organization_id==membership.organization_id,PayrollAccountingLink.payroll_run_id.in_(payload.payroll_run_ids)).all()
-    if len(links)!=len(runs) or any(x.reversal_journal_id for x in links):
+    if len(links)!=len(runs) or {x.payroll_run_id for x in links}!=set(payload.payroll_run_ids) or any(x.reversal_journal_id for x in links):
         raise HTTPException(409,"Every payroll run must have a valid, unreversed accounting accrual")
     journal_ids=[x.journal_id for x in links]
     posted_journals=db.query(AccountingJournal).filter(AccountingJournal.organization_id==membership.organization_id,AccountingJournal.id.in_(journal_ids),AccountingJournal.status=="posted").all()
