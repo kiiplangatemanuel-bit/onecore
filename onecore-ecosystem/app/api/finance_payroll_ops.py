@@ -434,8 +434,8 @@ def submit_statutory_batch(batch_id:int,membership=Depends(active_membership),us
 @router.post("/api/v1/payroll/statutory-batches/{batch_id}/approve")
 def approve_statutory_batch(batch_id:int,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_approver"}: raise HTTPException(403,"Payroll approver role required")
-    row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
-    if not row: raise HTTPException(404,"Statutory batch not found")
+    row=_load_statutory_batch(db,membership,batch_id)
+    row=db.query(PayrollStatutoryBatch).filter_by(id=row.id,organization_id=membership.organization_id).with_for_update().first()
     if row.status!="pending_approval": raise HTTPException(409,"Only submitted statutory batches can be approved")
     if user.id in {row.created_by,row.submitted_by}: raise HTTPException(409,"Preparer or submitter cannot approve the statutory batch")
     row.status="approved";row.approved_by=user.id;row.approved_at=datetime.now(timezone.utc)
@@ -445,8 +445,8 @@ def approve_statutory_batch(batch_id:int,membership=Depends(active_membership),u
 @router.post("/api/v1/payroll/statutory-batches/{batch_id}/record-payment")
 def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_payment"}: raise HTTPException(403,"Payroll payment role required")
-    row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
-    if not row: raise HTTPException(404,"Statutory batch not found")
+    row=_load_statutory_batch(db,membership,batch_id)
+    row=db.query(PayrollStatutoryBatch).filter_by(id=row.id,organization_id=membership.organization_id).with_for_update().first()
     if row.status!="approved": raise HTTPException(409,"Only approved statutory batches can be marked remitted")
     if user.id in {row.created_by,row.submitted_by,row.approved_by}: raise HTTPException(409,"Preparer, submitter or approver cannot record remittance")
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
