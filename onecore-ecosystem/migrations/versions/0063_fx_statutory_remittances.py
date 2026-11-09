@@ -32,6 +32,7 @@ def upgrade():
         sa.Column("foreign_amount", sa.Numeric(20, 4), nullable=False),
         sa.Column("base_amount", sa.Numeric(18, 2), nullable=False),
         sa.Column("idempotency_key", sa.String(100), nullable=False),
+        sa.Column("payload_hash", sa.String(64), nullable=False),
         sa.Column("reference", sa.String(120), nullable=False, server_default=""),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -49,6 +50,7 @@ def upgrade():
         sa.Column("total_loss", sa.Numeric(18, 2), nullable=False, server_default="0"),
         sa.Column("position_snapshot", sa.JSON(), nullable=False),
         sa.Column("idempotency_key", sa.String(100), nullable=False),
+        sa.Column("payload_hash", sa.String(64), nullable=False),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -66,6 +68,7 @@ def upgrade():
         sa.Column("source_run_ids", sa.JSON(), nullable=False),
         sa.Column("payment_journal_id", sa.Integer(), sa.ForeignKey("accounting_journals.id"), nullable=True, unique=True),
         sa.Column("idempotency_key", sa.String(100), nullable=False),
+        sa.Column("payload_hash", sa.String(64), nullable=False),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("approved_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
