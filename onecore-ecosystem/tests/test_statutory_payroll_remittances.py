@@ -58,6 +58,10 @@ def test_statutory_batch_approval_remittance_and_ledger_settlement():
             batch_id=created.json()["id"]
             assert created.json()["totals"]["NSSF_EMPLOYEE"]=="600.00"
             assert created.json()["totals"]["HOUSING_LEVY_EMPLOYER"]=="300.00"
+            replay=client.post("/api/v1/payroll/statutory-batches",json={"payroll_run_ids":[run_id],"idempotency_key":"statutory-batch-001"})
+            assert replay.status_code==201 and replay.json()["replayed"] is True
+            duplicate_batch=client.post("/api/v1/payroll/statutory-batches",json={"payroll_run_ids":[run_id],"idempotency_key":"statutory-batch-002"})
+            assert duplicate_batch.status_code==409
             returned=client.get(f"/api/v1/payroll/statutory-batches/{batch_id}/return")
             assert returned.status_code==200 and returned.json()["employee_lines"][0]["employee_number"]=="ST-001"
             submitted=client.post(f"/api/v1/payroll/statutory-batches/{batch_id}/submit",json={})
