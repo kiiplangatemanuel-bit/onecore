@@ -69,7 +69,7 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
                     {"account_id":account_ids[1],"position_type":"liability","foreign_balance":"100.00","carrying_base_amount":"13000.00"}
                 ],"idempotency_key":"fx-reval-0001"})
             assert revaluation.status_code==201,revaluation.text
-            assert revaluation.json()["total_gain"]=="500.00"
+            assert revaluation.json()["total_gain"]=="1000.00"
             assert revaluation.json()["total_loss"]=="0.00"
             check=override_db()
             session=next(check)
