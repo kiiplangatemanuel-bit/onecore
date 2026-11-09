@@ -15,6 +15,7 @@ from app.api.auth_mfa import _totp_code, complete_mfa_challenge, confirm_mfa_enr
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, MFAChallenge, MFARecoveryCode, PortalAuthorizationCode, User, UserMFAFactor
+from app.core.identity_models import UserSession
 from app.core.security import current_user, current_user_for_mfa_setup, create_access_token, hash_password
 from app.api.routes import login
 
@@ -23,7 +24,7 @@ def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
-        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__, UserSession.__table__,
     ])
     return engine
 
@@ -254,7 +255,7 @@ def test_privileged_password_login_is_restricted_until_mfa_is_enabled(monkeypatc
         with pytest.raises(HTTPException) as expired_setup:
             current_user_for_mfa_setup(token=result["access_token"], db=db)
         assert expired_setup.value.status_code == 401
-        fresh_token = create_access_token(user.id, user.auth_version)
+        fresh_token = create_access_token(user.id, user.auth_version, mfa_verified=True)
         assert current_user(token=fresh_token, db=db).id == user.id
     engine.dispose()
 
