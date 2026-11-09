@@ -1,0 +1,58 @@
+name: OneCore encrypted PostgreSQL backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check backup configuration
+        id: config
+        env:
+          DATABASE_URL: ${{ secrets.ONECORE_BACKUP_DATABASE_URL }}
+          S3_BUCKET: ${{ secrets.ONECORE_BACKUP_S3_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.ONECORE_BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ONECORE_BACKUP_AWS_REGION }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$S3_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_DEFAULT_REGION" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Configure ONECORE_BACKUP_DATABASE_URL, ONECORE_BACKUP_S3_BUCKET and scoped AWS backup credentials to enable backups."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install PostgreSQL client and Python dependency
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          python -m pip install "sqlalchemy>=2.0,<3.0"
+      - name: Create and verify backup
+        if: steps.config.outputs.configured == 'true'
+        env:
+          ONECORE_BACKUP_DATABASE_URL: ${{ secrets.ONECORE_BACKUP_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          archive="/tmp/onecore-$(date -u +%Y%m%dT%H%M%SZ).dump"
+          python onecore-ecosystem/scripts/postgres_backup.py backup --output "$archive"
+          python onecore-ecosystem/scripts/postgres_backup.py verify --archive "$archive"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Upload encrypted backup archive and manifest
+        if: steps.config.outputs.configured == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ONECORE_BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ONECORE_BACKUP_AWS_REGION }}
+          S3_BUCKET: ${{ secrets.ONECORE_BACKUP_S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "$ARCHIVE" "s3://$S3_BUCKET/onecore/$(basename "$ARCHIVE")" --sse AES256
+          aws s3 cp "$ARCHIVE.manifest.json" "s3://$S3_BUCKET/onecore/$(basename "$ARCHIVE").manifest.json" --sse AES256
