@@ -1,22 +1,24 @@
 # Supabase PostgreSQL (OneCore system of record)
 
-OneCore's backend is already wired to Supabase-managed PostgreSQL through SQLAlchemy/psycopg and Alembic. The `SUPABASE_DB_URL` setting takes precedence over `DATABASE_URL`. Existing procurement, accounting, inventory, HR and other domain models therefore share the same Supabase database and migration chain; no second browser-side database client is required.
+OneCore uses Supabase-managed PostgreSQL through SQLAlchemy/psycopg and Alembic. The application ORM and Alembic migrations support separate connection URLs: `DATABASE_URL` is the ORM connection and `ALEMBIC_DATABASE_URL` is the migration connection. `SUPABASE_DB_URL` remains a compatibility fallback for older deployments.
 
 ## Configure Render
 
 1. Open Supabase **Project Settings → Database → Connection string** and copy the URI for your project and selected connection mode.
-2. In Render, add `SUPABASE_DB_URL` as a secret environment variable on the API service. Use the exact host, port, username and password Supabase provides, and include `sslmode=require`.
-3. Set `APP_ENV=production`, `DEBUG=false`, a unique `SECRET_KEY`, explicit HTTPS `CORS_ORIGINS`, explicit `TRUSTED_HOSTS`, and `FORCE_HTTPS=true`.
+2. In Render, set `DATABASE_URL` to the Supabase Session Pooler URI for the application ORM and `ALEMBIC_DATABASE_URL` to the migration URI. They may initially contain the same connection string; separate credentials can be introduced after their database privileges are designed and tested.
+3. Keep `SUPABASE_DB_URL` only as a compatibility fallback. Explicit `DATABASE_URL` wins for the ORM; explicit `ALEMBIC_DATABASE_URL` wins for migrations. Set `APP_ENV=production`, `DEBUG=false`, a unique `SECRET_KEY`, explicit HTTPS `CORS_ORIGINS`, explicit `TRUSTED_HOSTS`, and `FORCE_HTTPS=true`.
 4. Configure any worker/scheduler services with the same `SUPABASE_DB_URL`. They must use the same Supabase project and schema revision as the API.
 5. Run Alembic migrations in the controlled release step before routing traffic. Do not run destructive downgrade operations against production.
 
 Example format only — copy actual values from the Supabase dashboard and never commit the completed URI:
 
 ```text
+DATABASE_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
+ALEMBIC_DATABASE_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
 SUPABASE_DB_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-host>:5432/postgres?sslmode=require
 ```
 
-Production requires an explicit `SUPABASE_DB_URL`; it will not silently fall back to `DATABASE_URL`. When the shared pooler is used, configuration validation rejects the bare `postgres` username and requires the project-qualified username copied from Supabase Connect. The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.
+The ORM selects `DATABASE_URL` first, then `SUPABASE_DB_URL` for compatibility (and local SQLite remains available in development). Alembic selects `ALEMBIC_DATABASE_URL` first, then `SUPABASE_DB_URL`, then the effective ORM URL. Production validates both effective URLs as Supabase PostgreSQL and rejects bare `postgres` usernames for shared-pooler connections. Both connections normalize PostgreSQL URLs to psycopg v3 and enforce Supabase TLS. Transaction-mode pooler connections on port 6543 disable psycopg prepared statements. The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.
 
 ## Support file attachments
 
@@ -31,11 +33,11 @@ The API accepts PDF, PNG, JPEG, TXT and CSV files up to 10 MiB. Upload URLs expi
 
 ## Docker Compose
 
-The API and CRM scheduler both receive the same database URL. Set `SUPABASE_DB_URL` in the project `.env` file or provide `ONECORE_DATABASE_URL` as the explicit Compose override. Compose uses the override first, then `SUPABASE_DB_URL`, and falls back to local SQLite only for development.
+The API and CRM scheduler both receive the same database URL. Set `DATABASE_URL` and `ALEMBIC_DATABASE_URL` in the project `.env` file, or retain `SUPABASE_DB_URL` as the compatibility fallback. Local SQLite remains development-only.
 
 ## Frontend security boundary
 
-Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The browser uses OneCore's authenticated API and tenant context. Never add `SUPABASE_DB_URL`, a database password or a Supabase service-role key to frontend environment variables, source code or browser storage.
+Set only `VITE_API_BASE_URL` in Vercel to the public HTTPS FastAPI origin. The browser uses OneCore's authenticated API and tenant context. Never add `DATABASE_URL`, `ALEMBIC_DATABASE_URL`, `SUPABASE_DB_URL`, a database password or a Supabase service-role key to frontend environment variables, source code or browser storage.
 
 ## Release verification
 
