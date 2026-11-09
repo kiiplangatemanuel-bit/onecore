@@ -102,7 +102,7 @@ def test_production_database_boundary_rejects_missing_critical_rls_table():
     "accounting_fx_revaluations", "accounting_fx_settlements",
     "payroll_statutory_batches",
 ])
-def test_production_readiness_rejects_each_missing_hr_payroll_rls_table(table_name):
+def test_production_readiness_rejects_each_missing_critical_tenant_rls_table(table_name):
     from app.main import _verify_rls_database_boundary
     tables = [row for row in _tables() if row["relname"] != table_name]
     with pytest.raises(RuntimeError, match="RLS schema"):
