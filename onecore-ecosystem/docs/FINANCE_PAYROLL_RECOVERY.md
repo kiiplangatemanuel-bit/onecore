@@ -43,3 +43,8 @@ Supabase-managed PITR, automated snapshots, cross-region replication and retenti
 ### FX rate evidence
 
 FX rate creation, period-end revaluation and realized settlement all retain the declared rate source and source reference alongside the numeric rate. Finance operators should record the approved published source, effective date and any source publication/reference identifier. The API does not independently validate the external rate publication; approval and reconciliation remain finance controls.
+
+
+### Automated restore drill
+
+Use the manual GitHub Actions workflow `.github/workflows/onecore-restore-drill.yml` to download a selected archive and adjacent manifest from private S3, verify its checksum and PostgreSQL archive listing, restore it into an explicitly configured empty recovery database, and run the core OneCore schema smoke test. Configure `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME` as repository secrets, alongside the backup S3 credentials. The recovery database must be a separate isolated target, not production. Each drill requires a fresh empty target (or an operator-provisioned replacement); the workflow intentionally refuses to overwrite a prior restored database. Capture measured RPO/RTO and complete application-level checks before sign-off.
