@@ -9,7 +9,7 @@ import uuid
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, User, UserMFAFactor
 from app.core.security import create_access_token, hash_password, platform_role_requires_mfa
+from app.services.user_sessions import create_user_session
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -68,7 +69,11 @@ def _verified_supabase_user(access_token: str) -> dict:
 
 
 @router.post("/supabase-session")
-def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = Depends(get_db)):
+def exchange_supabase_session(
+    payload: SupabaseSessionExchange,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
     identity = _verified_supabase_user(payload.access_token)
     supabase_id = identity["id"]
     email = identity["email"]
@@ -131,6 +136,11 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
 
     try:
         db.flush()
+        session = None
+        if not mfa_setup_only:
+            session = create_user_session(
+                db, user, request, auth_method="supabase", mfa_verified=mfa_verified
+            )
         db.add(AuditEvent(
             actor_user_id=user.id, organization_id=None,
             action=locals().get("action", "auth.supabase.session_exchanged"),
@@ -155,6 +165,8 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
             user.id, user.auth_version,
             mfa_verified=mfa_verified,
             mfa_setup_only=mfa_setup_only,
+            session_id=session.id if session else None,
+            expires_at=session.expires_at if session else None,
         ),
         "token_type": "bearer",
         "mfa_enrollment_required": mfa_setup_only,
