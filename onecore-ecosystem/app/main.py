@@ -255,7 +255,7 @@ def _verify_rls_database_boundary(connection):
         "payroll_accounting_mappings", "payroll_accounting_links",
         "payroll_adjustments", "payroll_payment_batches",
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
-        "accounting_fx_rates", "accounting_fx_postings", "accounting_fx_revaluations",
+        "accounting_fx_rates", "accounting_fx_postings", "accounting_fx_revaluations", "accounting_fx_settlements",
         "payroll_statutory_batches",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
