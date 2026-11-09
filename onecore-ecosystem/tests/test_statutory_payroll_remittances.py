@@ -62,6 +62,22 @@ def test_statutory_batch_approval_remittance_and_ledger_settlement():
             assert replay.status_code==201 and replay.json()["replayed"] is True
             duplicate_batch=client.post("/api/v1/payroll/statutory-batches",json={"payroll_run_ids":[run_id],"idempotency_key":"statutory-batch-002"})
             assert duplicate_batch.status_code==409
+            integrity=Session()
+            try:
+                source_link=integrity.query(PayrollAccountingLink).filter_by(payroll_run_id=run_id).one()
+                source_link.reversal_journal_id=source_link.journal_id
+                integrity.commit()
+            finally:
+                integrity.close()
+            blocked_return=client.get(f"/api/v1/payroll/statutory-batches/{batch_id}/return")
+            assert blocked_return.status_code==409
+            integrity=Session()
+            try:
+                source_link=integrity.query(PayrollAccountingLink).filter_by(payroll_run_id=run_id).one()
+                source_link.reversal_journal_id=None
+                integrity.commit()
+            finally:
+                integrity.close()
             returned=client.get(f"/api/v1/payroll/statutory-batches/{batch_id}/return")
             assert returned.status_code==200 and returned.json()["employee_lines"][0]["employee_number"]=="ST-001"
             submitted=client.post(f"/api/v1/payroll/statutory-batches/{batch_id}/submit",json={})
