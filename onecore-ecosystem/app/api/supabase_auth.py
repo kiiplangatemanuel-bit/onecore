@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, User, UserMFAFactor
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, hash_password, platform_role_requires_mfa
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -110,6 +110,8 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
         isinstance(factor, dict) and factor.get("status") == "verified"
         for factor in (identity.get("factors") or [])
     )
+    mfa_verified = False
+    mfa_setup_only = False
     if mfa_factor or supabase_mfa_enabled:
         try:
             claims = jwt.decode(
@@ -120,6 +122,12 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
             raise HTTPException(401, "Supabase MFA assurance could not be verified") from exc
         if str(claims.get("sub", "")) != supabase_id or claims.get("aal") != "aal2":
             raise HTTPException(403, "This OneCore account requires multi-factor authentication")
+        # The Supabase Auth /user request above has already validated the supplied
+        # token signature, expiry and subject. Preserve its AAL2 result only in a
+        # OneCore-signed claim so the local API can enforce the platform policy.
+        mfa_verified = True
+    elif platform_role_requires_mfa(user.platform_role):
+        mfa_setup_only = True
 
     try:
         db.flush()
@@ -129,6 +137,13 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
             resource_type="user", resource_id=str(user.id),
             detail="Supabase Auth identity verified by the configured Supabase Auth service",
         ))
+        if mfa_setup_only:
+            db.add(AuditEvent(
+                actor_user_id=user.id, organization_id=None,
+                action="account.mfa.enrollment_required",
+                resource_type="user", resource_id=str(user.id),
+                detail="Privileged Supabase session restricted to MFA enrollment",
+            ))
         db.commit()
         db.refresh(user)
     except IntegrityError as exc:
@@ -136,8 +151,13 @@ def exchange_supabase_session(payload: SupabaseSessionExchange, db: Session = De
         raise HTTPException(409, "This Supabase identity or email is already linked to another OneCore account") from exc
 
     return {
-        "access_token": create_access_token(user.id, user.auth_version),
+        "access_token": create_access_token(
+            user.id, user.auth_version,
+            mfa_verified=mfa_verified,
+            mfa_setup_only=mfa_setup_only,
+        ),
         "token_type": "bearer",
+        "mfa_enrollment_required": mfa_setup_only,
         "user": {
             "id": user.id, "email": user.email, "full_name": user.full_name,
             "platform_role": user.platform_role,

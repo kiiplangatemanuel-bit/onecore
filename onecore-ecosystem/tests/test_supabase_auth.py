@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, User, UserMFAFactor
-from app.core.security import current_user
+from app.core.security import current_user, current_user_for_mfa_setup
 from app.api.supabase_auth import SupabaseSessionExchange, exchange_supabase_session
 
 
@@ -195,4 +195,50 @@ def test_supabase_enrolled_mfa_factor_requires_aal2(monkeypatch):
         )
         result = exchange_supabase_session(SupabaseSessionExchange(access_token=aal2_token), db)
         assert result["access_token"]
+    engine.dispose()
+
+
+
+def test_privileged_supabase_session_is_restricted_until_second_factor(monkeypatch):
+    identity = _identity()
+    _configure_supabase(monkeypatch, identity)
+    engine = _db()
+    with Session(engine) as db:
+        user = User(
+            email=identity["email"], full_name="Platform Administrator",
+            password_hash="unused", platform_role="root_superadmin",
+            supabase_auth_user_id=identity["id"],
+        )
+        db.add(user)
+        db.commit()
+        result = exchange_supabase_session(
+            SupabaseSessionExchange(access_token="supabase-access-token-" + "x" * 32), db
+        )
+        assert result["mfa_enrollment_required"] is True
+        with pytest.raises(HTTPException) as blocked:
+            current_user(result["access_token"], db)
+        assert blocked.value.status_code == 401
+        assert current_user_for_mfa_setup(result["access_token"], db).id == user.id
+    engine.dispose()
+
+
+def test_privileged_supabase_aal2_session_is_accepted(monkeypatch):
+    identity = _identity(factors=[{"id": "factor-2", "factor_type": "totp", "status": "verified"}])
+    _configure_supabase(monkeypatch, identity)
+    engine = _db()
+    with Session(engine) as db:
+        user = User(
+            email=identity["email"], full_name="Platform Administrator",
+            password_hash="unused", platform_role="platform_admin",
+            supabase_auth_user_id=identity["id"],
+        )
+        db.add(user)
+        db.commit()
+        aal2_token = jwt.encode(
+            {"sub": identity["id"], "aal": "aal2"},
+            "test-only-unverified-signature", algorithm="HS256",
+        )
+        result = exchange_supabase_session(SupabaseSessionExchange(access_token=aal2_token), db)
+        assert result["mfa_enrollment_required"] is False
+        assert current_user(result["access_token"], db).id == user.id
     engine.dispose()

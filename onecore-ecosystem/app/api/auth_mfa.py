@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, MFAChallenge, MFARecoveryCode, PortalAuthorizationCode, User, UserMFAFactor
-from app.core.security import create_access_token, current_user, verify_password
+from app.core.security import create_access_token, current_user, current_user_for_mfa_setup, verify_password
 
 router = APIRouter(prefix="/api/v1/auth/mfa", tags=["authentication"])
 CHALLENGE_SECONDS = 300
@@ -176,7 +176,7 @@ def issue_mfa_challenge(db: Session, user: User) -> dict:
 
 
 @router.get("/status")
-def mfa_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def mfa_status(user: User = Depends(current_user_for_mfa_setup), db: Session = Depends(get_db)):
     factor = db.query(UserMFAFactor).filter_by(user_id=user.id).first()
     enabled = bool(factor and factor.enabled_at is not None)
     remaining = db.query(MFARecoveryCode).filter(
@@ -188,7 +188,7 @@ def mfa_status(user: User = Depends(current_user), db: Session = Depends(get_db)
 
 
 @router.post("/enroll")
-def start_mfa_enrollment(payload: MFAEnrollIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def start_mfa_enrollment(payload: MFAEnrollIn, user: User = Depends(current_user_for_mfa_setup), db: Session = Depends(get_db)):
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(403, "Password re-authentication failed.")
     cipher = _fernet()
@@ -216,7 +216,7 @@ def start_mfa_enrollment(payload: MFAEnrollIn, user: User = Depends(current_user
 
 
 @router.post("/confirm")
-def confirm_mfa_enrollment(payload: MFAConfirmIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def confirm_mfa_enrollment(payload: MFAConfirmIn, user: User = Depends(current_user_for_mfa_setup), db: Session = Depends(get_db)):
     now = _now()
     factor = db.query(UserMFAFactor).filter_by(user_id=user.id).with_for_update().first()
     if not factor or factor.enabled_at is not None:

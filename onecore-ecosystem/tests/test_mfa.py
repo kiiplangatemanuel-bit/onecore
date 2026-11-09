@@ -1,4 +1,5 @@
 import hashlib
+import jwt
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -14,7 +15,7 @@ from app.api.auth_mfa import _totp_code, complete_mfa_challenge, confirm_mfa_enr
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, MFAChallenge, MFARecoveryCode, PortalAuthorizationCode, User, UserMFAFactor
-from app.core.security import current_user, hash_password
+from app.core.security import current_user, current_user_for_mfa_setup, create_access_token, hash_password
 from app.api.routes import login
 
 
@@ -230,3 +231,105 @@ def test_mfa_routes_are_registered_and_challenge_is_rate_limited():
         assert second.status_code == 429
     finally:
         app.state.public_write_rate_limiter = original
+
+
+
+def test_privileged_password_login_is_restricted_until_mfa_is_enabled(monkeypatch):
+    monkeypatch.setattr(settings, "mfa_encryption_key", mfa.Fernet.generate_key().decode())
+    engine = _engine()
+    with Session(engine) as db:
+        user = _user(db)
+        user.platform_role = "root_superadmin"
+        db.commit()
+        form = OAuth2PasswordRequestForm(username=user.email, password="correct-password", scope="")
+        result = login(form, db)
+        assert result["mfa_enrollment_required"] is True
+        assert result["token_type"] == "bearer"
+        with pytest.raises(HTTPException) as blocked:
+            current_user(token=result["access_token"], db=db)
+        assert blocked.value.status_code == 401
+        assert current_user_for_mfa_setup(token=result["access_token"], db=db).id == user.id
+
+        _enable(db, user)
+        with pytest.raises(HTTPException) as expired_setup:
+            current_user_for_mfa_setup(token=result["access_token"], db=db)
+        assert expired_setup.value.status_code == 401
+        fresh_token = create_access_token(user.id, user.auth_version)
+        assert current_user(token=fresh_token, db=db).id == user.id
+    engine.dispose()
+
+
+@pytest.mark.parametrize("platform_role", [
+    "root_superadmin", "platform_admin", "security_admin", "cms_admin",
+    "support_admin", "developer_api_admin", "maintenance_admin",
+    "incident_commander", "release_manager", "analytics_admin", "recruitment_admin",
+])
+def test_privileged_role_rejects_legacy_access_token_without_mfa(platform_role):
+    engine = _engine()
+    with Session(engine) as db:
+        user = _user(db)
+        user.platform_role = platform_role
+        db.commit()
+        token = create_access_token(user.id, user.auth_version)
+        with pytest.raises(HTTPException) as blocked:
+            current_user(token=token, db=db)
+        assert blocked.value.status_code == 403
+        assert "multi-factor" in blocked.value.detail.lower()
+    engine.dispose()
+
+
+
+def test_setup_only_token_can_reach_only_mfa_setup_routes(monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import get_db
+    from app.main import app
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine, tables=[
+        User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
+        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+    ])
+    SessionFactory = sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False,
+    )
+    with SessionFactory() as db:
+        user = _user(db)
+        user.platform_role = "platform_admin"
+        db.commit()
+        token = create_access_token(user.id, user.auth_version, mfa_setup_only=True)
+
+    def override_db():
+        with SessionFactory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            status_response = client.get("/api/v1/auth/mfa/status", headers=headers)
+            assert status_response.status_code == 200
+            assert status_response.json()["enabled"] is False
+            profile_response = client.get("/api/v1/auth/me", headers=headers)
+            assert profile_response.status_code == 401
+            organizations_response = client.get("/api/v1/organizations", headers=headers)
+            assert organizations_response.status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        Base.metadata.drop_all(engine, tables=[
+            User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
+            MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+        ])
+        engine.dispose()
+
+
+
+def test_mfa_setup_token_expires_within_ten_minutes():
+    token = create_access_token(1, 0, mfa_setup_only=True)
+    payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    assert 0 < payload["exp"] - time.time() <= 600
