@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.core.authorization import can_access_branch
+from app.core.authorization import can_access_branch, branch_scope_ids
 from app.core.database import get_db
 from app.core.models import AccountingAccount, AccountingJournal, AuditEvent, Organization, Branch
 from app.core.security import current_user
@@ -47,6 +47,8 @@ def _audit(db, user, org_id, action, kind, rid, detail=""):
 
 def _branch_or_404(db, membership, branch_id):
     if branch_id is None:
+        if branch_scope_ids(membership) is not None:
+            raise HTTPException(422,"Select a branch for FX posting when your membership has a restricted branch scope")
         return
     branch=db.query(Branch).filter_by(id=branch_id,organization_id=membership.organization_id,is_active=True).first()
     if not branch or not can_access_branch(membership,branch_id):
