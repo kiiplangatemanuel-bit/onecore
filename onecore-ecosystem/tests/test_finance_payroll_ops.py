@@ -27,6 +27,7 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
         AccountingAccount(organization_id=org.id,code="4000",name="FX gain",account_type="revenue",created_by=user.id),
         AccountingAccount(organization_id=org.id,code="5000",name="FX loss",account_type="expense",created_by=user.id),
         AccountingAccount(organization_id=org.id,code="1010",name="Bank",account_type="asset",created_by=user.id),
+        AccountingAccount(organization_id=org.id,code="9999",name="Inactive account",account_type="asset",is_active=False,created_by=user.id),
     ]
     db.add_all(accounts);db.commit()
     org_id=org.id;user_id=user.id;account_ids=[x.id for x in accounts]
@@ -55,6 +56,11 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
                 "reference":"USD-INV-001","idempotency_key":"fx-posting-0001"})
             assert posting.status_code==201,posting.text
             assert posting.json()["base_amount"]=="13000.00"
+            inactive_posting=client.post("/api/v1/accounting/fx/postings",json={
+                "rate_id":rate_id,"entry_date":"2026-11-09","foreign_amount":"10.00",
+                "debit_account_id":account_ids[5],"credit_account_id":account_ids[4],
+                "reference":"INACTIVE-ACCOUNT","idempotency_key":"fx-inactive-0001"})
+            assert inactive_posting.status_code==404
             replay=client.post("/api/v1/accounting/fx/postings",json={
                 "rate_id":rate_id,"entry_date":"2026-11-09","foreign_amount":"100.00",
                 "debit_account_id":account_ids[0],"credit_account_id":account_ids[4],
