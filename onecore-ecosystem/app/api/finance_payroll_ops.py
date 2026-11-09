@@ -297,6 +297,8 @@ def settle_fx_position(payload: FxSettlementIn, membership=Depends(active_member
         if prior.payload_hash!=request_hash:
             raise HTTPException(409,"Idempotency key was already used with a different FX settlement payload")
         return {"id":prior.id,"journal_id":prior.journal_id,"currency":prior.currency,"settlement_base_amount":str(prior.settlement_base_amount),"realized_gain":str(prior.realized_gain),"realized_loss":str(prior.realized_loss),"replayed":True}
+    if db.query(AccountingFxSettlement).filter_by(organization_id=membership.organization_id,reference=payload.reference).first():
+        raise HTTPException(409,"FX settlement reference has already been used in this organization")
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     if not org or payload.currency==org.currency:
         raise HTTPException(422,"Settlement currency must differ from the organization's base currency")
@@ -455,6 +457,9 @@ def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=
     for account_id in account_ids[1:]:
         if account_map[account_id].account_type!="liability":
             raise HTTPException(422,"Statutory control accounts must be liabilities")
+    reference_owner=db.query(PayrollStatutoryBatch).filter(PayrollStatutoryBatch.organization_id==membership.organization_id,PayrollStatutoryBatch.payment_reference==payload.payment_reference,PayrollStatutoryBatch.id!=row.id).first()
+    if reference_owner:
+        raise HTTPException(409,"Statutory payment reference has already been used in this organization")
     totals=row.totals
     obligations=[
         (payload.paye_payable_account_id,Decimal(totals["PAYE"]),"PAYE"),
