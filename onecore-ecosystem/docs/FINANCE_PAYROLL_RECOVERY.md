@@ -3,7 +3,7 @@
 ## Multi-currency accounting
 
 - Configure each organization's base currency before posting any foreign-currency transactions.
-- Add a dated exchange rate at `POST /api/v1/accounting/fx/rates`. The rate convention is **foreign currency units per one unit of base currency**; for example, 1 USD = 130 KES is stored as 130 when KES is the base currency.
+- Add a dated exchange rate at `POST /api/v1/accounting/fx/rates`. The rate convention is **foreign currency units per one unit of base currency**; when KES is the base currency and 1 USD = 130 KES, store approximately 0.0076923077 USD per KES. Conversion to base currency divides the foreign amount by this rate.
 - Post a foreign-currency transaction at `POST /api/v1/accounting/fx/postings`. The endpoint converts the foreign amount to base currency, writes a balanced base-currency general-ledger journal, and stores the source rate, foreign amount and idempotency key.
 - At period end, prepare `POST /api/v1/accounting/fx/revaluations` with the verified foreign-currency monetary positions, carrying values, closing rate, and dedicated FX gain/loss accounts. Asset and liability revaluation directions are handled separately. The resulting journal is balanced and the input position snapshot is retained.
 - The supplied balances are an explicit finance-controlled subledger extract. Reconcile them to the AR/AP/bank/loan source ledgers before posting. This API does not infer foreign balances from historic base-currency journals.
