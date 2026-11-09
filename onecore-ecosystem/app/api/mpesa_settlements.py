@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import AuditEvent, MpesaPaymentIntent, MpesaRefundIntent, Organization
 from app.core.mpesa_settlement_models import MpesaSettlementBatch, MpesaSettlementLine
+from app.core.procurement_workflow_models import ProcurementSettlement
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.authorization import require_permission
@@ -70,14 +71,21 @@ def _match_entry(db: Session, organization_id: int, entry: SettlementEntry):
         ).one_or_none()
         kind = "collection"
     else:
-        row = db.query(MpesaRefundIntent).filter_by(
+        refund = db.query(MpesaRefundIntent).filter_by(
             organization_id=organization_id,
             mpesa_receipt_number=entry.receipt_number,
             status="success",
         ).one_or_none()
-        kind = "payout"
+        supplier = db.query(ProcurementSettlement).filter_by(
+            organization_id=organization_id, provider="mpesa",
+            provider_reference=entry.receipt_number, currency="KES",
+        ).filter(ProcurementSettlement.status.in_(("provider_confirmed", "settled"))).one_or_none()
+        if refund and supplier:
+            return "payout", None, None, "duplicate_provider_receipt", "Receipt is attached to both a POS refund and supplier payout"
+        row = refund or supplier
+        kind = "refund" if refund else ("supplier_payout" if supplier else "payout")
     if row is None:
-        return kind, None, None, "unmatched", "No successful tenant payment/refund callback has this receipt"
+        return kind, None, None, "unmatched", "No successful tenant collection/refund or confirmed supplier payout has this receipt"
     expected = Decimal(str(row.amount)).quantize(CENT)
     actual = entry.amount.quantize(CENT)
     if expected != actual:
