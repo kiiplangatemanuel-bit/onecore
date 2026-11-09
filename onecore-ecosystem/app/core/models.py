@@ -319,6 +319,23 @@ class ProcurementPurchaseOrderLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class ProcurementPurchaseOrderVersion(Base):
+    """Immutable, tenant-scoped snapshot of one issued purchase-order version."""
+    __tablename__ = "procurement_purchase_order_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("procurement_purchase_orders.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    change_reason: Mapped[str] = mapped_column(String(500))
+    supporting_notes: Mapped[str] = mapped_column(String(2000), default="")
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    changed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("uq_procurement_po_version", "organization_id", "purchase_order_id", "version_number", unique=True),
+    )
+
+
 class POSShift(Base):
     __tablename__ = "pos_shifts"
     id: Mapped[int] = mapped_column(primary_key=True)
