@@ -106,7 +106,7 @@ def test_production_requires_supabase_managed_postgresql():
         trusted_hosts="api.example.com",
         force_https=True,
     )
-    with pytest.raises(ValidationError, match="Supabase"):
+    with pytest.raises(ValidationError, match="SUPABASE_DB_URL"):
         Settings(_env_file=None, **safe)
 
 
@@ -151,3 +151,56 @@ def test_supabase_connection_refuses_ssl_disable():
         "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres?sslmode=disable"
     )
     assert url.query["sslmode"] == "require"
+
+
+
+def test_production_requires_explicit_supabase_db_url_even_when_database_url_is_set():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="SUPABASE_DB_URL is required"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            debug=False,
+            secret_key="s" * 48,
+            database_url="postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres",
+            cors_origins="https://app.example.com",
+            portal_redirect_origins="https://support.example.com",
+            trusted_hosts="api.example.com",
+            force_https=True,
+        )
+
+
+def test_production_rejects_unqualified_shared_pooler_username():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="project-qualified username"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            debug=False,
+            secret_key="s" * 48,
+            supabase_db_url="postgresql://postgres:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+            cors_origins="https://app.example.com",
+            portal_redirect_origins="https://support.example.com",
+            trusted_hosts="api.example.com",
+            force_https=True,
+        )
+
+
+def test_production_accepts_project_qualified_shared_pooler_username():
+    from app.core.config import Settings
+
+    Settings(
+        _env_file=None,
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        supabase_db_url="postgresql://postgres.project-ref:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
