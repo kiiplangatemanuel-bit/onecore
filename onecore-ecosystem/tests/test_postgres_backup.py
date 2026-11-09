@@ -45,3 +45,33 @@ def test_connection_args_requires_postgresql_and_uses_password_environment():
     assert env["PGPASSWORD"]=="secret"
     assert env["PGSSLMODE"]=="require"
     assert "secret" not in " ".join(args)
+
+
+
+def test_restore_refuses_database_with_existing_objects(tmp_path, monkeypatch):
+    archive=tmp_path/"backup.dump"
+    archive.write_bytes(b"verified-postgresql-archive")
+    manifest={
+        "format":"onecore-postgresql-custom-v1",
+        "database":"onecore",
+        "file":archive.name,
+        "size_bytes":archive.stat().st_size,
+        "sha256":postgres_backup.sha256(archive),
+        "verified_archive_listing":True,
+    }
+    archive.with_suffix(archive.suffix+".manifest.json").write_text(json.dumps(manifest),encoding="utf-8")
+    monkeypatch.setenv("ONECORE_RESTORE_DATABASE_URL","postgresql://restore:secret@db.example.test:5432/recovery?sslmode=require")
+    calls=[]
+    def fake_run(command,**kwargs):
+        calls.append(command)
+        return type("Result",(),{"returncode":0,"stdout":"1","stderr":""})()
+    monkeypatch.setattr(postgres_backup.subprocess,"run",fake_run)
+    args=type("Args",(),{"allow_restore":True,"confirm_target":"recovery","archive":str(archive)})()
+    try:
+        postgres_backup.restore(args)
+    except SystemExit as exc:
+        assert "not empty" in str(exc)
+    else:
+        raise AssertionError("restore accepted a database with existing objects")
+    assert any(command[0]=="psql" for command in calls)
+    assert not any(command[0]=="pg_restore" and "--exit-on-error" in command for command in calls)
