@@ -55,6 +55,13 @@ def _branch_or_404(db, membership, branch_id):
         raise HTTPException(404,"Branch not found")
 
 
+def _assert_fx_journal_branch(db,membership,journal_id):
+    journal=db.query(AccountingJournal).filter_by(id=journal_id,organization_id=membership.organization_id).first()
+    if not journal:
+        raise HTTPException(404,"FX journal not found")
+    _branch_or_404(db,membership,journal.branch_id)
+
+
 def _accounts(db, org_id, ids):
     rows = db.query(AccountingAccount).filter(
         AccountingAccount.organization_id == org_id, AccountingAccount.id.in_(set(ids))
@@ -202,6 +209,7 @@ def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membersh
     request_hash=_payload_hash(payload)
     if prior:
         if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different FX posting payload")
+        _assert_fx_journal_branch(db,membership,prior.journal_id)
         return {"id":prior.id,"journal_id":prior.journal_id,"currency":prior.currency,"foreign_amount":str(prior.foreign_amount),"base_amount":str(prior.base_amount),"replayed":True}
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     rate=db.query(AccountingFxRate).filter_by(id=payload.rate_id,organization_id=membership.organization_id).first()
@@ -233,6 +241,7 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
     prior=db.query(AccountingFxRevaluation).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if prior:
         if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different FX revaluation payload")
+        _assert_fx_journal_branch(db,membership,prior.journal_id)
         return {"id":prior.id,"journal_id":prior.journal_id,"total_gain":str(prior.total_gain),"total_loss":str(prior.total_loss),"replayed":True}
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     if not org or payload.currency==org.currency:
@@ -296,6 +305,7 @@ def settle_fx_position(payload: FxSettlementIn, membership=Depends(active_member
     if prior:
         if prior.payload_hash!=request_hash:
             raise HTTPException(409,"Idempotency key was already used with a different FX settlement payload")
+        _assert_fx_journal_branch(db,membership,prior.journal_id)
         return {"id":prior.id,"journal_id":prior.journal_id,"currency":prior.currency,"settlement_base_amount":str(prior.settlement_base_amount),"realized_gain":str(prior.realized_gain),"realized_loss":str(prior.realized_loss),"replayed":True}
     if db.query(AccountingFxSettlement).filter_by(organization_id=membership.organization_id,reference=payload.reference).first():
         raise HTTPException(409,"FX settlement reference has already been used in this organization")
