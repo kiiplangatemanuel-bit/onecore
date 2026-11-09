@@ -50,14 +50,22 @@ def backup(args):
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise SystemExit(f"Refusing to overwrite existing backup: {target}")
-    run(["pg_dump", *conn, "--format=custom", "--no-owner", "--file", str(target)], env)
-    run(["pg_restore", "--list", str(target)], env)
-    digest = sha256(target)
-    manifest = {"format":"onecore-postgresql-custom-v1","database":database,
-                "created_at":datetime.now(timezone.utc).isoformat(),
-                "file":target.name,"size_bytes":target.stat().st_size,"sha256":digest,
-                "verified_archive_listing":True}
-    target.with_suffix(target.suffix + ".manifest.json").write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
+    manifest_path = target.with_suffix(target.suffix + ".manifest.json")
+    try:
+        run(["pg_dump", *conn, "--format=custom", "--no-owner", "--no-acl", "--file", str(target)], env)
+        run(["pg_restore", "--list", str(target)], env)
+        digest = sha256(target)
+        manifest = {"format":"onecore-postgresql-custom-v1","database":database,
+                    "created_at":datetime.now(timezone.utc).isoformat(),
+                    "file":target.name,"size_bytes":target.stat().st_size,"sha256":digest,
+                    "verified_archive_listing":True}
+        temporary_manifest = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+        temporary_manifest.write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
+        temporary_manifest.replace(manifest_path)
+    except Exception:
+        target.unlink(missing_ok=True)
+        manifest_path.unlink(missing_ok=True)
+        raise
     print(json.dumps(manifest, indent=2))
 
 
