@@ -183,6 +183,12 @@ def _resolve_current_user(token: str, db: Session, *, allow_mfa_setup_only: bool
         session = db.query(UserSession).filter_by(id=session_id, user_id=user.id).first()
         if not session or session.revoked_at is not None:
             raise error
+        # The database session record is the authoritative assurance record for
+        # tracked tokens. A mismatch indicates an inconsistent or stale token.
+        session_mfa_verified = bool(session.mfa_verified)
+        if session_mfa_verified != (payload.get("mfa_verified") is True):
+            raise error
+        db.info["onecore_mfa_verified"] = session_mfa_verified
         session_expiry = session.expires_at
         if session_expiry.tzinfo is None:
             session_expiry = session_expiry.replace(tzinfo=timezone.utc)
