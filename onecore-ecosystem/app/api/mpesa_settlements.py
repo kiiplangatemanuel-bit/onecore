@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditEvent, MpesaPaymentIntent, MpesaRefundIntent
+from app.core.models import AuditEvent, MpesaPaymentIntent, MpesaRefundIntent, Organization
 from app.core.mpesa_settlement_models import MpesaSettlementBatch, MpesaSettlementLine
 from app.core.security import current_user
 from app.core.tenancy import active_membership
@@ -89,8 +89,8 @@ def _match_entry(db: Session, organization_id: int, entry: SettlementEntry):
 def import_settlement_statement(payload: SettlementImport,
                                 membership=Depends(active_membership),
                                 user=Depends(current_user), db: Session = Depends(get_db)):
-    require_permission(membership, "manage")
-    canonical = _canonical_payload(payload)
+    require_permission(membership, "update")
+    # Serialize imports per tenant so the same provider receipt cannot be accepted\n    # concurrently into two different statement batches.\n    db.query(Organization).filter_by(id=membership.organization_id).with_for_update().one()\n    canonical = _canonical_payload(payload)
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     existing = db.query(MpesaSettlementBatch).filter_by(
         organization_id=membership.organization_id,
@@ -122,9 +122,7 @@ def import_settlement_statement(payload: SettlementImport,
             status, detail = "duplicate_in_statement", "Receipt appears more than once in this statement"
         else:
             seen.add(entry.receipt_number)
-            kind, row, expected, status, detail = _match_entry(
-                db, membership.organization_id, entry
-            )
+            prior = db.query(MpesaSettlementLine).filter(\n                MpesaSettlementLine.organization_id == membership.organization_id,\n                MpesaSettlementLine.receipt_number == entry.receipt_number,\n            ).first()\n            if prior:\n                kind, row, expected = entry.transaction_type, None, None\n                status, detail = "already_imported", "Receipt was already included in a prior settlement statement"\n            else:\n                kind, row, expected, status, detail = _match_entry(\n                    db, membership.organization_id, entry\n                )
         if status == "matched":
             matched += amount
             matched_count += 1
