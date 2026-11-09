@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.models import User
+from app.core import identity_models  # noqa: F401 - register account-owned identity tables
 from app.core.security import hash_password
 from app.api.routes import router
 from app.api.inventory_completion import router as inventory_completion_router
@@ -35,6 +36,7 @@ from app.api.auth_workflows import router as auth_workflows_router
 from app.api.portal_auth import router as portal_auth_router
 from app.api.portal_workflows import router as portal_workflows_router
 from app.api.auth_mfa import router as auth_mfa_router
+from app.api.user_sessions import router as user_sessions_router
 from app.api.supabase_auth import router as supabase_auth_router
 from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
@@ -100,6 +102,7 @@ app.include_router(auth_workflows_router)
 app.include_router(portal_auth_router)
 app.include_router(portal_workflows_router)
 app.include_router(auth_mfa_router)
+app.include_router(user_sessions_router)
 app.include_router(supabase_auth_router)
 app.include_router(developer_api_keys_router)
 app.include_router(developer_webhooks_router)
@@ -256,7 +259,7 @@ def _verify_rls_database_boundary(connection):
         "payroll_adjustments", "payroll_payment_batches",
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings", "accounting_fx_revaluations", "accounting_fx_settlements",
-        "payroll_statutory_batches",
+        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""
