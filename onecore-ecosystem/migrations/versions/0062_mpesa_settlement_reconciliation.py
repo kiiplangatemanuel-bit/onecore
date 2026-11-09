@@ -47,7 +47,8 @@ def upgrade():
     )
     op.create_index("ix_mpesa_settlement_lines_organization_id", "mpesa_settlement_lines", ["organization_id"])
     op.create_index("ix_mpesa_settlement_lines_batch_id", "mpesa_settlement_lines", ["batch_id"])
-    op.create_index("ix_mpesa_settlement_org_receipt", "mpesa_settlement_lines", ["organization_id", "receipt_number"])\n    op.create_index("ix_mpesa_settlement_batch_status", "mpesa_settlement_lines", ["batch_id", "status"])
+    op.create_index("ix_mpesa_settlement_org_receipt", "mpesa_settlement_lines", ["organization_id", "receipt_number"])
+    op.create_index("ix_mpesa_settlement_batch_status", "mpesa_settlement_lines", ["batch_id", "status"])
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         for table in ("mpesa_settlement_batches", "mpesa_settlement_lines"):
