@@ -17,12 +17,18 @@ jobs:
         id: target
         env:
           HEALTHCHECK_URL: ${{ secrets.ONECORE_HEALTHCHECK_URL }}
+          MONITOR_TOKEN: ${{ secrets.ONECORE_MONITOR_TOKEN }}
         run: |
           if [ -z "$HEALTHCHECK_URL" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Set repository secret ONECORE_HEALTHCHECK_URL to enable production probes."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$MONITOR_TOKEN" ]; then
+            echo "token_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "token_configured=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Probe liveness, readiness and OpenAPI
         if: steps.target.outputs.configured == 'true'
@@ -49,4 +55,25 @@ jobs:
           if missing:
               raise SystemExit("Production API is missing expected finance/payroll routes: " + ", ".join(missing))
           print("Production API health, database readiness and finance/payroll route probes passed.")
+          PY
+
+      - name: Check enabled provider configuration
+        if: steps.target.outputs.configured == 'true' && steps.target.outputs.token_configured == 'true'
+        env:
+          HEALTHCHECK_URL: ${{ secrets.ONECORE_HEALTHCHECK_URL }}
+          MONITOR_TOKEN: ${{ secrets.ONECORE_MONITOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="${HEALTHCHECK_URL%/}"
+          curl --fail --silent --show-error --retry 2 --retry-delay 3 --max-time 20 \
+            -H "Authorization: Bearer $MONITOR_TOKEN" "$base/api/v1/integrations" -o /tmp/integrations.json
+          python - <<'PY'
+          import json
+          with open("/tmp/integrations.json", encoding="utf-8") as stream:
+              providers = json.load(stream)
+          missing = sorted(name for name, item in providers.items()
+                           if item.get("enabled") and not item.get("configured"))
+          if missing:
+              raise SystemExit("Enabled integrations are missing required environment settings: " + ", ".join(missing))
+          print("All enabled provider integrations have their required environment configuration.")
           PY
