@@ -14,14 +14,20 @@ class _Query:
         return self
     def one_or_none(self):
         return self.row
+    def filter(self, *args):
+        return self
 
 
 class _DB:
-    def __init__(self, payment=None, refund=None):
-        self.payment, self.refund = payment, refund
+    def __init__(self, payment=None, refund=None, supplier=None):
+        self.payment, self.refund, self.supplier = payment, refund, supplier
     def query(self, model):
         name = getattr(model, "__name__", "")
-        return _Query(self.payment if name == "MpesaPaymentIntent" else self.refund)
+        if name == "MpesaPaymentIntent":
+            return _Query(self.payment)
+        if name == "MpesaRefundIntent":
+            return _Query(self.refund)
+        return _Query(self.supplier)
 
 
 def _entry(amount="250.00", kind="collection"):
@@ -65,3 +71,15 @@ def test_statement_entry_requires_timezone_and_token_receipt():
     with pytest.raises(ValueError):
         SettlementEntry(receipt_number="bad receipt", transaction_type="collection",
                         transaction_at=datetime(2026, 11, 9, tzinfo=timezone.utc), amount=Decimal("1"))
+
+
+def test_confirmed_supplier_b2c_payout_is_included_in_settlement_matching():
+    row = SimpleNamespace(id=9, amount=Decimal("125.00"))
+    kind, found, expected, status, detail = _match_entry(
+        _DB(supplier=row), 7, _entry("125.00", "payout")
+    )
+    assert kind == "supplier_payout"
+    assert found.id == 9
+    assert expected == Decimal("125.00")
+    assert status == "matched"
+    assert detail == ""
