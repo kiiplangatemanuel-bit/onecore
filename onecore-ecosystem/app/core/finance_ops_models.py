@@ -107,4 +107,7 @@ class AccountingFxSettlement(Base):
     payload_hash: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("uq_accounting_fx_settlement_org_key", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index("uq_accounting_fx_settlement_org_key", "organization_id", "idempotency_key", unique=True),
+        Index("uq_accounting_fx_settlement_org_reference", "organization_id", "reference", unique=True),
+    )
