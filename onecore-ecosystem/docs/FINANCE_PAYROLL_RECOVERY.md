@@ -38,3 +38,8 @@ Supabase-managed PITR, automated snapshots, cross-region replication and retenti
 - A green readiness response is not a backup restore test, provider certification, statutory filing confirmation or production UAT sign-off.
 
 - For realized FX reconciliation, use `POST /api/v1/accounting/fx/settlements` with the foreign amount, carrying value, settlement rate, receivable/payable account, bank account and FX gain/loss accounts. It clears the carrying balance and posts the realized difference to gain or loss. Reconcile the supplied carrying value to the actual open item before posting.
+
+
+### FX rate evidence
+
+FX rate creation, period-end revaluation and realized settlement all retain the declared rate source and source reference alongside the numeric rate. Finance operators should record the approved published source, effective date and any source publication/reference identifier. The API does not independently validate the external rate publication; approval and reconciliation remain finance controls.
