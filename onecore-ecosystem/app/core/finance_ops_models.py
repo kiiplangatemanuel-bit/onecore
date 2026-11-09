@@ -1,7 +1,7 @@
 """Tenant-scoped foreign-currency and statutory-remittance records."""
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Date, DateTime, ForeignKey, Index, JSON, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -82,4 +82,8 @@ class PayrollStatutoryBatch(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    __table_args__ = (Index("uq_payroll_statutory_batch_org_key", "organization_id", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index("uq_payroll_statutory_batch_org_key", "organization_id", "idempotency_key", unique=True),
+        Index("uq_payroll_statutory_batch_org_payment_reference", "organization_id", "payment_reference", unique=True,
+              sqlite_where=text("payment_reference <> ''"), postgresql_where=text("payment_reference <> ''")),
+    )
