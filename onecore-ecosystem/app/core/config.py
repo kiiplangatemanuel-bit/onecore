@@ -116,16 +116,29 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG must be false in production")
             if self.secret_key == "unsafe-development-key-change-me" or len(self.secret_key) < 32:
                 raise ValueError("SECRET_KEY must be a unique random value of at least 32 characters in production")
+            # Production must never silently fall back to a legacy DATABASE_URL.
+            # That fallback can keep an old/bare username active after operators
+            # update SUPABASE_DB_URL, making credential failures hard to diagnose.
+            if not self.supabase_db_url.strip():
+                raise ValueError(
+                    "SUPABASE_DB_URL is required in production; DATABASE_URL is only a development/legacy fallback"
+                )
             from sqlalchemy.engine import make_url
             try:
-                database = make_url(self.database_connection_url)
+                database = make_url(self.supabase_db_url.strip())
             except Exception as exc:
-                raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be a valid SQLAlchemy URL") from exc
+                raise ValueError("SUPABASE_DB_URL must be a valid SQLAlchemy URL") from exc
             if database.get_backend_name() != "postgresql":
                 raise ValueError("Supabase PostgreSQL is required in production; configure SUPABASE_DB_URL")
             host = (database.host or "").lower()
             if not (host.endswith(".supabase.co") or host.endswith(".pooler.supabase.com")):
                 raise ValueError("Production database host must belong to Supabase (db.<project>.supabase.co or Supabase pooler)")
+            if host.endswith(".pooler.supabase.com"):
+                username = (database.username or "").strip()
+                if "." not in username or not username.rsplit(".", 1)[-1]:
+                    raise ValueError(
+                        "Supabase shared pooler requires a project-qualified username such as postgres.<project-ref>; copy the Session pooler URI from Supabase Connect"
+                    )
             origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
             if not origins or "*" in origins or any(not origin.startswith("https://") for origin in origins):
                 raise ValueError("CORS_ORIGINS must contain explicit HTTPS origins in production")
