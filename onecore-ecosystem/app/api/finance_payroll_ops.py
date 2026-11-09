@@ -161,6 +161,7 @@ class StatutoryBatchIn(BaseModel):
 class StatutoryPaymentIn(BaseModel):
     payment_reference: str = Field(min_length=3, max_length=120)
     payment_date: date
+    paid_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     bank_account_id: int = Field(gt=0)
     paye_payable_account_id: int = Field(gt=0)
     nssf_payable_account_id: int = Field(gt=0)
@@ -487,6 +488,8 @@ def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=
             lines.append({"account_id":account_id,"description":f"{label} statutory remittance","debit":amount,"credit":0})
             grand_total+=amount
     if grand_total<=0: raise HTTPException(409,"There are no statutory amounts to remit")
+    if money(payload.paid_amount)!=grand_total:
+        raise HTTPException(409,f"Confirmed payment amount {money(payload.paid_amount)} does not match statutory batch total {grand_total}")
     lines.append({"account_id":payload.bank_account_id,"description":"Statutory remittance bank settlement","debit":0,"credit":grand_total})
     source_run=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(row.source_run_ids)).first()
     journal=_accounting_make_journal(db,membership,user,payload.payment_date,payload.payment_reference,"Statutory payroll remittance settlement",lines,source_run.branch_id if source_run else None)
