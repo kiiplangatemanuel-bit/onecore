@@ -276,6 +276,7 @@ def test_privileged_role_rejects_legacy_access_token_without_mfa(platform_role):
 
 def test_setup_only_token_can_reach_only_mfa_setup_routes(monkeypatch):
     from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
     from app.core.database import get_db
     from app.main import app
@@ -289,7 +290,7 @@ def test_setup_only_token_can_reach_only_mfa_setup_routes(monkeypatch):
         User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
         MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
     ])
-    SessionFactory = __import__("sqlalchemy.orm", fromlist=["sessionmaker"]).sessionmaker(
+    SessionFactory = sessionmaker(
         bind=engine, autoflush=False, autocommit=False, expire_on_commit=False,
     )
     with SessionFactory() as db:
