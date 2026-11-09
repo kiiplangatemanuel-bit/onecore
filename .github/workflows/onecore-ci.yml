@@ -56,7 +56,7 @@ jobs:
         working-directory: onecore-ecosystem
         run: alembic downgrade base && alembic upgrade head
       - name: Compile Python modules
-        run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests
+        run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests onecore-ecosystem/scripts
       - name: Run tests
         working-directory: onecore-ecosystem
         run: python -m pytest -q tests
