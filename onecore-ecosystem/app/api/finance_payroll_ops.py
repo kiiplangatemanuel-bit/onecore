@@ -99,8 +99,22 @@ class StatutoryBatchIn(BaseModel):
         return self
 
 
-class RemittanceDecisionIn(BaseModel):
+class StatutoryPaymentIn(BaseModel):
     payment_reference: str = Field(min_length=3, max_length=120)
+    payment_date: date
+    bank_account_id: int = Field(gt=0)
+    paye_payable_account_id: int = Field(gt=0)
+    nssf_payable_account_id: int = Field(gt=0)
+    shif_payable_account_id: int = Field(gt=0)
+    housing_levy_payable_account_id: int = Field(gt=0)
+    pension_payable_account_id: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def unique_accounts(self):
+        ids=[self.bank_account_id,self.paye_payable_account_id,self.nssf_payable_account_id,self.shif_payable_account_id,self.housing_levy_payable_account_id,self.pension_payable_account_id]
+        if len(ids)!=len(set(ids)):
+            raise ValueError("Each statutory control and bank account must be distinct")
+        return self
 
 
 @router.get("/api/v1/accounting/fx/rates")
@@ -211,7 +225,7 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
 
 
 def _statutory_payload(batch):
-    return {"id":batch.id,"period_start":batch.period_start.date().isoformat(),"period_end":batch.period_end.date().isoformat(),"currency":batch.currency,"status":batch.status,"totals":batch.totals,"source_run_ids":batch.source_run_ids,"payment_reference":batch.payment_reference,"created_by":batch.created_by,"submitted_by":batch.submitted_by,"approved_by":batch.approved_by,"paid_by":batch.paid_by}
+    return {"id":batch.id,"period_start":batch.period_start.date().isoformat(),"period_end":batch.period_end.date().isoformat(),"currency":batch.currency,"status":batch.status,"totals":batch.totals,"source_run_ids":batch.source_run_ids,"payment_reference":batch.payment_reference,"payment_journal_id":batch.payment_journal_id,"created_by":batch.created_by,"submitted_by":batch.submitted_by,"approved_by":batch.approved_by,"paid_by":batch.paid_by}
 
 
 @router.get("/api/v1/payroll/statutory-batches")
@@ -240,12 +254,14 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     slips=db.query(PayrollPayslip).filter(PayrollPayslip.organization_id==membership.organization_id,PayrollPayslip.payroll_run_id.in_(payload.payroll_run_ids)).all()
     if not slips: raise HTTPException(409,"No payroll payslips exist for the selected runs")
     totals={"PAYE":Decimal("0"),"NSSF_EMPLOYEE":Decimal("0"),"NSSF_EMPLOYER":Decimal("0"),"SHIF":Decimal("0"),"HOUSING_LEVY_EMPLOYEE":Decimal("0"),"HOUSING_LEVY_EMPLOYER":Decimal("0"),"PENSION":Decimal("0")}
-    for s in slips:
-        totals["PAYE"]+=Decimal(s.paye); totals["NSSF_EMPLOYEE"]+=Decimal(s.nssf_employee); totals["NSSF_EMPLOYER"]+=Decimal(s.nssf_employer)
-        totals["SHIF"]+=Decimal(s.shif_employee); totals["HOUSING_LEVY_EMPLOYEE"]+=Decimal(s.housing_levy_employee); totals["HOUSING_LEVY_EMPLOYER"]+=Decimal(s.housing_levy_employer); totals["PENSION"]+=Decimal(s.pension_employee)
+    employee_lines=[]
+    for slip in slips:
+        values={"PAYE":Decimal(slip.paye),"NSSF_EMPLOYEE":Decimal(slip.nssf_employee),"NSSF_EMPLOYER":Decimal(slip.nssf_employer),"SHIF":Decimal(slip.shif_employee),"HOUSING_LEVY_EMPLOYEE":Decimal(slip.housing_levy_employee),"HOUSING_LEVY_EMPLOYER":Decimal(slip.housing_levy_employer),"PENSION":Decimal(slip.pension_employee)}
+        for key,value in values.items(): totals[key]+=value
+        employee_lines.append({"employee_id":slip.employee_id,"employee_number":slip.employee_number,"employee_name":slip.employee_name,**{key:str(money(value)) for key,value in values.items()}})
     totals={k:str(money(v)) for k,v in totals.items()}
     start=min(x.period_start for x in runs); end=max(x.period_end for x in runs)
-    batch=PayrollStatutoryBatch(organization_id=membership.organization_id,period_start=start,period_end=end,currency=next(iter(currencies)),totals=totals,source_run_ids=payload.payroll_run_ids,idempotency_key=payload.idempotency_key,created_by=user.id)
+    batch=PayrollStatutoryBatch(organization_id=membership.organization_id,period_start=start,period_end=end,currency=next(iter(currencies)),totals=totals,employee_lines=employee_lines,source_run_ids=payload.payroll_run_ids,idempotency_key=payload.idempotency_key,created_by=user.id)
     db.add(batch);db.flush();_audit(db,user,membership.organization_id,"payroll.statutory_batch.created","payroll_statutory_batch",batch.id,str(totals));db.commit()
     return {**_statutory_payload(batch),"replayed":False}
 
@@ -272,14 +288,43 @@ def approve_statutory_batch(batch_id:int,membership=Depends(active_membership),u
 
 
 @router.post("/api/v1/payroll/statutory-batches/{batch_id}/record-payment")
-def record_statutory_payment(batch_id:int,payload:RemittanceDecisionIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
+def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_payment"}: raise HTTPException(403,"Payroll payment role required")
     row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
     if not row: raise HTTPException(404,"Statutory batch not found")
     if row.status!="approved": raise HTTPException(409,"Only approved statutory batches can be marked remitted")
     if user.id in {row.created_by,row.submitted_by,row.approved_by}: raise HTTPException(409,"Preparer, submitter or approver cannot record remittance")
+    org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not org or row.currency!=org.currency:
+        raise HTTPException(422,"Statutory settlement must use the organization's base currency; configure an approved FX settlement workflow for foreign-currency payroll")
+    account_ids=[payload.bank_account_id,payload.paye_payable_account_id,payload.nssf_payable_account_id,payload.shif_payable_account_id,payload.housing_levy_payable_account_id,payload.pension_payable_account_id]
+    account_map=_accounts(db,membership.organization_id,account_ids)
+    if account_map[payload.bank_account_id].account_type!="asset":
+        raise HTTPException(422,"Statutory settlement bank account must be an asset")
+    for account_id in account_ids[1:]:
+        if account_map[account_id].account_type!="liability":
+            raise HTTPException(422,"Statutory control accounts must be liabilities")
+    totals=row.totals
+    obligations=[
+        (payload.paye_payable_account_id,Decimal(totals["PAYE"]),"PAYE"),
+        (payload.nssf_payable_account_id,Decimal(totals["NSSF_EMPLOYEE"])+Decimal(totals["NSSF_EMPLOYER"]),"NSSF"),
+        (payload.shif_payable_account_id,Decimal(totals["SHIF"]),"SHIF"),
+        (payload.housing_levy_payable_account_id,Decimal(totals["HOUSING_LEVY_EMPLOYEE"])+Decimal(totals["HOUSING_LEVY_EMPLOYER"]),"Housing Levy"),
+        (payload.pension_payable_account_id,Decimal(totals["PENSION"]),"Pension"),
+    ]
+    lines=[]; grand_total=Decimal("0.00")
+    for account_id,amount,label in obligations:
+        amount=money(amount)
+        if amount>0:
+            lines.append({"account_id":account_id,"description":f"{label} statutory remittance","debit":amount,"credit":0})
+            grand_total+=amount
+    if grand_total<=0: raise HTTPException(409,"There are no statutory amounts to remit")
+    lines.append({"account_id":payload.bank_account_id,"description":"Statutory remittance bank settlement","debit":0,"credit":grand_total})
+    journal=_accounting_make_journal(db,membership,user,payload.payment_date,payload.payment_reference,"Statutory payroll remittance settlement",lines)
+    row.payment_journal_id=journal.id
     row.status="remitted";row.paid_by=user.id;row.payment_reference=payload.payment_reference;row.paid_at=datetime.now(timezone.utc)
-    _audit(db,user,membership.organization_id,"payroll.statutory_batch.remitted","payroll_statutory_batch",row.id,payload.payment_reference);db.commit();return _statutory_payload(row)
+    _audit(db,user,membership.organization_id,"payroll.statutory_batch.remitted","payroll_statutory_batch",row.id,f"{payload.payment_reference}; journal {journal.id}; amount {grand_total}")
+    db.commit();return _statutory_payload(row)
 
 
 @router.get("/api/v1/payroll/statutory-batches/{batch_id}/return")
@@ -287,4 +332,4 @@ def statutory_return(batch_id:int,membership=Depends(active_membership),db:Sessi
     if (membership.role or "").lower() not in {"org_admin","payroll_manager","payroll_approver","payroll_payment","accountant"}: raise HTTPException(403,"Payroll statutory access is restricted")
     row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).first()
     if not row: raise HTTPException(404,"Statutory batch not found")
-    return {"schema_version":"onecore.statutory-return.v1","batch":_statutory_payload(row),"filing_status":"not_filed","provider_submission_id":None,"notice":"Export is a calculation schedule, not a statutory filing receipt. Submit through the approved authority channel and record the resulting reference."}
+    return {"schema_version":"onecore.statutory-return.v1","batch":_statutory_payload(row),"employee_lines":row.employee_lines,"filing_status":"not_filed","provider_submission_id":None,"notice":"Export is a calculation schedule, not a statutory filing receipt. Submit through the approved authority channel and record the resulting reference."}
