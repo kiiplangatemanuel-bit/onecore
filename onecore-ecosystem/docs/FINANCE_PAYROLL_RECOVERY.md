@@ -36,3 +36,5 @@ Supabase-managed PITR, automated snapshots, cross-region replication and retenti
 - The scheduled workflow `.github/workflows/onecore-production-monitor.yml` probes `/health`, `/ready` and the OpenAPI FX/payroll routes every 15 minutes. Configure the repository secret `ONECORE_HEALTHCHECK_URL` to the deployed API base URL and enable GitHub Actions failure notifications for the operators.
 - Configure the hosting platform to probe `/ready`, alert on non-2xx responses, and retain request/error logs. Alert on failed backups, checksum mismatches, migration failures, payment/provider callback backlog, unremitted statutory batches and restore-drill expiry.
 - A green readiness response is not a backup restore test, provider certification, statutory filing confirmation or production UAT sign-off.
+
+- For realized FX reconciliation, use `POST /api/v1/accounting/fx/settlements` with the foreign amount, carrying value, settlement rate, receivable/payable account, bank account and FX gain/loss accounts. It clears the carrying balance and posts the realized difference to gain or loss. Reconcile the supplied carrying value to the actual open item before posting.
