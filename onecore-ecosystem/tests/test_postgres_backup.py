@@ -4,7 +4,7 @@ from pathlib import Path
 from scripts import postgres_backup
 
 
-def test_backup_verify_checks_manifest_checksum_and_archive_listing(tmp_path, monkeypatch):
+def test_backup_verify_checks_manifest_checksum_and_archive_listing(tmp_path, monkeypatch, capsys):
     archive=tmp_path/"backup.dump"
     archive.write_bytes(b"verified-postgresql-archive")
     manifest={
@@ -22,6 +22,8 @@ def test_backup_verify_checks_manifest_checksum_and_archive_listing(tmp_path, mo
         return type("Result",(),{"returncode":0,"stdout":"archive contents","stderr":""})()
     monkeypatch.setattr(postgres_backup.subprocess,"run",fake_run)
     postgres_backup.verify(type("Args",(),{"archive":str(archive)})())
+    result = json.loads(capsys.readouterr().out)
+    assert result["verified"] is True
     assert calls and calls[0][:2]==["pg_restore","--list"]
 
 
