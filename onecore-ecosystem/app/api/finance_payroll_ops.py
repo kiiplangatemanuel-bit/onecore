@@ -300,6 +300,26 @@ def _load_statutory_batch(db,membership,batch_id):
     runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(batch.source_run_ids)).all()
     if len(runs)!=len(batch.source_run_ids) or len({run.branch_id for run in runs})!=1 or any(not can_access_branch(membership,run.branch_id) for run in runs):
         raise HTTPException(404,"Statutory batch not found")
+    if any(run.status!="approved" for run in runs):
+        raise HTTPException(409,"A source payroll run is no longer approved; statutory batch actions are blocked")
+    links=db.query(PayrollAccountingLink).filter(
+        PayrollAccountingLink.organization_id==membership.organization_id,
+        PayrollAccountingLink.payroll_run_id.in_(batch.source_run_ids)).all()
+    if len(links)!=len(runs) or {link.payroll_run_id for link in links}!=set(batch.source_run_ids) or any(link.reversal_journal_id for link in links):
+        raise HTTPException(409,"A source payroll accrual was reversed or is no longer available")
+    journals=db.query(AccountingJournal).filter(
+        AccountingJournal.organization_id==membership.organization_id,
+        AccountingJournal.id.in_([link.journal_id for link in links]),
+        AccountingJournal.status=="posted").all()
+    run_by_id={run.id:run for run in runs}
+    link_by_run={link.payroll_run_id:link for link in links}
+    journal_by_id={journal.id:journal for journal in journals}
+    if len(journals)!=len(runs) or any(
+        link_by_run[run.id].journal_id not in journal_by_id
+        or journal_by_id[link_by_run[run.id].journal_id].branch_id!=run.branch_id
+        for run in runs
+    ):
+        raise HTTPException(409,"A source payroll accrual journal is no longer posted or does not match its payroll branch")
     return batch
 
 
