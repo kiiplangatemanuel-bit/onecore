@@ -94,3 +94,8 @@ This payment-batch implementation is a new, focused change against the canonical
 - Pre-payment accrual reversal releases adjustments back to approved/unassigned state for a corrected payroll run. Paid runs cannot use this reversal path.
 - A one-off deduction is posted to a separate liability account. Posting is blocked until Finance maps an active tenant-owned liability account; the journal remains balanced.
 - Migration 0043 adds the adjustment table after payment-batch migration 0042. Migration 0044 adds the optional other-deductions liability mapping. Both migrations are reversible and included in the migration upgrade/downgrade CI workflow.
+
+
+## Statutory returns and remittance settlement (PR #123)
+
+Statutory remittance batches can now be prepared from approved payroll runs with posted, unreversed accrual journals. Employee-level PAYE, employee/employer NSSF, SHIF, employee/employer Housing Levy and employee pension schedules are retained as a return snapshot. Preparation, submission, independent approval and payment recording are separated by role; re-used payroll runs and payment references are rejected. Recording an externally confirmed payment posts a balanced statutory-liability/bank journal. The return endpoint is a calculation schedule only: KRA/NSSF/SHA filing, authority acknowledgements, provider credentials and direct bank/M-Pesa payment execution are not included or certified. Validate rule rates and filing formats against current official publications and retain authority receipts separately.
