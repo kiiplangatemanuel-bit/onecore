@@ -56,6 +56,26 @@ def upgrade():
     )
     op.create_index("uq_accounting_fx_revaluation_org_key","accounting_fx_revaluations",["organization_id","idempotency_key"],unique=True)
     op.create_table(
+        "accounting_fx_settlements",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column("journal_id", sa.Integer(), sa.ForeignKey("accounting_journals.id"), nullable=False, unique=True),
+        sa.Column("currency", sa.String(3), nullable=False),
+        sa.Column("position_type", sa.String(12), nullable=False),
+        sa.Column("foreign_amount", sa.Numeric(20, 4), nullable=False),
+        sa.Column("carrying_base_amount", sa.Numeric(18, 2), nullable=False),
+        sa.Column("settlement_rate", sa.Numeric(20, 10), nullable=False),
+        sa.Column("settlement_base_amount", sa.Numeric(18, 2), nullable=False),
+        sa.Column("realized_gain", sa.Numeric(18, 2), nullable=False, server_default="0"),
+        sa.Column("realized_loss", sa.Numeric(18, 2), nullable=False, server_default="0"),
+        sa.Column("reference", sa.String(120), nullable=False),
+        sa.Column("idempotency_key", sa.String(100), nullable=False),
+        sa.Column("payload_hash", sa.String(64), nullable=False),
+        sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("uq_accounting_fx_settlement_org_key","accounting_fx_settlements",["organization_id","idempotency_key"],unique=True)
+    op.create_table(
         "payroll_statutory_batches",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
@@ -83,7 +103,7 @@ def upgrade():
     op.create_index("uq_payroll_statutory_batch_org_payment_reference","payroll_statutory_batches",["organization_id","payment_reference"],unique=True,sqlite_where=sa.text("payment_reference <> ''"),postgresql_where=sa.text("payment_reference <> ''"))
     bind=op.get_bind()
     if bind.dialect.name=="postgresql":
-        for table in ("accounting_fx_rates","accounting_fx_postings","accounting_fx_revaluations","payroll_statutory_batches"):
+        for table in ("accounting_fx_rates","accounting_fx_postings","accounting_fx_revaluations","accounting_fx_settlements","payroll_statutory_batches"):
             op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
             op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
             op.execute(f"""
@@ -124,11 +144,12 @@ def upgrade():
 def downgrade():
     bind=op.get_bind()
     if bind.dialect.name=="postgresql":
-        for table in ("payroll_statutory_batches","accounting_fx_revaluations","accounting_fx_postings","accounting_fx_rates"):
+        for table in ("payroll_statutory_batches","accounting_fx_settlements","accounting_fx_revaluations","accounting_fx_postings","accounting_fx_rates"):
             op.execute(f"DROP POLICY IF EXISTS tenant_scope_access ON {table}")
             op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
             op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
     op.drop_table("payroll_statutory_batches")
+    op.drop_table("accounting_fx_settlements")
     op.drop_table("accounting_fx_revaluations")
     op.drop_table("accounting_fx_postings")
     op.drop_table("accounting_fx_rates")
