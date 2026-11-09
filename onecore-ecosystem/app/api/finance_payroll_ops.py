@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import can_access_branch
 from app.core.database import get_db
-from app.core.models import AccountingAccount, AuditEvent, Organization, Branch
+from app.core.models import AccountingAccount, AccountingJournal, AuditEvent, Organization, Branch
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.hr_payroll_models import PayrollRun, PayrollPayslip, PayrollAccountingLink
@@ -295,6 +295,10 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     links=db.query(PayrollAccountingLink).filter(PayrollAccountingLink.organization_id==membership.organization_id,PayrollAccountingLink.payroll_run_id.in_(payload.payroll_run_ids)).all()
     if len(links)!=len(runs) or any(x.reversal_journal_id for x in links):
         raise HTTPException(409,"Every payroll run must have a valid, unreversed accounting accrual")
+    journal_ids=[x.journal_id for x in links]
+    posted_journals=db.query(AccountingJournal).filter(AccountingJournal.organization_id==membership.organization_id,AccountingJournal.id.in_(journal_ids),AccountingJournal.status=="posted").all()
+    if len(posted_journals)!=len(runs):
+        raise HTTPException(409,"Every source payroll run must have a posted general-ledger accrual journal")
     currencies={x.currency for x in runs}
     if len(currencies)!=1: raise HTTPException(422,"A statutory batch cannot mix payroll currencies")
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
@@ -309,12 +313,16 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
         raise HTTPException(409,"One or more payroll runs already belong to a statutory remittance batch")
     slips=db.query(PayrollPayslip).filter(PayrollPayslip.organization_id==membership.organization_id,PayrollPayslip.payroll_run_id.in_(payload.payroll_run_ids)).all()
     if not slips: raise HTTPException(409,"No payroll payslips exist for the selected runs")
+    if any(s.currency not in currencies for s in slips):
+        raise HTTPException(409,"Payslip currency does not match its payroll run currency")
     totals={"PAYE":Decimal("0"),"NSSF_EMPLOYEE":Decimal("0"),"NSSF_EMPLOYER":Decimal("0"),"SHIF":Decimal("0"),"HOUSING_LEVY_EMPLOYEE":Decimal("0"),"HOUSING_LEVY_EMPLOYER":Decimal("0"),"PENSION":Decimal("0")}
     employee_lines=[]
     for slip in slips:
         values={"PAYE":Decimal(slip.paye),"NSSF_EMPLOYEE":Decimal(slip.nssf_employee),"NSSF_EMPLOYER":Decimal(slip.nssf_employer),"SHIF":Decimal(slip.shif_employee),"HOUSING_LEVY_EMPLOYEE":Decimal(slip.housing_levy_employee),"HOUSING_LEVY_EMPLOYER":Decimal(slip.housing_levy_employer),"PENSION":Decimal(slip.pension_employee)}
         for key,value in values.items(): totals[key]+=value
         employee_lines.append({"employee_id":slip.employee_id,"employee_number":slip.employee_number,"employee_name":slip.employee_name,**{key:str(money(value)) for key,value in values.items()}})
+    if sum(totals.values(),Decimal("0"))<=0:
+        raise HTTPException(409,"Selected payroll runs contain no statutory amounts to remit")
     totals={k:str(money(v)) for k,v in totals.items()}
     start=min(x.period_start for x in runs); end=max(x.period_end for x in runs)
     batch=PayrollStatutoryBatch(organization_id=membership.organization_id,period_start=start,period_end=end,currency=next(iter(currencies)),totals=totals,employee_lines=employee_lines,source_run_ids=payload.payroll_run_ids,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
