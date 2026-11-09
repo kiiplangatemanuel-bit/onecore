@@ -109,6 +109,8 @@ class FxRevaluationIn(BaseModel):
     currency: str = Field(pattern="^[A-Z]{3}$")
     valuation_date: date
     closing_rate: Decimal = Field(gt=0, max_digits=20, decimal_places=10)
+    closing_rate_source: str = Field(min_length=2, max_length=80)
+    closing_rate_reference: str = Field(default="", max_length=120)
     fx_gain_account_id: int = Field(gt=0)
     fx_loss_account_id: int = Field(gt=0)
     positions: list[FxPosition] = Field(min_length=1, max_length=200)
@@ -130,6 +132,8 @@ class FxSettlementIn(BaseModel):
     foreign_amount: Decimal = Field(gt=0, max_digits=20, decimal_places=4)
     carrying_base_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     settlement_rate: Decimal = Field(gt=0, max_digits=20, decimal_places=10)
+    settlement_rate_source: str = Field(min_length=2, max_length=80)
+    settlement_rate_reference: str = Field(default="", max_length=120)
     position_account_id: int = Field(gt=0)
     bank_account_id: int = Field(gt=0)
     fx_gain_account_id: int = Field(gt=0)
@@ -281,6 +285,7 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
     journal=_accounting_make_journal(db,membership,user,payload.valuation_date,f"FX-REVAL-{payload.currency}-{payload.valuation_date.isoformat()}","Foreign currency period-end revaluation",lines,payload.branch_id)
     row=AccountingFxRevaluation(organization_id=org.id,journal_id=journal.id,currency=payload.currency,
         valuation_date=datetime.combine(payload.valuation_date,time.min,tzinfo=timezone.utc),closing_rate=payload.closing_rate,
+        closing_rate_source=payload.closing_rate_source,closing_rate_reference=payload.closing_rate_reference,
         total_gain=total_gain,total_loss=total_loss,position_snapshot=snapshot,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
     db.add(row);db.flush()
     _audit(db,user,org.id,"accounting.fx_revaluation.posted","accounting_fx_revaluation",row.id,f"gain {total_gain}; loss {total_loss}")
@@ -350,8 +355,8 @@ def settle_fx_position(payload: FxSettlementIn, membership=Depends(active_member
         payload.memo or f"Realized FX settlement {payload.foreign_amount} {payload.currency}",lines,payload.branch_id)
     row=AccountingFxSettlement(organization_id=org.id,journal_id=journal.id,currency=payload.currency,
         position_type=payload.position_type,foreign_amount=payload.foreign_amount,
-        carrying_base_amount=payload.carrying_base_amount,settlement_rate=payload.settlement_rate,
-        settlement_base_amount=settlement_base,realized_gain=realized_gain,realized_loss=realized_loss,
+        carrying_base_amount=payload.carrying_base_amount,settlement_rate=payload.settlement_rate,settlement_rate_source=payload.settlement_rate_source,
+        settlement_rate_reference=payload.settlement_rate_reference,settlement_base_amount=settlement_base,realized_gain=realized_gain,realized_loss=realized_loss,
         reference=payload.reference,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
     db.add(row);db.flush()
     _audit(db,user,org.id,"accounting.fx_settlement.posted","accounting_fx_settlement",row.id,
