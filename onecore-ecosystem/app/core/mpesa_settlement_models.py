@@ -46,6 +46,6 @@ class MpesaSettlementLine(Base):
     exception_detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
-        UniqueConstraint("organization_id", "receipt_number", name="uq_mpesa_settlement_org_receipt"),
+        Index("ix_mpesa_settlement_org_receipt", "organization_id", "receipt_number"),
         Index("ix_mpesa_settlement_batch_status", "batch_id", "status"),
     )
