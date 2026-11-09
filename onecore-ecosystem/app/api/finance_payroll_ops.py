@@ -283,7 +283,7 @@ def _load_statutory_batch(db,membership,batch_id):
     if not batch:
         raise HTTPException(404,"Statutory batch not found")
     runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(batch.source_run_ids)).all()
-    if len(runs)!=len(batch.source_run_ids) or any(not can_access_branch(membership,run.branch_id) for run in runs):
+    if len(runs)!=len(batch.source_run_ids) or len({run.branch_id for run in runs})!=1 or any(not can_access_branch(membership,run.branch_id) for run in runs):
         raise HTTPException(404,"Statutory batch not found")
     return batch
 
@@ -388,6 +388,8 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     posted_journals=db.query(AccountingJournal).filter(AccountingJournal.organization_id==membership.organization_id,AccountingJournal.id.in_(journal_ids),AccountingJournal.status=="posted").all()
     if len(posted_journals)!=len(runs):
         raise HTTPException(409,"Every source payroll run must have a posted general-ledger accrual journal")
+    if len({x.branch_id for x in runs})!=1:
+        raise HTTPException(422,"A statutory batch must contain payroll runs from exactly one branch")
     currencies={x.currency for x in runs}
     if len(currencies)!=1: raise HTTPException(422,"A statutory batch cannot mix payroll currencies")
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
@@ -476,7 +478,8 @@ def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=
             grand_total+=amount
     if grand_total<=0: raise HTTPException(409,"There are no statutory amounts to remit")
     lines.append({"account_id":payload.bank_account_id,"description":"Statutory remittance bank settlement","debit":0,"credit":grand_total})
-    journal=_accounting_make_journal(db,membership,user,payload.payment_date,payload.payment_reference,"Statutory payroll remittance settlement",lines)
+    source_run=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(row.source_run_ids)).first()
+    journal=_accounting_make_journal(db,membership,user,payload.payment_date,payload.payment_reference,"Statutory payroll remittance settlement",lines,source_run.branch_id if source_run else None)
     row.payment_journal_id=journal.id
     row.status="remitted";row.paid_by=user.id;row.payment_reference=payload.payment_reference;row.paid_at=datetime.now(timezone.utc)
     _audit(db,user,membership.organization_id,"payroll.statutory_batch.remitted","payroll_statutory_batch",row.id,f"{payload.payment_reference}; journal {journal.id}; amount {grand_total}")
