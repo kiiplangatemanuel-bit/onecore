@@ -5,7 +5,7 @@ OneCore uses Supabase-managed PostgreSQL through SQLAlchemy/psycopg and Alembic.
 ## Configure Render
 
 1. Open Supabase **Project Settings → Database → Connection string** and copy the URI for your project and selected connection mode.
-2. In Render, set `DATABASE_URL` to the Supabase Session Pooler URI for the application ORM and `ALEMBIC_DATABASE_URL` to the migration URI. They may initially contain the same connection string; separate credentials can be introduced after their database privileges are designed and tested.
+2. In Render, set `DATABASE_URL` to the Supabase Session Pooler URI for the dedicated least-privilege API runtime login (NOBYPASSRLS), and set `ALEMBIC_DATABASE_URL` to the migration-owner connection URI. Keep these credentials separate; do not use the Supabase `postgres` superuser as the application ORM login.
 3. Keep `SUPABASE_DB_URL` only as a compatibility fallback. Explicit `DATABASE_URL` wins for the ORM; explicit `ALEMBIC_DATABASE_URL` wins for migrations. Set `APP_ENV=production`, `DEBUG=false`, a unique `SECRET_KEY`, explicit HTTPS `CORS_ORIGINS`, explicit `TRUSTED_HOSTS`, and `FORCE_HTTPS=true`.
 4. Configure each worker/scheduler with its dedicated least-privilege worker URL (for example, `WEBHOOK_WORKER_DATABASE_URL` or `STATUS_ALERT_WORKER_DATABASE_URL`). They must use the same Supabase project and schema revision as the API.
 5. Run Alembic migrations in the controlled release step before routing traffic. Do not run destructive downgrade operations against production.
@@ -13,8 +13,8 @@ OneCore uses Supabase-managed PostgreSQL through SQLAlchemy/psycopg and Alembic.
 Example format only — copy actual values from the Supabase dashboard and never commit the completed URI:
 
 ```text
-DATABASE_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
-ALEMBIC_DATABASE_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
+DATABASE_URL=postgresql://onecore_api.<project-ref>:<runtime-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
+ALEMBIC_DATABASE_URL=postgresql://<migration-login>.<project-ref>:<migration-password>@<supabase-session-pooler-host>:5432/postgres?sslmode=require
 SUPABASE_DB_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-host>:5432/postgres?sslmode=require
 ```
 
