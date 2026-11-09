@@ -159,6 +159,33 @@ class PurchaseOrderIn(BaseModel):
     lines: list[PurchaseOrderLineIn] = Field(min_length=1, max_length=200)
 
 
+class PurchaseOrderAmendmentLineIn(BaseModel):
+    line_id: int | None = Field(default=None, gt=0)
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
+    unit_cost: Decimal = Field(ge=0, le=Decimal("9999999999999999"))
+
+
+class PurchaseOrderAmendmentIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+    supporting_notes: str = Field(default="", max_length=2000)
+    lines: list[PurchaseOrderAmendmentLineIn] = Field(min_length=1, max_length=200)
+
+    @field_validator("reason")
+    @classmethod
+    def amendment_reason_not_blank(cls, value):
+        if len(value.strip()) < 5:
+            raise ValueError("Amendment reason must contain at least five non-space characters")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def unique_existing_line_ids(self):
+        ids = [line.line_id for line in self.lines if line.line_id is not None]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each existing purchase-order line may appear only once")
+        return self
+
+
 class PurchaseOrderReceiptLineIn(BaseModel):
     line_id: int = Field(gt=0)
     quantity: Decimal = Field(gt=0, le=Decimal("999999999999"))
