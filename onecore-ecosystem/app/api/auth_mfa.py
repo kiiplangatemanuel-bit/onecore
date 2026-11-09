@@ -193,7 +193,12 @@ def mfa_status(user: User = Depends(current_user_for_mfa_setup), db: Session = D
         MFARecoveryCode.used_at.is_(None),
         MFARecoveryCode.revoked_at.is_(None),
     ).count()
-    return {"enabled": enabled, "setup_pending": bool(factor and factor.enabled_at is None), "recovery_codes_remaining": remaining}
+    return {
+        "enabled": enabled,
+        "setup_pending": bool(factor and factor.enabled_at is None),
+        "recovery_codes_remaining": remaining,
+        "session_management_available": not bool(db.info.get("onecore_mfa_setup_only", False)),
+    }
 
 
 @router.post("/enroll")
