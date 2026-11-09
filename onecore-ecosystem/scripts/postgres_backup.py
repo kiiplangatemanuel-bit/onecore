@@ -88,11 +88,11 @@ def restore(args):
     # Deliberately do not use --clean/--if-exists. Check the destination first
     # and only restore into an empty, isolated database.
     probe = subprocess.run(["psql", *conn, "--tuples-only", "--no-align", "--command",
-        "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')"],
+        "SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND c.relkind IN ('r','p','v','m','S','f')) + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')) + (SELECT count(*) FROM pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','pg_toast','public'))"],
         env=env, check=True, capture_output=True, text=True)
     if int(probe.stdout.strip() or "0") != 0:
         raise SystemExit("Restore target is not empty; refusing to overwrite existing data")
-    run(["pg_restore", "--exit-on-error", "--no-owner", "--dbname", database,
+    run(["pg_restore", "--exit-on-error", "--no-owner", "--no-acl", "--dbname", database,
          "--host", conn[1], "--port", conn[3], "--username", conn[5], str(archive)], env)
     print(json.dumps({"restored":True,"target_database":database,
                       "warning":"Run post-restore validation and keep the target isolated until approved."}))
