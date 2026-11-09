@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import require_permission, can_access_branch
 from app.core.database import get_db
-from app.core.models import AccountingAccount, AccountingJournal, AccountingJournalLine, AuditEvent, Organization
+from app.core.models import AccountingAccount, AccountingJournal, AccountingJournalLine, AuditEvent, Organization, Branch
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.hr_payroll_models import PayrollRun, PayrollPayslip, PayrollAccountingLink
@@ -39,6 +39,14 @@ def _payload_hash(payload):
 def _audit(db, user, org_id, action, kind, rid, detail=""):
     db.add(AuditEvent(actor_user_id=user.id, organization_id=org_id, action=action,
                       resource_type=kind, resource_id=str(rid), detail=detail))
+
+
+def _branch_or_404(db, membership, branch_id):
+    if branch_id is None:
+        return
+    branch=db.query(Branch).filter_by(id=branch_id,organization_id=membership.organization_id,is_active=True).first()
+    if not branch or not can_access_branch(membership,branch_id):
+        raise HTTPException(404,"Branch not found")
 
 
 def _accounts(db, org_id, ids):
@@ -169,8 +177,7 @@ def post_fx_transaction(payload: FxPostingIn, membership=Depends(active_membersh
     rate=db.query(AccountingFxRate).filter_by(id=payload.rate_id,organization_id=membership.organization_id).first()
     if not org or not rate or rate.currency==org.currency or rate.rate_date.date()>payload.entry_date:
         raise HTTPException(422,"A tenant-owned exchange rate dated on or before the posting date is required")
-    if payload.branch_id and not can_access_branch(membership,payload.branch_id):
-        raise HTTPException(404,"Branch not found")
+    _branch_or_404(db,membership,payload.branch_id)
     _accounting_assert_period_open(db,org.id,payload.entry_date)
     _accounts(db,org.id,[payload.debit_account_id,payload.credit_account_id])
     base_amount=money(payload.foreign_amount / Decimal(rate.units_per_base))
@@ -200,8 +207,7 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
     org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
     if not org or payload.currency==org.currency:
         raise HTTPException(422,"Revaluation currency must differ from the organization's base currency")
-    if payload.branch_id and not can_access_branch(membership,payload.branch_id):
-        raise HTTPException(404,"Branch not found")
+    _branch_or_404(db,membership,payload.branch_id)
     ids=[x.account_id for x in payload.positions]+[payload.fx_gain_account_id,payload.fx_loss_account_id]
     accounts=_accounts(db,org.id,ids)
     if accounts[payload.fx_gain_account_id].account_type!="revenue" or accounts[payload.fx_loss_account_id].account_type!="expense":
@@ -242,6 +248,16 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
     return {"id":row.id,"journal_id":journal.id,"currency":payload.currency,"closing_rate":str(payload.closing_rate),"total_gain":str(total_gain),"total_loss":str(total_loss),"positions":snapshot,"replayed":False}
 
 
+def _load_statutory_batch(db,membership,batch_id):
+    batch=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).first()
+    if not batch:
+        raise HTTPException(404,"Statutory batch not found")
+    runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(batch.source_run_ids)).all()
+    if len(runs)!=len(batch.source_run_ids) or any(not can_access_branch(membership,run.branch_id) for run in runs):
+        raise HTTPException(404,"Statutory batch not found")
+    return batch
+
+
 def _statutory_payload(batch):
     return {"id":batch.id,"period_start":batch.period_start.date().isoformat(),"period_end":batch.period_end.date().isoformat(),"currency":batch.currency,"status":batch.status,"totals":batch.totals,"source_run_ids":batch.source_run_ids,"payment_reference":batch.payment_reference,"payment_journal_id":batch.payment_journal_id,"created_by":batch.created_by,"submitted_by":batch.submitted_by,"approved_by":batch.approved_by,"paid_by":batch.paid_by}
 
@@ -252,7 +268,11 @@ def list_statutory_batches(membership=Depends(active_membership),db:Session=Depe
     if role not in {"org_admin","payroll_manager","payroll_approver","payroll_payment","accountant","hr_admin"}:
         raise HTTPException(403,"Payroll statutory access is restricted")
     rows=db.query(PayrollStatutoryBatch).filter_by(organization_id=membership.organization_id).order_by(PayrollStatutoryBatch.id.desc()).limit(100).all()
-    return [_statutory_payload(x) for x in rows]
+    visible=[]
+    for row in rows:
+        try: _load_statutory_batch(db,membership,row.id); visible.append(_statutory_payload(row))
+        except HTTPException: continue
+    return visible
 
 
 @router.post("/api/v1/payroll/statutory-batches",status_code=201)
@@ -263,6 +283,7 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     prior=db.query(PayrollStatutoryBatch).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if prior:
         if prior.payload_hash!=request_hash: raise HTTPException(409,"Idempotency key was already used with a different statutory batch payload")
+        _load_statutory_batch(db,membership,prior.id)
         return {**_statutory_payload(prior),"replayed":True}
     runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(payload.payroll_run_ids)).with_for_update().all()
     if len(runs)!=len(payload.payroll_run_ids) or any(x.status!="approved" or not can_access_branch(membership,x.branch_id) for x in runs):
@@ -290,8 +311,8 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
 @router.post("/api/v1/payroll/statutory-batches/{batch_id}/submit")
 def submit_statutory_batch(batch_id:int,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_manager"}: raise HTTPException(403,"Payroll manager role required")
-    row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).with_for_update().first()
-    if not row: raise HTTPException(404,"Statutory batch not found")
+    row=_load_statutory_batch(db,membership,batch_id)
+    row=db.query(PayrollStatutoryBatch).filter_by(id=row.id,organization_id=membership.organization_id).with_for_update().first()
     if row.status!="draft": raise HTTPException(409,"Only draft statutory batches can be submitted")
     row.status="pending_approval";row.submitted_by=user.id;row.submitted_at=datetime.now(timezone.utc)
     _audit(db,user,membership.organization_id,"payroll.statutory_batch.submitted","payroll_statutory_batch",row.id);db.commit();return _statutory_payload(row)
@@ -351,6 +372,5 @@ def record_statutory_payment(batch_id:int,payload:StatutoryPaymentIn,membership=
 @router.get("/api/v1/payroll/statutory-batches/{batch_id}/return")
 def statutory_return(batch_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_manager","payroll_approver","payroll_payment","accountant"}: raise HTTPException(403,"Payroll statutory access is restricted")
-    row=db.query(PayrollStatutoryBatch).filter_by(id=batch_id,organization_id=membership.organization_id).first()
-    if not row: raise HTTPException(404,"Statutory batch not found")
+    row=_load_statutory_batch(db,membership,batch_id)
     return {"schema_version":"onecore.statutory-return.v1","batch":_statutory_payload(row),"employee_lines":row.employee_lines,"filing_status":"not_filed","provider_submission_id":None,"notice":"Export is a calculation schedule, not a statutory filing receipt. Submit through the approved authority channel and record the resulting reference."}
