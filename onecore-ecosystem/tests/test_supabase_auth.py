@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, User, UserMFAFactor
+from app.core.identity_models import UserSession
 from app.core.security import current_user, current_user_for_mfa_setup
 from app.api.supabase_auth import SupabaseSessionExchange, exchange_supabase_session
 
@@ -25,7 +26,7 @@ class FakeSupabaseResponse:
 
 def _db():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[User.__table__, UserMFAFactor.__table__, AuditEvent.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, UserMFAFactor.__table__, AuditEvent.__table__, UserSession.__table__])
     return engine
 
 
