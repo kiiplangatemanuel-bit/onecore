@@ -176,7 +176,9 @@ def test_disable_requires_password_and_second_factor_and_revokes_access(monkeypa
         ), db)
         old_access_token = login_result["access_token"]
         tracked_session = db.query(UserSession).filter_by(user_id=user.id).one()
-        disable_code = enabled["recovery_codes"][0]
+        disable_now = fixed_now + timedelta(seconds=60)
+        monkeypatch.setattr(mfa, "_now", lambda: disable_now)
+        disable_code = _totp_code(mfa._decrypt_secret(factor), disable_now.timestamp())
         result = disable_mfa(MFASensitiveActionIn(password="correct-password", code=disable_code), user, db)
         db.refresh(user)
         assert result["status"] == "disabled"
