@@ -41,6 +41,8 @@ from app.api.developer_webhooks import router as developer_webhooks_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa settlement models
+from app.core import finance_ops_models  # noqa: F401 - register FX and statutory payroll tables
+from app.api.finance_payroll_ops import router as finance_payroll_ops_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -92,6 +94,7 @@ app.include_router(procurement_workflows_router)
 app.include_router(school_advanced_router)
 app.include_router(ai_router)
 app.include_router(hr_payroll_router)
+app.include_router(finance_payroll_ops_router)
 app.include_router(support_router)
 app.include_router(auth_workflows_router)
 app.include_router(portal_auth_router)
