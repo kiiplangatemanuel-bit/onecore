@@ -112,7 +112,7 @@ def upgrade():
                 DO $grant$
                 BEGIN
                     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
-                        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.{table} TO onecore_api;
+                        GRANT SELECT, INSERT, UPDATE ON TABLE public.{table} TO onecore_api;
                         GRANT USAGE, SELECT ON SEQUENCE public.{table}_id_seq TO onecore_api;
                     END IF;
                 END
