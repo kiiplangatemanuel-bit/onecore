@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base
 from app.core.models import AuditEvent, PortalAuthorizationCode, User
+from app.core.identity_models import PortalAuthorizationAssurance, UserSession
 from app.api.portal_auth import PortalCodeExchange, PortalCodeRequest, exchange_portal_code, issue_portal_code
 
 
@@ -24,6 +25,7 @@ def test_portal_code_is_origin_bound_pkce_protected_and_single_use(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         User.__table__, PortalAuthorizationCode.__table__, AuditEvent.__table__,
+        PortalAuthorizationAssurance.__table__, UserSession.__table__,
     ])
     verifier, challenge = _pkce_pair()
     redirect_uri = "https://support.example.com/tickets"
