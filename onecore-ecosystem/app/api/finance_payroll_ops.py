@@ -19,7 +19,7 @@ from app.core.models import AccountingAccount, AccountingJournal, AuditEvent, Or
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.hr_payroll_models import PayrollRun, PayrollPayslip, PayrollAccountingLink
-from app.core.finance_ops_models import AccountingFxRate, AccountingFxPosting, AccountingFxRevaluation, PayrollStatutoryBatch
+from app.core.finance_ops_models import AccountingFxRate, AccountingFxPosting, AccountingFxRevaluation, AccountingFxSettlement, PayrollStatutoryBatch
 from app.api.routes import _accounting_make_journal, _accounting_assert_period_open
 
 router = APIRouter(tags=["finance-fx-statutory"])
@@ -113,6 +113,30 @@ class FxRevaluationIn(BaseModel):
         ids=[x.account_id for x in self.positions]
         if len(ids)!=len(set(ids)):
             raise ValueError("Each foreign-currency ledger account may appear only once per revaluation")
+        return self
+
+
+class FxSettlementIn(BaseModel):
+    currency: str = Field(pattern="^[A-Z]{3}$")
+    settlement_date: date
+    position_type: str = Field(pattern="^(asset|liability)$")
+    foreign_amount: Decimal = Field(gt=0, max_digits=20, decimal_places=4)
+    carrying_base_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    settlement_rate: Decimal = Field(gt=0, max_digits=20, decimal_places=10)
+    position_account_id: int = Field(gt=0)
+    bank_account_id: int = Field(gt=0)
+    fx_gain_account_id: int = Field(gt=0)
+    fx_loss_account_id: int = Field(gt=0)
+    reference: str = Field(min_length=1, max_length=120)
+    memo: str = Field(default="", max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    branch_id: str | None = None
+
+    @model_validator(mode="after")
+    def distinct_accounts(self):
+        ids=[self.position_account_id,self.bank_account_id,self.fx_gain_account_id,self.fx_loss_account_id]
+        if len(ids)!=len(set(ids)):
+            raise ValueError("Position, bank, FX gain and FX loss accounts must be distinct")
         return self
 
 
@@ -262,6 +286,67 @@ def _load_statutory_batch(db,membership,batch_id):
     if len(runs)!=len(batch.source_run_ids) or any(not can_access_branch(membership,run.branch_id) for run in runs):
         raise HTTPException(404,"Statutory batch not found")
     return batch
+
+
+@router.post("/api/v1/accounting/fx/settlements", status_code=201)
+def settle_fx_position(payload: FxSettlementIn, membership=Depends(active_membership), user=Depends(current_user), db: Session=Depends(get_db)):
+    _require_finance(membership)
+    request_hash=_payload_hash(payload)
+    prior=db.query(AccountingFxSettlement).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
+    if prior:
+        if prior.payload_hash!=request_hash:
+            raise HTTPException(409,"Idempotency key was already used with a different FX settlement payload")
+        return {"id":prior.id,"journal_id":prior.journal_id,"currency":prior.currency,"settlement_base_amount":str(prior.settlement_base_amount),"realized_gain":str(prior.realized_gain),"realized_loss":str(prior.realized_loss),"replayed":True}
+    org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not org or payload.currency==org.currency:
+        raise HTTPException(422,"Settlement currency must differ from the organization's base currency")
+    _branch_or_404(db,membership,payload.branch_id)
+    account_ids=[payload.position_account_id,payload.bank_account_id,payload.fx_gain_account_id,payload.fx_loss_account_id]
+    accounts=_accounts(db,org.id,account_ids)
+    expected_position="asset" if payload.position_type=="asset" else "liability"
+    if accounts[payload.position_account_id].account_type!=expected_position:
+        raise HTTPException(422,"Position type must match the selected receivable/payable ledger account")
+    if accounts[payload.bank_account_id].account_type!="asset":
+        raise HTTPException(422,"Settlement bank account must be an asset")
+    if accounts[payload.fx_gain_account_id].account_type!="revenue" or accounts[payload.fx_loss_account_id].account_type!="expense":
+        raise HTTPException(422,"FX gain account must be revenue and FX loss account must be expense")
+    settlement_base=money(payload.foreign_amount/payload.settlement_rate)
+    if settlement_base<=0:
+        raise HTTPException(422,"Settlement amount rounds to zero in base currency")
+    difference=money(settlement_base-payload.carrying_base_amount)
+    gain=((difference>0 and payload.position_type=="asset") or (difference<0 and payload.position_type=="liability"))
+    loss=((difference<0 and payload.position_type=="asset") or (difference>0 and payload.position_type=="liability"))
+    realized_gain=abs(difference) if gain else Decimal("0.00")
+    realized_loss=abs(difference) if loss else Decimal("0.00")
+    lines=[]
+    if payload.position_type=="asset":
+        lines.append({"account_id":payload.bank_account_id,"description":"Foreign-currency receivable settlement cash received","debit":settlement_base,"credit":0})
+        lines.append({"account_id":payload.position_account_id,"description":"Clear foreign-currency receivable at carrying value","debit":0,"credit":payload.carrying_base_amount})
+        if gain:
+            lines.append({"account_id":payload.fx_gain_account_id,"description":"Realized FX gain on receivable settlement","debit":0,"credit":realized_gain})
+        elif loss:
+            lines.append({"account_id":payload.fx_loss_account_id,"description":"Realized FX loss on receivable settlement","debit":realized_loss,"credit":0})
+    else:
+        lines.append({"account_id":payload.position_account_id,"description":"Clear foreign-currency payable at carrying value","debit":payload.carrying_base_amount,"credit":0})
+        lines.append({"account_id":payload.bank_account_id,"description":"Foreign-currency payable settlement cash paid","debit":0,"credit":settlement_base})
+        if gain:
+            lines.append({"account_id":payload.fx_gain_account_id,"description":"Realized FX gain on payable settlement","debit":0,"credit":realized_gain})
+        elif loss:
+            lines.append({"account_id":payload.fx_loss_account_id,"description":"Realized FX loss on payable settlement","debit":realized_loss,"credit":0})
+    journal=_accounting_make_journal(db,membership,user,payload.settlement_date,payload.reference,
+        payload.memo or f"Realized FX settlement {payload.foreign_amount} {payload.currency}",lines,payload.branch_id)
+    row=AccountingFxSettlement(organization_id=org.id,journal_id=journal.id,currency=payload.currency,
+        position_type=payload.position_type,foreign_amount=payload.foreign_amount,
+        carrying_base_amount=payload.carrying_base_amount,settlement_rate=payload.settlement_rate,
+        settlement_base_amount=settlement_base,realized_gain=realized_gain,realized_loss=realized_loss,
+        reference=payload.reference,idempotency_key=payload.idempotency_key,payload_hash=request_hash,created_by=user.id)
+    db.add(row);db.flush()
+    _audit(db,user,org.id,"accounting.fx_settlement.posted","accounting_fx_settlement",row.id,
+        f"{payload.foreign_amount} {payload.currency}; base {settlement_base}; gain {realized_gain}; loss {realized_loss}")
+    db.commit()
+    return {"id":row.id,"journal_id":journal.id,"currency":row.currency,"foreign_amount":str(row.foreign_amount),
+        "settlement_base_amount":str(row.settlement_base_amount),"realized_gain":str(row.realized_gain),
+        "realized_loss":str(row.realized_loss),"replayed":False}
 
 
 def _statutory_payload(batch):
