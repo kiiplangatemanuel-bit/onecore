@@ -950,17 +950,17 @@ passed 241 tests (5 warnings), dependency audit, Alembic upgrade and
 downgrade/re-upgrade, Python compilation, the main frontend build and all ten
 independent portal builds.
 
-Remaining identity work: mandatory MFA policy for root superadmins and other
-privileged roles, organization/role-level MFA policy, external OIDC federation,
-durable session/device inventory and per-session revocation, privileged step-up,
-distributed edge/WAF throttling and account lockout. SMTP
+Remaining identity work: organization/role-level MFA policy, passkeys/WebAuthn,
+external OIDC federation, durable session/device inventory and per-session
+revocation, privileged step-up/approval for high-impact actions, distributed
+edge/WAF throttling and account lockout. SMTP
 credentials, sender-domain authentication, deliverability monitoring and a
 durable retrying email outbox/worker still require deployment/operations work.
 The PKCE portal flow is not an OIDC provider or a Supabase Auth session, and this
 CI evidence is not a production deployment or security certification.
 
 
-## Account MFA / TOTP foundation (8 November 2026)
+## Account MFA / TOTP foundation (8–9 November 2026)
 
 Implemented in PR #102 and squash-merged into main as commit dd4276653ba52cc837fa3fc8e79de5ae5a2aad78. The migration is 0053_user_mfa after 0052_portal_workflow_records. The PR-head and post-merge main CI runs both passed.
 
@@ -983,15 +983,34 @@ Implemented in PR #102 and squash-merged into main as commit dd4276653ba52cc837f
 PR-head CI [run 42474040729](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42474040729) passed **264 tests, 5 warnings**, dependency audit, migration upgrade and downgrade/re-upgrade, Python compilation, the main frontend build and all ten independent portal builds. Post-merge main CI [run 42474601078](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42474601078) also passed **264 tests, 5 warnings** and all the same jobs on merge commit `dd4276653ba52cc837fa3fc8e79de5ae5a2aad78`. Vercel status checks still report the account's `build-rate-limit` quota; these source checks do not establish a successful production deployment.
 
 The key must be supplied through MFA_ENCRYPTION_KEY in the deployment secret
-manager before users can enroll. Key custody/rotation, MFA policy enforcement,
-passkeys, OIDC, per-session revocation, privileged step-up, production UAT and
-security review remain open. This increment is not a security certification.
+manager before users can enroll. The account-level TOTP/recovery-code foundation
+is now complemented by mandatory privileged-role enforcement in PR #125 below.
+Key custody/rotation, organization-level policy, passkeys, OIDC, per-session
+revocation, privileged step-up, production UAT and security review remain open.
+This increment is not a security certification.
 
 
-## Finance, statutory payroll and operations increment (PR #123)
+## Finance, statutory payroll and operations increment (PR #123 and PR #124; merged)
 
-A draft increment adds tenant-scoped foreign-currency rates/postings/revaluation, statutory payroll return schedules and remittance settlement journals, plus backup verification/restore tooling and scheduled health/backup workflows. New migration: 0063_fx_statutory_remittances. New API/UI: app/api/finance_payroll_ops.py, Finance FX workspace and statutory payroll tab. New operational assets: scripts/postgres_backup.py, onecore-postgres-backup.yml, onecore-production-monitor.yml, and docs/FINANCE_PAYROLL_RECOVERY.md.
+PR #123 merged as commit 2f70e7094eb1216f89bbceccf93af0b6c66cdb42. It adds tenant-scoped foreign-currency rates/postings/revaluation and realized settlement journals, statutory payroll return schedules and remittance settlement journals, PostgreSQL backup verification/restore tooling, and scheduled health/backup workflows. New migration: 0063_fx_statutory_remittances. New API/UI: app/api/finance_payroll_ops.py, Finance FX workspace and statutory payroll tab. Operational assets: scripts/postgres_backup.py, onecore-postgres-backup.yml, onecore-production-monitor.yml and docs/FINANCE_PAYROLL_RECOVERY.md.
 
-Verification is pending the latest PR CI run; do not mark this increment verified until migration upgrade/downgrade/re-upgrade, Python compilation, full pytest, frontend build and all portal builds pass. Production backup and monitoring workflows remain inactive until their documented repository secrets are configured. Supabase PITR/cross-region recovery, KRA/NSSF/SHA provider filing, external payment execution, rate-feed approval and production restore drills still require infrastructure/provider configuration and operational sign-off.
+PR #124 merged as commit b15a78276dca3ff5cc7a748170588ac447c27501 to correct three test regressions exposed by the first main-branch run: tenant security table coverage for the new FX/statutory tables, settlement source-type assertions, and machine-readable restore output. PR CI [run 42600790641](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42600790641) and post-merge main CI [run 42601284108](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42601284108) both passed **377 tests, 7 warnings**, dependency audit, migration upgrade/downgrade/re-upgrade, Python compilation, frontend build and all ten portal builds.
 
-The FX API also includes realized settlement reconciliation at `POST /api/v1/accounting/fx/settlements`; it posts balanced receivable/payable, bank and realized gain/loss lines. The production monitor smoke-tests this route alongside FX rate, posting, revaluation and statutory payroll endpoints.
+The scheduled production monitor [run 42603021132](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603021132) failed at its configuration preflight because the repository secret ONECORE_HEALTHCHECK_URL is not set. Consequently, /health, /ready, OpenAPI and provider-configuration probes were skipped; no production health result is established. Set ONECORE_HEALTHCHECK_URL to the actual deployed API base URL. ONECORE_MONITOR_TOKEN is optional and enables the authenticated provider-configuration check. The PostgreSQL backup workflow also requires the five backup/S3 secrets documented in docs/FINANCE_PAYROLL_RECOVERY.md; no successful production backup/restore drill is established by source CI.
+
+The FX API includes realized settlement reconciliation at POST /api/v1/accounting/fx/settlements; it posts balanced receivable/payable, bank and realized gain/loss lines. Supabase PITR/cross-region recovery, KRA/NSSF/SHA provider filing, external payment execution, rate-feed approval and production restore drills still require infrastructure/provider configuration and operational sign-off.
+
+
+## Mandatory privileged MFA enforcement (PR #125; merged 9 November 2026)
+
+PR #125 merged as commit 70c805b6adaa247eafa4e1e76237e1842f526e86. It enforces MFA before an ordinary OneCore API session is granted to root_superadmin, platform_admin, security_admin, cms_admin, support_admin, developer_api_admin, maintenance_admin, incident_commander, release_manager, analytics_admin and recruitment_admin roles.
+
+- Password and Supabase Auth session exchange both apply the same platform-role policy.
+- Privileged users without an accepted second factor receive a setup-only token with a maximum ten-minute lifetime. It is accepted only by MFA status, enrollment and confirmation routes; /auth/me, tenant APIs, platform administration and other protected routes reject it.
+- Supabase AAL2 is preserved only after the configured Supabase Auth /user endpoint validates the supplied token. Local OneCore TOTP remains supported; normal MFA confirmation increments auth_version and invalidates the setup token.
+- The main login UI routes a privileged account directly to authenticator enrollment. Customer accounts retain optional MFA.
+- Added tests for all current/planned privileged role names, legacy token rejection, setup-token expiry and route isolation, password login and Supabase AAL2.
+
+PR-head CI [run 42603183029](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603183029) passed **393 tests, 8 warnings**, pip-audit (no known vulnerabilities), Alembic upgrade/downgrade/re-upgrade, Python compilation, main frontend build and all ten portal builds. Post-merge main CI is tracked separately and must also pass before this entry is considered fully verified on main.
+
+The deployment must set MFA_ENCRYPTION_KEY in its secret manager before privileged users can enroll. Organization-level MFA policy, passkeys/WebAuthn, external OIDC, durable per-device sessions and revocation, and privileged step-up/dual approval for high-impact actions remain open. This is not production UAT or a security certification.
