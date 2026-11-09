@@ -24,8 +24,8 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.ONECORE_BACKUP_AWS_REGION }}
         run: |
           if [ -z "$DATABASE_URL" ] || [ -z "$S3_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_DEFAULT_REGION" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Configure ONECORE_BACKUP_DATABASE_URL, ONECORE_BACKUP_S3_BUCKET and scoped AWS backup credentials to enable backups."
+            echo "::error::Backup is not configured. Set ONECORE_BACKUP_DATABASE_URL, ONECORE_BACKUP_S3_BUCKET, ONECORE_BACKUP_AWS_ACCESS_KEY_ID, ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY and ONECORE_BACKUP_AWS_REGION."
+            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
