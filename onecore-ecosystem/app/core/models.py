@@ -1043,6 +1043,7 @@ class ProcurementApprovalAction(Base):
     entity_type: Mapped[str] = mapped_column(String(24))
     entity_id: Mapped[int] = mapped_column()
     approval_level: Mapped[int] = mapped_column()
+    approval_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     approver_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(16))
     note: Mapped[str] = mapped_column(String(500), default="")
