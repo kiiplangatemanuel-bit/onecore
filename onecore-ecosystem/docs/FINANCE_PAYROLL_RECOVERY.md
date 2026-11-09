@@ -12,7 +12,7 @@
 
 - Prepare a statutory batch from approved payroll runs with posted, unreversed accrual journals from one branch and one pay period using `POST /api/v1/payroll/statutory-batches`.
 - The batch calculates PAYE, employee/employer NSSF, SHIF, employee/employer Housing Levy and employee pension from immutable payslip snapshots.
-- Submit, independently approve, then record the externally confirmed payment reference. Preparer/submitter/approver/payment segregation is enforced.
+- Submit, independently approve, then record the externally confirmed payment reference and actual amount; the amount must exactly reconcile to the batch total before the settlement journal is posted. Preparer/submitter/approver/payment segregation is enforced.
 - `GET /api/v1/payroll/statutory-batches/{id}/return` exports a versioned calculation schedule. It is **not** a KRA/NSSF/SHA filing receipt and does not submit money or returns to those providers. Verify current official rates and filing formats, then file through the approved authority channels and retain the acknowledgement.
 
 ## PostgreSQL backup and recovery
