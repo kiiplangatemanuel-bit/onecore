@@ -12,13 +12,67 @@ export default function AccountSecurity() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [sessionState, setSessionState] = useState(null);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionError, setSessionError] = useState("");
 
   async function load() {
-    setBusy(true); setError("");
-    try { setStatus(await api("/api/v1/auth/mfa/status")); }
-    catch (e) { setError(e.message); }
+    setBusy(true); setError(""); setSessionError("");
+    try {
+      const nextStatus = await api("/api/v1/auth/mfa/status");
+      setStatus(nextStatus);
+      if (nextStatus.session_management_available === false) {
+        setSessionState({ sessions: [], setup_only: true });
+      } else {
+        setSessionState(await api("/api/v1/auth/sessions"));
+      }
+    } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
+
+  async function refreshSessions() {
+    setSessionBusy(true); setSessionError("");
+    try { setSessionState(await api("/api/v1/auth/sessions")); }
+    catch (e) { setSessionError(e.message); }
+    finally { setSessionBusy(false); }
+  }
+
+  async function revokeSession(session) {
+    if (!window.confirm(session.current
+      ? "Revoke this device session? You will be signed out immediately."
+      : "Revoke this device session?")) return;
+    setSessionBusy(true); setSessionError(""); setNotice("");
+    try {
+      const result = await api(`/api/v1/auth/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (result.current_session) {
+        clearToken();
+        setNotice("This device session has been revoked. Sign in again to continue.");
+      } else {
+        setNotice("The selected device session has been revoked.");
+        await refreshSessions();
+      }
+    } catch (e) { setSessionError(e.message); }
+    finally { setSessionBusy(false); }
+  }
+
+  async function revokeOtherSessions() {
+    if (!window.confirm("Sign out all other active OneCore sessions? This device will remain signed in.")) return;
+    setSessionBusy(true); setSessionError(""); setNotice("");
+    try {
+      const result = await api("/api/v1/auth/sessions/revoke-others", { method: "POST" });
+      setNotice(`${result.revoked_count} other session(s) revoked. This device remains signed in.`);
+      await refreshSessions();
+    } catch (e) { setSessionError(e.message); }
+    finally { setSessionBusy(false); }
+  }
+
+  const formatSessionDate = value => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+  const activeOtherSessions = (sessionState?.sessions || []).filter(session =>
+    !session.current && !session.revoked_at && new Date(session.expires_at).getTime() > Date.now()
+  );
   useEffect(() => { load(); }, []);
 
   async function beginEnrollment(e) {
@@ -135,6 +189,41 @@ export default function AccountSecurity() {
         </>}
       </section>
     </>}
+    {sessionState?.setup_only ? <section className="panel">
+      <h3>Device sessions</h3>
+      <p className="muted">Session inventory becomes available after you complete privileged MFA enrollment and sign in again.</p>
+    </section> : sessionState ? <section className="panel">
+      <div className="panel-head">
+        <div><h3>Signed-in devices and sessions</h3><p className="muted">Review recent account access and revoke devices you no longer use.</p></div>
+        <button className="secondary" type="button" onClick={refreshSessions} disabled={sessionBusy}>{sessionBusy ? "Refreshing…" : "Refresh"}</button>
+      </div>
+      {sessionError && <div className="alert error" role="alert">{sessionError}</div>}
+      {sessionState.legacy_session && <p className="notice info" role="status">This sign-in predates device tracking. Sign in again to identify and revoke the current device or use the sign-out-other-sessions action.</p>}
+      <div className="session-toolbar">
+        <span className="muted">{activeOtherSessions.length} other active session(s)</span>
+        <button className="secondary" type="button" onClick={revokeOtherSessions} disabled={sessionBusy || sessionState.legacy_session || activeOtherSessions.length === 0}>Sign out other devices</button>
+      </div>
+      {(sessionState.sessions || []).length === 0 ? <p className="muted">No tracked sessions are available for this account yet.</p> : <div className="session-list">
+        {sessionState.sessions.map(session => {
+          const expired = new Date(session.expires_at).getTime() <= Date.now();
+          const stateLabel = session.revoked_at ? "Revoked" : expired ? "Expired" : session.current ? "This device" : "Active";
+          return <article className="session-item" key={session.id}>
+            <div className="session-item-head">
+              <div><strong>{session.device_name || "Unnamed device"}</strong><p className="muted">{session.user_agent || "Device details not supplied"}</p></div>
+              <span className={session.revoked_at || expired ? "status checking" : "status online"}><i/>{stateLabel}</span>
+            </div>
+            <div className="session-item-meta">
+              <span>Method: <strong>{session.auth_method}</strong></span>
+              <span>MFA: <strong>{session.mfa_verified ? "Verified" : "Not verified"}</strong></span>
+              <span>Last seen: <strong>{formatSessionDate(session.last_seen_at)}</strong></span>
+              <span>Expires: <strong>{formatSessionDate(session.expires_at)}</strong></span>
+              {session.revoked_at && <span>Revoked: <strong>{formatSessionDate(session.revoked_at)}</strong></span>}
+            </div>
+            {!session.revoked_at && !expired && <button className="secondary" type="button" onClick={() => revokeSession(session)} disabled={sessionBusy}>Revoke session</button>}
+          </article>;
+        })}
+      </div>}
+    </section> : null}
     {codeBlock}
     <p className="tiny">If MFA enrollment is unavailable, the deployment operator must configure the dedicated MFA_ENCRYPTION_KEY secret. Do not send the TOTP seed or recovery codes to support.</p>
   </div>;
