@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = Field(default=5, ge=1, le=30)
     login_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600)
     database_url: str = "sqlite:///./onecore.db"
+    alembic_database_url: str = ""
     webhook_worker_database_url: str = ""
-    # Supabase-managed PostgreSQL is the production system of record. Keep DATABASE_URL
-    # for local development and legacy deployments; SUPABASE_DB_URL takes precedence.
+    # Legacy compatibility fallback; explicit DATABASE_URL/ALEMBIC_DATABASE_URL win.
     supabase_db_url: str = ""
     supabase_url: str = ""
     supabase_anon_key: str = ""
@@ -106,7 +106,20 @@ class Settings(BaseSettings):
 
     @property
     def database_connection_url(self) -> str:
-        return (self.supabase_db_url or self.database_url).strip()
+        """Application ORM URL: explicit DATABASE_URL, then legacy Supabase fallback."""
+        database_url = self.database_url.strip()
+        if database_url and database_url != "sqlite:///./onecore.db":
+            return database_url
+        return (self.supabase_db_url or database_url).strip()
+
+    @property
+    def alembic_connection_url(self) -> str:
+        """Migration URL: explicit ALEMBIC_DATABASE_URL, then compatibility fallbacks."""
+        return (
+            self.alembic_database_url.strip()
+            or self.supabase_db_url.strip()
+            or self.database_connection_url
+        )
 
     @model_validator(mode="after")
     def validate_production_security(self):
@@ -116,16 +129,25 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG must be false in production")
             if self.secret_key == "unsafe-development-key-change-me" or len(self.secret_key) < 32:
                 raise ValueError("SECRET_KEY must be a unique random value of at least 32 characters in production")
+            # Validate both effective connections to prevent ORM/migration drift.
             from sqlalchemy.engine import make_url
-            try:
-                database = make_url(self.database_connection_url)
-            except Exception as exc:
-                raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be a valid SQLAlchemy URL") from exc
-            if database.get_backend_name() != "postgresql":
-                raise ValueError("Supabase PostgreSQL is required in production; configure SUPABASE_DB_URL")
-            host = (database.host or "").lower()
-            if not (host.endswith(".supabase.co") or host.endswith(".pooler.supabase.com")):
-                raise ValueError("Production database host must belong to Supabase (db.<project>.supabase.co or Supabase pooler)")
+            for setting_name, connection_value in (
+                ("DATABASE_URL", self.database_connection_url),
+                ("ALEMBIC_DATABASE_URL", self.alembic_connection_url),
+            ):
+                try:
+                    database = make_url(connection_value)
+                except Exception as exc:
+                    raise ValueError(f"{setting_name} must be a valid SQLAlchemy URL") from exc
+                if database.get_backend_name() != "postgresql":
+                    raise ValueError(f"{setting_name} must use Supabase PostgreSQL in production")
+                host = (database.host or "").lower()
+                if not (host.endswith(".supabase.co") or host.endswith(".pooler.supabase.com")):
+                    raise ValueError(f"{setting_name} host must belong to Supabase (db.<project>.supabase.co or Supabase pooler)")
+                if host.endswith(".pooler.supabase.com"):
+                    username = (database.username or "").strip()
+                    if "." not in username or not username.rsplit(".", 1)[-1]:
+                        raise ValueError(f"{setting_name} using the shared pooler requires a project-qualified username such as postgres.<project-ref>")
             origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
             if not origins or "*" in origins or any(not origin.startswith("https://") for origin in origins):
                 raise ValueError("CORS_ORIGINS must contain explicit HTTPS origins in production")

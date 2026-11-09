@@ -151,3 +151,117 @@ def test_supabase_connection_refuses_ssl_disable():
         "postgresql://postgres:secret@db.project-ref.supabase.co:5432/postgres?sslmode=disable"
     )
     assert url.query["sslmode"] == "require"
+
+
+
+
+def test_database_url_is_the_application_orm_url_and_supabase_is_legacy_fallback():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql://orm-user:secret@db.project-ref.supabase.co:5432/postgres",
+        supabase_db_url="postgresql://legacy-user:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert settings.database_connection_url.startswith("postgresql://orm-user:")
+    fallback = Settings(
+        _env_file=None,
+        database_url="sqlite:///./onecore.db",
+        supabase_db_url="postgresql://legacy-user:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert fallback.database_connection_url.startswith("postgresql://legacy-user:")
+
+
+def test_alembic_database_url_has_priority_and_falls_back_safely():
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql://orm-user:secret@db.project-ref.supabase.co:5432/postgres",
+        alembic_database_url="postgresql://migration-user:secret@db.project-ref.supabase.co:5432/postgres",
+        supabase_db_url="postgresql://legacy-user:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert settings.alembic_connection_url.startswith("postgresql://migration-user:")
+    fallback = Settings(
+        _env_file=None,
+        database_url="postgresql://orm-user:secret@db.project-ref.supabase.co:5432/postgres",
+    )
+    assert fallback.alembic_connection_url == fallback.database_connection_url
+
+
+def test_production_validates_both_shared_pooler_urls():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    common = dict(
+        _env_file=None,
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
+    with pytest.raises(ValidationError, match="project-qualified username"):
+        Settings(
+            **common,
+            database_url="postgresql://postgres:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        )
+    with pytest.raises(ValidationError, match="project-qualified username"):
+        Settings(
+            **common,
+            database_url="postgresql://postgres.project-ref:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+            alembic_database_url="postgresql://postgres:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        )
+
+
+def test_production_accepts_separate_project_qualified_pooler_urls():
+    from app.core.config import Settings
+
+    Settings(
+        _env_file=None,
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        database_url="postgresql://postgres.project-ref:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        alembic_database_url="postgresql://postgres.project-ref:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )
+
+
+def test_production_rejects_unqualified_shared_pooler_username():
+    from pydantic import ValidationError
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="project-qualified username"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            debug=False,
+            secret_key="s" * 48,
+            supabase_db_url="postgresql://postgres:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+            cors_origins="https://app.example.com",
+            portal_redirect_origins="https://support.example.com",
+            trusted_hosts="api.example.com",
+            force_https=True,
+        )
+
+
+def test_production_accepts_project_qualified_shared_pooler_username():
+    from app.core.config import Settings
+
+    Settings(
+        _env_file=None,
+        app_env="production",
+        debug=False,
+        secret_key="s" * 48,
+        supabase_db_url="postgresql://postgres.project-ref:secret@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+        cors_origins="https://app.example.com",
+        portal_redirect_origins="https://support.example.com",
+        trusted_hosts="api.example.com",
+        force_https=True,
+    )

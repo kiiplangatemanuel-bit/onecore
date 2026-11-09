@@ -11,7 +11,7 @@ from app.core import finance_ops_models  # noqa: F401 - register FX and statutor
 from app.core import identity_models  # noqa: F401 - register account session and portal assurance tables
 
 config = context.config
-database_url = str(normalized_database_url(settings.database_connection_url))
+database_url = str(normalized_database_url(settings.alembic_connection_url))
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
