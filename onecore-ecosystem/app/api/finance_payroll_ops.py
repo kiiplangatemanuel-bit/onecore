@@ -191,13 +191,13 @@ def create_fx_revaluation(payload: FxRevaluationIn, membership=Depends(active_me
             if pos.position_type=="asset":
                 lines.extend([{"account_id":pos.account_id,"description":f"{payload.currency} asset revaluation","debit":amount,"credit":0},{"account_id":payload.fx_gain_account_id,"description":"Unrealized FX gain","debit":0,"credit":amount}])
             else:
-                lines.extend([{"account_id":payload.fx_gain_account_id,"description":"Unrealized FX gain","debit":amount,"credit":0},{"account_id":pos.account_id,"description":f"{payload.currency} liability revaluation","debit":0,"credit":amount}])
+                lines.extend([{"account_id":pos.account_id,"description":f"{payload.currency} liability revaluation","debit":amount,"credit":0},{"account_id":payload.fx_gain_account_id,"description":"Unrealized FX gain","debit":0,"credit":amount}])
         else:
             total_loss+=amount
             if pos.position_type=="asset":
                 lines.extend([{"account_id":payload.fx_loss_account_id,"description":"Unrealized FX loss","debit":amount,"credit":0},{"account_id":pos.account_id,"description":f"{payload.currency} asset revaluation","debit":0,"credit":amount}])
             else:
-                lines.extend([{"account_id":pos.account_id,"description":f"{payload.currency} liability revaluation","debit":amount,"credit":0},{"account_id":payload.fx_loss_account_id,"description":"Unrealized FX loss","debit":0,"credit":amount}])
+                lines.extend([{"account_id":payload.fx_loss_account_id,"description":"Unrealized FX loss","debit":amount,"credit":0},{"account_id":pos.account_id,"description":f"{payload.currency} liability revaluation","debit":0,"credit":amount}])
     if not lines:
         raise HTTPException(422,"No revaluation difference exists; no journal was created")
     journal=_accounting_make_journal(db,membership,user,payload.valuation_date,f"FX-REVAL-{payload.currency}-{payload.valuation_date.isoformat()}","Foreign currency period-end revaluation",lines,payload.branch_id)
@@ -230,8 +230,8 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
     prior=db.query(PayrollStatutoryBatch).filter_by(organization_id=membership.organization_id,idempotency_key=payload.idempotency_key).first()
     if prior: return {**_statutory_payload(prior),"replayed":True}
     runs=db.query(PayrollRun).filter(PayrollRun.organization_id==membership.organization_id,PayrollRun.id.in_(payload.payroll_run_ids)).with_for_update().all()
-    if len(runs)!=len(payload.payroll_run_ids) or any(x.status!="approved" for x in runs):
-        raise HTTPException(409,"Every source payroll run must exist in this tenant and be approved")
+    if len(runs)!=len(payload.payroll_run_ids) or any(x.status!="approved" or not can_access_branch(membership,x.branch_id) for x in runs):
+        raise HTTPException(409,"Every source payroll run must exist in this tenant, be within branch scope and be approved")
     links=db.query(PayrollAccountingLink).filter(PayrollAccountingLink.organization_id==membership.organization_id,PayrollAccountingLink.payroll_run_id.in_(payload.payroll_run_ids)).all()
     if len(links)!=len(runs) or any(x.reversal_journal_id for x in links):
         raise HTTPException(409,"Every payroll run must have a valid, unreversed accounting accrual")
