@@ -6,14 +6,16 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, PortalAuthorizationCode, User
-from app.core.security import current_user, create_access_token
+from app.core.identity_models import PortalAuthorizationAssurance
+from app.core.security import current_user, create_access_token, platform_role_requires_mfa, set_verified_user_context
+from app.services.user_sessions import create_user_session
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -62,12 +64,19 @@ def issue_portal_code(
     redirect_uri = _trusted_redirect(payload.redirect_uri)
     raw_code = secrets.token_urlsafe(36)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=90)
-    db.add(PortalAuthorizationCode(
+    code_row = PortalAuthorizationCode(
         code_hash=_sha256(raw_code),
         user_id=user.id,
         redirect_uri=redirect_uri,
         code_challenge=payload.code_challenge,
         expires_at=expires_at,
+    )
+    db.add(code_row)
+    db.flush()
+    db.add(PortalAuthorizationAssurance(
+        portal_code_id=code_row.id,
+        user_id=user.id,
+        mfa_verified=bool(db.info.get("onecore_mfa_verified", False)),
     ))
     db.add(AuditEvent(
         actor_user_id=user.id,
@@ -85,7 +94,11 @@ def issue_portal_code(
 
 
 @router.post("/exchange-portal-code")
-def exchange_portal_code(payload: PortalCodeExchange, db: Session = Depends(get_db)):
+def exchange_portal_code(
+    payload: PortalCodeExchange,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
     redirect_uri = _trusted_redirect(payload.redirect_uri)
     challenge = base64.urlsafe_b64encode(
         hashlib.sha256(payload.code_verifier.encode("ascii")).digest()
@@ -108,6 +121,13 @@ def exchange_portal_code(payload: PortalCodeExchange, db: Session = Depends(get_
     user = db.get(User, row.user_id)
     if not user or not user.is_active:
         raise HTTPException(401, "The OneCore account is no longer active")
+    set_verified_user_context(db, user.id)
+    assurance = db.query(PortalAuthorizationAssurance).filter_by(
+        portal_code_id=row.id, user_id=user.id
+    ).first()
+    mfa_verified = bool(assurance and assurance.mfa_verified)
+    if platform_role_requires_mfa(user.platform_role) and not mfa_verified:
+        raise HTTPException(403, "A verified second factor is required for privileged portal access.")
     row.consumed_at = now
     db.add(AuditEvent(
         actor_user_id=user.id,
@@ -116,5 +136,14 @@ def exchange_portal_code(payload: PortalCodeExchange, db: Session = Depends(get_
         resource_id=str(row.id),
         detail=urlsplit(redirect_uri).netloc,
     ))
+    session = create_user_session(
+        db, user, request, auth_method="portal", mfa_verified=mfa_verified
+    )
     db.commit()
-    return {"access_token": create_access_token(user.id, user.auth_version), "token_type": "bearer"}
+    return {
+        "access_token": create_access_token(
+            user.id, user.auth_version, mfa_verified=mfa_verified,
+            session_id=session.id, expires_at=session.expires_at,
+        ),
+        "token_type": "bearer",
+    }
