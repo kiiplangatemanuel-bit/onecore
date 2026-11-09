@@ -1014,3 +1014,57 @@ PR #125 merged as commit 70c805b6adaa247eafa4e1e76237e1842f526e86. It enforces M
 PR-head CI [run 42603183029](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603183029) and post-merge main CI [run 42603604559](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42603604559) both passed **393 tests, 8 warnings**, pip-audit (no known vulnerabilities), Alembic upgrade/downgrade/re-upgrade, Python compilation, main frontend build and all ten portal builds. The source CI is green on the merge commit; Vercel deployment checks still fail with the account build-rate-limit quota and no successful production deployment is established.
 
 The deployment must set MFA_ENCRYPTION_KEY in its secret manager before privileged users can enroll. Organization-level MFA policy, passkeys/WebAuthn, external OIDC, durable per-device sessions and revocation, and privileged step-up/dual approval for high-impact actions remain open. This is not production UAT or a security certification.
+
+
+## Durable account sessions and device revocation (PR #126; merged 9 November 2026)
+
+Merged to `main` as `ffda89a681e4904cacefbae94a78523e12bbbcde`:
+https://github.com/kiiplangatemanuel-bit/onecore/commit/ffda89a681e4904cacefbae94a78523e12bbbcde
+
+Delivered:
+- Account-owned `user_sessions` records for password login, TOTP/recovery-code
+  login, verified Supabase Auth exchange and PKCE portal-code exchange.
+- Signed access tokens carry an opaque session ID. Every tracked API request
+  checks that the database session exists, is not revoked, is unexpired, matches
+  the account authentication version and has the same MFA assurance as the
+  signed token claim. Last-seen activity is updated at bounded intervals.
+- `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/{session_id}`
+  and `POST /api/v1/auth/sessions/revoke-others`; account ownership is checked
+  by both the query and PostgreSQL RLS. Individual and bulk revocation are audited.
+- Account-security UI lists recent devices, authentication method, MFA assurance,
+  last-seen and expiry, with individual and bulk sign-out controls. Restricted
+  privileged MFA-enrollment tokens are explicitly told that session management
+  is unavailable until enrollment and a new sign-in are complete.
+- PKCE portal handoffs persist verified MFA assurance; privileged portal exchange
+  rejects a handoff without that assurance. Password reset and MFA security
+  changes revoke all tracked active sessions.
+- Migration `0064_identity_sessions` follows
+  `0063_fx_statutory_remittances`. Both identity tables use ENABLE/FORCE RLS
+  with owner-only `app.user_id` policies; the runtime role receives SELECT,
+  INSERT and UPDATE, not DELETE. The migration environment registers the models.
+- Added API, ownership, current-device, bulk revocation, expiry, token-assurance,
+  MFA, portal, Supabase, password-reset and migration tests; operator guidance:
+  `docs/IDENTITY_SESSIONS.md`.
+
+Verification:
+- PR CI [run 42610974740](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42610974740): **407 passed, 8 warnings**; dependency audit reported no known vulnerabilities; PostgreSQL migration upgrade, downgrade/re-upgrade, Python compilation, main frontend build and all ten independent portal builds passed.
+- Post-merge `main` CI [run 42611208311](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42611208311): **407 passed, 8 warnings** and the same migration, compilation, audit and frontend/portal checks passed.
+
+Compatibility and release gates:
+- Tokens minted before durable session tracking have no session ID. They cannot
+  be individually revoked or listed as the current device and remain subject to
+  their existing JWT expiry and account authentication version. Sign in again
+  to obtain a tracked session.
+- No refresh-token family, passkey/WebAuthn, OIDC federation, device attestation
+  or hardware binding is included. PostgreSQL runtime-role/RLS behavior still
+  needs a production-like least-privilege rehearsal, plus independent security
+  review and user acceptance testing. This is not a security certification.
+- Vercel deployment checks remain rate-limited by the account's
+  `build-rate-limit` quota; successful source CI is not evidence of a live
+  deployment.
+- Production health monitor [run 42610235596](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42610235596)
+  failed its required-URL preflight because repository secret
+  `ONECORE_HEALTHCHECK_URL` is unset. No live `/health`, `/ready`, OpenAPI
+  or provider-configuration probe ran. Configure that secret with the actual
+  deployed API base URL; `ONECORE_MONITOR_TOKEN` is optional for the
+  authenticated provider-configuration probe.
