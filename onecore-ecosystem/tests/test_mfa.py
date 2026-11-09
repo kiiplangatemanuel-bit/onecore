@@ -271,3 +271,52 @@ def test_privileged_role_rejects_legacy_access_token_without_mfa(platform_role):
         assert blocked.value.status_code == 403
         assert "multi-factor" in blocked.value.detail.lower()
     engine.dispose()
+
+
+
+def test_setup_only_token_can_reach_only_mfa_setup_routes(monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import get_db
+    from app.main import app
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine, tables=[
+        User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
+        MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+    ])
+    SessionFactory = __import__("sqlalchemy.orm", fromlist=["sessionmaker"]).sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False,
+    )
+    with SessionFactory() as db:
+        user = _user(db)
+        user.platform_role = "platform_admin"
+        db.commit()
+        token = create_access_token(user.id, user.auth_version, mfa_setup_only=True)
+
+    def override_db():
+        with SessionFactory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            status_response = client.get("/api/v1/auth/mfa/status", headers=headers)
+            assert status_response.status_code == 200
+            assert status_response.json()["enabled"] is False
+            profile_response = client.get("/api/v1/auth/me", headers=headers)
+            assert profile_response.status_code == 401
+            organizations_response = client.get("/api/v1/organizations", headers=headers)
+            assert organizations_response.status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        Base.metadata.drop_all(engine, tables=[
+            User.__table__, AuditEvent.__table__, MFAChallenge.__table__,
+            MFARecoveryCode.__table__, PortalAuthorizationCode.__table__, UserMFAFactor.__table__,
+        ])
+        engine.dispose()
