@@ -64,6 +64,9 @@ def test_supabase_auth_session_provisions_onecore_identity_and_issues_api_token(
         assert user.is_active is True
         assert user.full_name == "Verified User"
         assert current_user(result["access_token"], db).id == user.id
+        session = db.query(UserSession).filter_by(user_id=user.id).one()
+        assert session.auth_method == "supabase"
+        assert session.mfa_verified is False
     engine.dispose()
 
 
@@ -242,4 +245,6 @@ def test_privileged_supabase_aal2_session_is_accepted(monkeypatch):
         result = exchange_supabase_session(SupabaseSessionExchange(access_token=aal2_token), db)
         assert result["mfa_enrollment_required"] is False
         assert current_user(result["access_token"], db).id == user.id
+        session = db.query(UserSession).filter_by(user_id=user.id).one()
+        assert session.mfa_verified is True
     engine.dispose()
