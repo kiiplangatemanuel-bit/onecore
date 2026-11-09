@@ -88,6 +88,32 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
                 assert Decimal(liability_line.credit)==Decimal("0.00")
             finally:
                 session.close()
+            asset_settlement=client.post("/api/v1/accounting/fx/settlements",json={
+                "currency":"USD","settlement_date":"2026-11-09","position_type":"asset",
+                "foreign_amount":"100.00","carrying_base_amount":"12000.00","settlement_rate":"0.008",
+                "position_account_id":account_ids[0],"bank_account_id":account_ids[4],
+                "fx_gain_account_id":account_ids[2],"fx_loss_account_id":account_ids[3],
+                "reference":"USD-RECEIPT-001","idempotency_key":"fx-settle-asset-001"})
+            assert asset_settlement.status_code==201,asset_settlement.text
+            assert asset_settlement.json()["realized_gain"]=="500.00"
+            assert asset_settlement.json()["realized_loss"]=="0.00"
+            liability_settlement=client.post("/api/v1/accounting/fx/settlements",json={
+                "currency":"USD","settlement_date":"2026-11-09","position_type":"liability",
+                "foreign_amount":"100.00","carrying_base_amount":"13000.00","settlement_rate":"0.007",
+                "position_account_id":account_ids[1],"bank_account_id":account_ids[4],
+                "fx_gain_account_id":account_ids[2],"fx_loss_account_id":account_ids[3],
+                "reference":"USD-PAYMENT-001","idempotency_key":"fx-settle-liability-001"})
+            assert liability_settlement.status_code==201,liability_settlement.text
+            assert liability_settlement.json()["realized_gain"]=="0.00"
+            assert liability_settlement.json()["realized_loss"]=="1285.71"
+            check=override_db()
+            session=next(check)
+            try:
+                for settlement in (asset_settlement,liability_settlement):
+                    lines=session.query(AccountingJournalLine).filter_by(journal_id=settlement.json()["journal_id"]).all()
+                    assert sum((Decimal(x.debit) for x in lines),Decimal("0"))==sum((Decimal(x.credit) for x in lines),Decimal("0"))
+            finally:
+                session.close()
     finally:
         app.dependency_overrides.pop(get_db,None)
         app.dependency_overrides.pop(current_user,None)
