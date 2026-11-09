@@ -60,6 +60,11 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
                 "debit_account_id":account_ids[0],"credit_account_id":account_ids[4],
                 "reference":"USD-INV-001","idempotency_key":"fx-posting-0001"})
             assert replay.status_code==201 and replay.json()["replayed"] is True
+            conflicting_replay=client.post("/api/v1/accounting/fx/postings",json={
+                "rate_id":rate_id,"entry_date":"2026-11-09","foreign_amount":"101.00",
+                "debit_account_id":account_ids[0],"credit_account_id":account_ids[4],
+                "reference":"USD-INV-001","idempotency_key":"fx-posting-0001"})
+            assert conflicting_replay.status_code==409
 
             revaluation=client.post("/api/v1/accounting/fx/revaluations",json={
                 "currency":"USD","valuation_date":"2026-11-09","closing_rate":"0.008",
