@@ -28,7 +28,7 @@ def test_backup_verify_checks_manifest_checksum_and_archive_listing(tmp_path, mo
 def test_backup_verify_rejects_modified_archive(tmp_path, monkeypatch):
     archive=tmp_path/"backup.dump"
     archive.write_bytes(b"original")
-    manifest={"size_bytes":8,"sha256":"0"*64}
+    manifest={"format":"onecore-postgresql-custom-v1","size_bytes":8,"sha256":"0"*64}
     archive.with_suffix(archive.suffix+".manifest.json").write_text(json.dumps(manifest),encoding="utf-8")
     monkeypatch.setattr(postgres_backup.subprocess,"run",lambda *a,**k:None)
     try:
