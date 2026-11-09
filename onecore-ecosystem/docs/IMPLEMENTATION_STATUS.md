@@ -986,3 +986,10 @@ The key must be supplied through MFA_ENCRYPTION_KEY in the deployment secret
 manager before users can enroll. Key custody/rotation, MFA policy enforcement,
 passkeys, OIDC, per-session revocation, privileged step-up, production UAT and
 security review remain open. This increment is not a security certification.
+
+
+## Finance, statutory payroll and operations increment (PR #123)
+
+A draft increment adds tenant-scoped foreign-currency rates/postings/revaluation, statutory payroll return schedules and remittance settlement journals, plus backup verification/restore tooling and scheduled health/backup workflows. New migration: 0063_fx_statutory_remittances. New API/UI: app/api/finance_payroll_ops.py, Finance FX workspace and statutory payroll tab. New operational assets: scripts/postgres_backup.py, onecore-postgres-backup.yml, onecore-production-monitor.yml, and docs/FINANCE_PAYROLL_RECOVERY.md.
+
+Verification is pending the latest PR CI run; do not mark this increment verified until migration upgrade/downgrade/re-upgrade, Python compilation, full pytest, frontend build and all portal builds pass. Production backup and monitoring workflows remain inactive until their documented repository secrets are configured. Supabase PITR/cross-region recovery, KRA/NSSF/SHA provider filing, external payment execution, rate-feed approval and production restore drills still require infrastructure/provider configuration and operational sign-off.
