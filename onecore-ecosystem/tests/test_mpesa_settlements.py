@@ -47,7 +47,9 @@ def test_collection_statement_line_matches_only_confirmed_receipt_and_exact_amou
 def test_payout_statement_line_matches_confirmed_refund():
     row = SimpleNamespace(id=2, amount=Decimal("90.00"))
     kind, found, expected, status, _ = _match_entry(_DB(refund=row), 7, _entry("90.00", "payout"))
-    assert kind == "payout" and found.id == 2 and status == "matched"
+    # matched_type identifies the confirmed source record; the statement line
+    # itself remains transaction_type="payout".
+    assert kind == "refund" and found.id == 2 and status == "matched"
 
 
 def test_statement_amount_mismatch_is_exception_not_silent_match():
