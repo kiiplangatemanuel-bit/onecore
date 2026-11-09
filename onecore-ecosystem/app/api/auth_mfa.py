@@ -9,14 +9,16 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, MFAChallenge, MFARecoveryCode, PortalAuthorizationCode, User, UserMFAFactor
+from app.core.identity_models import UserSession
 from app.core.security import create_access_token, current_user, current_user_for_mfa_setup, verify_password
+from app.services.user_sessions import create_user_session
 
 router = APIRouter(prefix="/api/v1/auth/mfa", tags=["authentication"])
 CHALLENGE_SECONDS = 300
@@ -118,6 +120,13 @@ def _revoke_portal_handoffs(db: Session, user_id: int, now: datetime) -> None:
         MFAChallenge.user_id == user_id,
         MFAChallenge.consumed_at.is_(None),
     ).update({MFAChallenge.consumed_at: now}, synchronize_session=False)
+    db.query(UserSession).filter(
+        UserSession.user_id == user_id,
+        UserSession.revoked_at.is_(None),
+    ).update(
+        {UserSession.revoked_at: now, UserSession.revoked_reason: "mfa_security_change"},
+        synchronize_session=False,
+    )
 
 
 def _revoke_recovery_codes(db: Session, user_id: int, now: datetime) -> None:
@@ -138,7 +147,7 @@ def _new_recovery_codes(db: Session, user_id: int, now: datetime) -> list[str]:
     return codes
 
 
-def _verify_and_consume_code(db: Session, user: User, factor: UserMFAFactor, code: str, now: datetime) -> bool:
+def _verify_and_consume_code(db: Session, user: User, factor: UserMFAFactor, code: str, now: datetime) -> str | None:
     normalized = re.sub(r"[\s-]", "", code).upper()
     if re.fullmatch(r"[A-F0-9]{16}", normalized):
         recovery = db.query(MFARecoveryCode).filter_by(
@@ -146,13 +155,13 @@ def _verify_and_consume_code(db: Session, user: User, factor: UserMFAFactor, cod
         ).with_for_update().first()
         if recovery and recovery.used_at is None and recovery.revoked_at is None:
             recovery.used_at = now
-            return True
+            return "recovery_code"
     secret = _decrypt_secret(factor)
     step = _matching_totp_step(secret, code.strip(), now.timestamp(), factor.last_used_step)
     if step is None:
-        return False
+        return None
     factor.last_used_step = step
-    return True
+    return "totp"
 
 
 def issue_mfa_challenge(db: Session, user: User) -> dict:
@@ -242,7 +251,11 @@ def confirm_mfa_enrollment(payload: MFAConfirmIn, user: User = Depends(current_u
 
 
 @router.post("/challenge")
-def complete_mfa_challenge(payload: MFAChallengeIn, db: Session = Depends(get_db)):
+def complete_mfa_challenge(
+    payload: MFAChallengeIn,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
     now = _now()
     row = db.query(MFAChallenge).filter_by(token_hash=_digest(payload.challenge_token)).with_for_update().first()
     if not row or row.consumed_at is not None:
@@ -257,11 +270,21 @@ def complete_mfa_challenge(payload: MFAChallengeIn, db: Session = Depends(get_db
         row.consumed_at = now
         db.commit()
         raise HTTPException(401, "MFA challenge is invalid or expired.")
-    if _verify_and_consume_code(db, user, factor, payload.code, now):
+    auth_method = _verify_and_consume_code(db, user, factor, payload.code, now)
+    if auth_method:
         row.consumed_at = now
-        _audit(db, user, "account.mfa.challenge_succeeded")
+        session = create_user_session(
+            db, user, request, auth_method=auth_method, mfa_verified=True
+        )
+        _audit(db, user, "account.mfa.challenge_succeeded", f"method={auth_method}")
         db.commit()
-        return {"access_token": create_access_token(user.id, user.auth_version), "token_type": "bearer"}
+        return {
+            "access_token": create_access_token(
+                user.id, user.auth_version, mfa_verified=True,
+                session_id=session.id, expires_at=session.expires_at,
+            ),
+            "token_type": "bearer",
+        }
     row.attempts = int(row.attempts or 0) + 1
     if row.attempts >= MAX_CHALLENGE_ATTEMPTS:
         row.consumed_at = now
