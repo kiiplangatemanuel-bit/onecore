@@ -1,0 +1,64 @@
+name: OneCore PostgreSQL restore drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_key:
+        description: "S3 object key for a verified OneCore .dump archive (for example onecore/onecore-20261109T021500Z.dump)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require isolated recovery target and storage credentials
+        env:
+          S3_BUCKET: ${{ secrets.ONECORE_BACKUP_S3_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.ONECORE_BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ONECORE_BACKUP_AWS_REGION }}
+          RESTORE_DATABASE_URL: ${{ secrets.ONECORE_RESTORE_DATABASE_URL }}
+          RESTORE_DATABASE_NAME: ${{ secrets.ONECORE_RESTORE_DATABASE_NAME }}
+        run: |
+          set -euo pipefail
+          for name in S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION RESTORE_DATABASE_URL RESTORE_DATABASE_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required restore-drill configuration: $name"
+              exit 1
+            fi
+          done
+      - name: Install PostgreSQL client and Python dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          python -m pip install "sqlalchemy>=2.0,<3.0"
+      - name: Download archive and manifest from private S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ONECORE_BACKUP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ONECORE_BACKUP_AWS_REGION }}
+          S3_BUCKET: ${{ secrets.ONECORE_BACKUP_S3_BUCKET }}
+          ARCHIVE_KEY: ${{ inputs.archive_key }}
+        run: |
+          set -euo pipefail
+          archive_file="$(basename "$ARCHIVE_KEY")"
+          test -n "$archive_file"
+          case "$archive_file" in *.dump) ;; *) echo "::error::Archive key must point to a .dump file"; exit 1;; esac
+          aws s3 cp "s3://$S3_BUCKET/$ARCHIVE_KEY" "/tmp/$archive_file"
+          aws s3 cp "s3://$S3_BUCKET/$ARCHIVE_KEY.manifest.json" "/tmp/$archive_file.manifest.json"
+          echo "ARCHIVE_PATH=/tmp/$archive_file" >> "$GITHUB_ENV"
+      - name: Verify checksum and PostgreSQL archive
+        run: python onecore-ecosystem/scripts/postgres_backup.py verify --archive "$ARCHIVE_PATH"
+      - name: Restore into the explicitly configured empty recovery database
+        env:
+          ONECORE_RESTORE_DATABASE_URL: ${{ secrets.ONECORE_RESTORE_DATABASE_URL }}
+          RESTORE_DATABASE_NAME: ${{ secrets.ONECORE_RESTORE_DATABASE_NAME }}
+        run: |
+          set -euo pipefail
+          python onecore-ecosystem/scripts/postgres_backup.py restore --archive "$ARCHIVE_PATH" --confirm-target "$RESTORE_DATABASE_NAME" --allow-restore

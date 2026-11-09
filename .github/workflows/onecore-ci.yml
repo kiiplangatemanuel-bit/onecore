@@ -1,7 +1,12 @@
 name: OneCore API checks
 
+concurrency:
+  group: onecore-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 on:
   push:
+    branches: [main]
     paths:
       - "onecore-ecosystem/**"
       - "frontend/**"
@@ -56,7 +61,7 @@ jobs:
         working-directory: onecore-ecosystem
         run: alembic downgrade base && alembic upgrade head
       - name: Compile Python modules
-        run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests
+        run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests onecore-ecosystem/scripts
       - name: Run tests
         working-directory: onecore-ecosystem
         run: python -m pytest -q tests
@@ -78,6 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         portal: [support, status, developers, docs, community, trust, events, careers, partners, admin]
     steps:

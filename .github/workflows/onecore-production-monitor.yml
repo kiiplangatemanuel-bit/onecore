@@ -1,0 +1,79 @@
+name: OneCore production health monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require configured production URL
+        id: target
+        env:
+          HEALTHCHECK_URL: ${{ secrets.ONECORE_HEALTHCHECK_URL }}
+          MONITOR_TOKEN: ${{ secrets.ONECORE_MONITOR_TOKEN }}
+        run: |
+          if [ -z "$HEALTHCHECK_URL" ]; then
+            echo "::error::Production monitoring is not configured. Set the ONECORE_HEALTHCHECK_URL repository secret."
+            exit 1
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$MONITOR_TOKEN" ]; then
+            echo "token_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "token_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Probe liveness, readiness and OpenAPI
+        if: steps.target.outputs.configured == 'true'
+        env:
+          HEALTHCHECK_URL: ${{ secrets.ONECORE_HEALTHCHECK_URL }}
+        run: |
+          set -euo pipefail
+          base="${HEALTHCHECK_URL%/}"
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 --max-time 15 "$base/health"
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 --max-time 20 "$base/ready"
+          curl --fail --silent --show-error --retry 2 --retry-delay 3 --max-time 20 "$base/openapi.json" -o /tmp/openapi.json
+          python - <<'PY'
+          import json
+          with open("/tmp/openapi.json", encoding="utf-8") as stream:
+              spec = json.load(stream)
+          required = {
+              "/api/v1/accounting/fx/rates",
+              "/api/v1/accounting/fx/postings",
+              "/api/v1/accounting/fx/revaluations",
+              "/api/v1/accounting/fx/settlements",
+              "/api/v1/payroll/statutory-batches",
+          }
+          missing = sorted(required - set(spec.get("paths", {})))
+          if missing:
+              raise SystemExit("Production API is missing expected finance/payroll routes: " + ", ".join(missing))
+          print("Production API health, database readiness and finance/payroll route probes passed.")
+          PY
+
+      - name: Check enabled provider configuration
+        if: steps.target.outputs.configured == 'true' && steps.target.outputs.token_configured == 'true'
+        env:
+          HEALTHCHECK_URL: ${{ secrets.ONECORE_HEALTHCHECK_URL }}
+          MONITOR_TOKEN: ${{ secrets.ONECORE_MONITOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="${HEALTHCHECK_URL%/}"
+          curl --fail --silent --show-error --retry 2 --retry-delay 3 --max-time 20 \
+            -H "Authorization: Bearer $MONITOR_TOKEN" "$base/api/v1/integrations" -o /tmp/integrations.json
+          python - <<'PY'
+          import json
+          with open("/tmp/integrations.json", encoding="utf-8") as stream:
+              providers = json.load(stream)
+          missing = sorted(name for name, item in providers.items()
+                           if item.get("enabled") and not item.get("configured"))
+          if missing:
+              raise SystemExit("Enabled integrations are missing required environment settings: " + ", ".join(missing))
+          print("All enabled provider integrations have their required environment configuration.")
+          PY
