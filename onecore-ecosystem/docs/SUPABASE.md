@@ -16,7 +16,7 @@ Example format only — copy actual values from the Supabase dashboard and never
 SUPABASE_DB_URL=postgresql://postgres.<project-ref>:<database-password>@<supabase-host>:5432/postgres?sslmode=require
 ```
 
-The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.
+Production requires an explicit `SUPABASE_DB_URL`; it will not silently fall back to `DATABASE_URL`. When the shared pooler is used, configuration validation rejects the bare `postgres` username and requires the project-qualified username copied from Supabase Connect. The backend normalizes PostgreSQL URLs to psycopg v3, enforces Supabase TLS, and disables psycopg prepared statements when using Supabase's transaction-mode pooler (port 6543). The backend database configuration also supports bounded connection-pool sizing and recycling. Do not guess a project hostname or pooler username.
 
 ## Support file attachments
 
