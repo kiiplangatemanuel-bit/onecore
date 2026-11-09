@@ -221,7 +221,7 @@ def _resolve_current_user(token: str, db: Session, *, allow_mfa_setup_only: bool
     if platform_role_requires_mfa(user.platform_role) and payload.get("mfa_verified") is not True:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="A verified second factor is required for privileged platform access.",
+            detail="Multi-factor authentication with a verified second factor is required for privileged platform access.",
         )
     return user
 
