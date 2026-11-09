@@ -103,8 +103,13 @@ def restore(args):
         raise SystemExit("Restore target is not empty; refusing to overwrite existing data")
     run(["pg_restore", "--exit-on-error", "--no-owner", "--no-acl", "--dbname", database,
          "--host", conn[1], "--port", conn[3], "--username", conn[5], str(archive)], env)
-    print(json.dumps({"restored":True,"target_database":database,
-                      "warning":"Run post-restore validation and keep the target isolated until approved."}))
+    smoke = subprocess.run(["psql", *conn, "--tuples-only", "--no-align", "--command",
+        "SELECT CASE WHEN to_regclass('public.alembic_version') IS NOT NULL AND to_regclass('public.organizations') IS NOT NULL AND to_regclass('public.memberships') IS NOT NULL AND to_regclass('public.accounting_journals') IS NOT NULL THEN 'ok' ELSE 'missing' END"],
+        env=env, check=True, capture_output=True, text=True)
+    if smoke.stdout.strip() != "ok":
+        raise SystemExit("Restore smoke test failed: required OneCore core tables are missing")
+    print(json.dumps({"restored":True,"smoke_test":"passed","target_database":database,
+                      "warning":"Keep the restored target isolated until application-level validation and recovery approval."}))
 
 
 def main():
