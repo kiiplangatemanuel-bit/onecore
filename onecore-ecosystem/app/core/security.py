@@ -175,6 +175,7 @@ def _resolve_current_user(token: str, db: Session, *, allow_mfa_setup_only: bool
 
     session_id = payload.get("sid")
     db.info["onecore_session_id"] = None
+    db.info["onecore_mfa_setup_only"] = setup_only
     db.info["onecore_mfa_verified"] = payload.get("mfa_verified") is True
     if session_id is not None:
         if not isinstance(session_id, str) or len(session_id) != 36:
