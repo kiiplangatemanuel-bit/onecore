@@ -10,6 +10,7 @@ import app.api.auth_workflows as workflows
 from app.api.auth_workflows import confirm_password_reset, request_password_reset
 from app.core.database import Base
 from app.core.models import AuditEvent, PasswordResetToken, PortalAuthorizationCode, User
+from app.core.identity_models import UserSession
 from app.core.schemas import PasswordResetConfirmIn, PasswordResetRequestIn
 from app.core.security import create_access_token, current_user, verify_password
 
@@ -17,7 +18,7 @@ from app.core.security import create_access_token, current_user, verify_password
 def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, AuditEvent.__table__,
+        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, UserSession.__table__, AuditEvent.__table__,
     ])
     return engine
 
