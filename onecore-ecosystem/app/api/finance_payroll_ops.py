@@ -311,7 +311,6 @@ def _load_statutory_batch(db,membership,batch_id):
         AccountingJournal.organization_id==membership.organization_id,
         AccountingJournal.id.in_([link.journal_id for link in links]),
         AccountingJournal.status=="posted").all()
-    run_by_id={run.id:run for run in runs}
     link_by_run={link.payroll_run_id:link for link in links}
     journal_by_id={journal.id:journal for journal in journals}
     if len(journals)!=len(runs) or any(
@@ -422,8 +421,10 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
         raise HTTPException(409,"Every payroll run must have a valid, unreversed accounting accrual")
     journal_ids=[x.journal_id for x in links]
     posted_journals=db.query(AccountingJournal).filter(AccountingJournal.organization_id==membership.organization_id,AccountingJournal.id.in_(journal_ids),AccountingJournal.status=="posted").all()
-    if len(posted_journals)!=len(runs):
-        raise HTTPException(409,"Every source payroll run must have a posted general-ledger accrual journal")
+    posted_by_id={journal.id:journal for journal in posted_journals}
+    link_by_run={link.payroll_run_id:link for link in links}
+    if len(posted_journals)!=len(runs) or any(posted_by_id.get(link_by_run[run.id].journal_id) is None or posted_by_id[link_by_run[run.id].journal_id].branch_id!=run.branch_id for run in runs):
+        raise HTTPException(409,"Every source payroll run must have a posted accrual journal in the same branch")
     if len({x.branch_id for x in runs})!=1:
         raise HTTPException(422,"A statutory batch must contain payroll runs from exactly one branch")
     currencies={x.currency for x in runs}
