@@ -75,6 +75,7 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("uq_accounting_fx_settlement_org_key","accounting_fx_settlements",["organization_id","idempotency_key"],unique=True)
+    op.create_index("uq_accounting_fx_settlement_org_reference","accounting_fx_settlements",["organization_id","reference"],unique=True)
     op.create_table(
         "payroll_statutory_batches",
         sa.Column("id", sa.Integer(), primary_key=True),
