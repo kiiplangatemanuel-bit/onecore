@@ -435,7 +435,7 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
 def submit_statutory_batch(batch_id:int,membership=Depends(active_membership),user=Depends(current_user),db:Session=Depends(get_db)):
     if (membership.role or "").lower() not in {"org_admin","payroll_manager"}: raise HTTPException(403,"Payroll manager role required")
     row=_load_statutory_batch(db,membership,batch_id)
-    row=db.query(PayrollStatutoryBatch).filter_by(id=row.id,organization_id=membership.organization_id).with_for_update().first()
+    row=db.query(PayrollStatutoryBatch).filter_by(id=row.id,organization_id=membership.organization_id).populate_existing().with_for_update().first()
     if row.status!="draft": raise HTTPException(409,"Only draft statutory batches can be submitted")
     row.status="pending_approval";row.submitted_by=user.id;row.submitted_at=datetime.now(timezone.utc)
     _audit(db,user,membership.organization_id,"payroll.statutory_batch.submitted","payroll_statutory_batch",row.id);db.commit();return _statutory_payload(row)
