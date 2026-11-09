@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.core.authorization import require_permission, can_access_branch
+from app.core.authorization import can_access_branch
 from app.core.database import get_db
-from app.core.models import AccountingAccount, AccountingJournal, AccountingJournalLine, AuditEvent, Organization, Branch
+from app.core.models import AccountingAccount, AuditEvent, Organization, Branch
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.core.hr_payroll_models import PayrollRun, PayrollPayslip, PayrollAccountingLink
@@ -24,7 +24,6 @@ from app.api.routes import _accounting_make_journal, _accounting_assert_period_o
 
 router = APIRouter(tags=["finance-fx-statutory"])
 CENT = Decimal("0.01")
-RATE_QUANTUM = Decimal("0.0000000001")
 
 
 def money(v):
@@ -298,6 +297,16 @@ def create_statutory_batch(payload:StatutoryBatchIn,membership=Depends(active_me
         raise HTTPException(409,"Every payroll run must have a valid, unreversed accounting accrual")
     currencies={x.currency for x in runs}
     if len(currencies)!=1: raise HTTPException(422,"A statutory batch cannot mix payroll currencies")
+    org=db.query(Organization).filter_by(id=membership.organization_id,is_active=True).first()
+    if not org or currencies!={org.currency}:
+        raise HTTPException(422,"Statutory remittance batches must use the organization's base currency")
+    periods={(x.period_start.date(),x.period_end.date()) for x in runs}
+    if len(periods)!=1:
+        raise HTTPException(422,"A statutory batch must contain payroll runs from exactly one pay period")
+    prior_batches=db.query(PayrollStatutoryBatch).filter_by(organization_id=membership.organization_id).all()
+    selected=set(payload.payroll_run_ids)
+    if any(selected.intersection(set(batch.source_run_ids or [])) for batch in prior_batches):
+        raise HTTPException(409,"One or more payroll runs already belong to a statutory remittance batch")
     slips=db.query(PayrollPayslip).filter(PayrollPayslip.organization_id==membership.organization_id,PayrollPayslip.payroll_run_id.in_(payload.payroll_run_ids)).all()
     if not slips: raise HTTPException(409,"No payroll payslips exist for the selected runs")
     totals={"PAYE":Decimal("0"),"NSSF_EMPLOYEE":Decimal("0"),"NSSF_EMPLOYER":Decimal("0"),"SHIF":Decimal("0"),"HOUSING_LEVY_EMPLOYEE":Decimal("0"),"HOUSING_LEVY_EMPLOYER":Decimal("0"),"PENSION":Decimal("0")}
