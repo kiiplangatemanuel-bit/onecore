@@ -51,11 +51,9 @@ def upgrade():
                 FOR ALL
                 USING (
                     user_id = NULLIF(current_setting('app.user_id', true), '')::integer
-                    OR public.onecore_is_platform_admin()
                 )
                 WITH CHECK (
                     user_id = NULLIF(current_setting('app.user_id', true), '')::integer
-                    OR public.onecore_is_platform_admin()
                 )
             """)
         op.execute("""
