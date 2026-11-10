@@ -1,77 +1,118 @@
 # OneCore implementation status
 
-Scope baseline: the supplied master specification defines 75 functional categories and
-requires a feature to have its data/configuration, backend, frontend, permissions,
-validation, tests, monitoring, documentation and deployment evidence before it is
-marked complete.
+Scope baseline: the supplied master specification defines 75 functional categories.
+A category is complete only when its relevant database, backend, frontend, permissions,
+validation, integration, testing, documentation, deployment, monitoring and UAT
+evidence has been reviewed. The categories are functional groupings, not 75 separate
+microservices.
 
-## Verified in this delivery
+**Reconciled:** 10 November 2026  
+**Current main:** `f419c33756280cb43b896c4cc44bf0a97f01df48`
 
-The following are implemented in the shared modular-monolith foundation and have
-passed the repository CI test workflow at the recorded commits:
+## Verified on current main
 
-- JWT login/current-user lookup and Argon2 password verification (existing baseline).
-- Tenant membership lookup and role-based permissions for generic record operations.
-- Branch scope filtering for records; record create, list, update and delete.
-- Organization branch model and tenant-scoped create/list/update/deactivate APIs.
-- Organization invitation creation, listing, revocation and acceptance; token hashes
-  are stored, expiry is checked, and acceptance requires the invited account email.
-- Custom-domain request, DNS TXT ownership verification, TLS certificate check before
-  platform activation, primary-domain selection and tenant-safe organization lookup.
-- Informational maintenance notices with organization/user/platform-role targeting,
-  scheduling, dismissal, draft editing, second-admin publication approval and withdrawal.
-- Mandatory footer API wording and public homepage attribution.
-- Registration email verification and password recovery with hashed, expiring, single-use tokens; password reset increments an authentication version to invalidate previously issued access tokens. Production SMTP delivery still requires deployment configuration.
-- Shared cross-origin portal sign-in using a short-lived, single-use PKCE authorization code, exact HTTPS origin allowlist, state verification and per-origin session storage; bearer tokens are not placed in redirect URLs.
-- CI workflow for dependency audit, migration upgrade/downgrade, Python compilation, pytest, the main frontend and ten independent portal builds.
+The following shared-platform foundations have implementation and automated-test
+coverage:
+
+- Account registration, email verification and password reset using hashed,
+  expiring, single-use tokens; password changes invalidate prior authentication
+  versions. SMTP delivery still requires deployment configuration.
+- JWT authentication, Argon2 password verification, PKCE-based portal sign-in,
+  account TOTP enrollment/verification, encrypted authenticator seeds, hashed
+  single-use recovery codes, privileged-role MFA enforcement, durable sessions,
+  device inventory and per-session revocation.
+- Organization/branch models, branch-scoped access, membership invitations,
+  tenant-aware host routing, custom-domain ownership verification, pre-activation
+  HTTPS certificate checks, and targeted/audited maintenance notices.
+- PostgreSQL tenant RLS policies and forced-RLS catalog checks. The current CI
+  additionally assumes a non-owner `NOLOGIN NOSUPERUSER NOBYPASSRLS` role and
+  tests actual tenant read/write isolation and append-only audit behavior on
+  `records`, `memberships` and `audit_events`.
+- Alembic migration chain through `0064_identity_sessions`, with CI upgrade,
+  downgrade-to-base and re-upgrade checks against PostgreSQL 16.
+- Specialist domain slices exist on main for Inventory, Accounting, CRM,
+  Procurement, POS, School, Hospital, Pharmacy/Laboratory and HR/Payroll. These
+  are partial applications with real models/migrations, APIs, validation,
+  authorization, audit and tests; their presence does not mean their full master
+  requirements or production acceptance are complete.
+- OneCore attribution uses the required footer wording: **Powered by OneCore Technologies Ltd**.
 
 ## Verification evidence
 
-- CI workflow: .github/workflows/onecore-ci.yml.
-- A successful run after the explicit package-path fix:
-  4bd2ac2222ce975f9dfc5f9aab7704ab14f6a284.
-- A successful run after invitations and branch APIs:
-  b4097d650626575a697f49314119f01b6b5db9ad.
-- Newer documentation-only commits trigger the same workflow; check the Actions tab
-  for the latest run before release.
+- [PR #128](https://github.com/kiiplangatemanuel-bit/onecore/pull/128) fixed a
+  CI-only test isolation regression in the Alembic URL fallback assertion.
+  Post-merge main run
+  [42803058113](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42803058113)
+  passed: 413 tests, 8 warnings.
+- [PR #129](https://github.com/kiiplangatemanuel-bit/onecore/pull/129) added
+  behavioral PostgreSQL RLS verification. Post-merge main run
+  [42803483055](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42803483055)
+  passed: 414 tests, 8 warnings. Migration upgrade/downgrade/re-upgrade,
+  dependency audit, Python compilation, main frontend build and all ten portal
+  builds passed.
+- The RLS behavior test uses a disposable CI-only role with grants limited to
+  memberships, records and audit events. It is not evidence that the production
+  Supabase runtime roles have been provisioned or tested.
 
-## Not complete / production blockers
+## Current outstanding work and release blockers
 
-The 75-category register and module folders are scope/catalogue assets, not 75
-implemented business applications. The specialist module directories still need
-their own domain schemas, migrations, services, UI, authorization matrix, tests,
-monitoring, documentation and user acceptance testing.
-
-Shared platform work still outstanding includes:
-
-- Production SMTP/email deliverability and domain authentication; organization/role-
-  level MFA policy, passkeys/WebAuthn and external OIDC identity federation;
-  distributed throttling and account lockout. Account-level TOTP/recovery codes,
-  mandatory privileged-role MFA and durable session/device inventory with
-  per-session revocation are implemented. Registration email verification and
-  password recovery flows are implemented, but live delivery depends on SMTP
-  deployment configuration.
-- A dedicated organization/branch administration frontend and verified branch
-  existence in branch-scope assignment/invitation UX.
-- Domain ingress provisioning, automated certificate issuance/renewal, primary-domain
-  redirects and end-to-end custom-host deployment tests. The API checks an already
-  provisioned HTTPS certificate; it does not provision TLS or configure DNS.
-- A notification delivery worker, WebSocket/SSE push and fallback polling UI.
-- Alembic migrations; production PostgreSQL/Redis/object storage setup; backup/PITR,
-  tested restore, monitoring, alerting, incident runbooks and rollback.
-- Security review, load/performance/accessibility testing and production deployment.
-- Complete frontend experiences for every enabled module and required responsive
-  English/Kiswahili content.
-- Provider-specific M-Pesa, KRA eTIMS, SHA, bank, messaging and AI sandbox/UAT;
-  no adapter should be called certified or live without formal provider approval.
+1. **Production database role rehearsal:** provision the actual Supabase API and
+   worker roles with reviewed least-privilege grants, `NOBYPASSRLS`, no tenant-table
+   ownership and correct login membership. Run the RLS behavior suite against the
+   target Supabase project. CI uses a disposable local PostgreSQL role only.
+2. **Backups and disaster recovery:** scheduled backup run
+   [42746373375](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42746373375)
+   stopped at its configuration preflight because these repository secrets are
+   missing: `ONECORE_BACKUP_DATABASE_URL`, `ONECORE_BACKUP_S3_BUCKET`,
+   `ONECORE_BACKUP_AWS_ACCESS_KEY_ID`, `ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY`
+   and `ONECORE_BACKUP_AWS_REGION`. The restore drill also needs
+   `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME`.
+   No successful production backup or restore drill is evidenced.
+3. **Production monitoring:** health-monitor run
+   [42800251425](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42800251425)
+   stopped at preflight because `ONECORE_HEALTHCHECK_URL` is not configured.
+   Consequently no production `/health`, `/ready`, OpenAPI or provider-configuration
+   probe has been verified.
+4. **Identity and communications:** organization-level MFA policy, passkeys/WebAuthn,
+   external OIDC/SSO, distributed rate limiting/lockout, a durable identity-email
+   outbox, and live SMTP domain authentication/deliverability remain open. The
+   current account MFA and session controls do not close these items.
+5. **External integrations:** M-Pesa, eTIMS, SHA, bank, SMS, email, WhatsApp, AI,
+   biometric and hardware connections still require authorized production
+   credentials, provider sandbox/UAT, callbacks, reconciliation and formal
+   approval. No provider certification or live transaction processing is claimed.
+6. **Specialist scope:** Accounting, CRM, Procurement, POS, School, Hospital,
+   Pharmacy/Laboratory and HR/Payroll still need feature-by-feature completion,
+   fuller user workflows and UAT. No dedicated SACCO, Microfinance or Chama
+   domain vertical slice is yet evidenced on main. Hotel, Restaurant, Property,
+   Services, E-commerce, Website Builder, central CMS and other product categories
+   likewise need their own reviewed vertical slices; a catalogue folder or manifest
+   is not implementation evidence.
+7. **Frontend and quality:** complete responsive workspaces, English/Kiswahili
+   coverage, accessibility, browser/device compatibility, end-to-end workflows,
+   security review, penetration testing, load/concurrency testing and customer UAT
+   remain release gates.
+8. **Domains and operations:** custom-domain APIs verify ownership and an already
+   provisioned HTTPS certificate; DNS routing, ingress configuration and automated
+   certificate issuance/renewal remain deployment responsibilities. Redis/object
+   storage topology, centralized metrics/tracing/alerting, incident runbooks,
+   rollback and measured RPO/RTO still require production validation.
 
 ## Release policy
 
 Do not expose a module as production-ready merely because it exists in the catalogue.
 Keep specialist modules disabled until their own acceptance evidence is complete.
 Do not use the generic JSON record API as a substitute for accounting, clinical,
-tax, payroll, school grading, lending or offline-POS domain logic.
+tax, payroll, school grading, lending or offline-POS domain logic. A green CI run is
+not production deployment, provider certification, successful backup/restore or
+user acceptance.
 
+## Historical implementation log
+
+Entries below are dated implementation history. Branch names and "CI pending" labels
+describe the state at the time of that entry; they are not authoritative current
+branch status. Use the current-main snapshot and linked Actions runs above for
+release decisions.
 
 ## Database migration foundation (added 7 November 2026)
 
