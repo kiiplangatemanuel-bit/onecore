@@ -39,6 +39,7 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}/onecore-ecosystem
       SUPABASE_DB_URL: postgresql+psycopg://postgres@localhost:5432/onecore_test
+      ONECORE_CI_RLS_ROLE: onecore_ci_runtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,6 +61,43 @@ jobs:
       - name: Verify migration downgrade and upgrade
         working-directory: onecore-ecosystem
         run: alembic downgrade base && alembic upgrade head
+      - name: Provision CI-only NOBYPASSRLS role for tenant behavior tests
+        working-directory: onecore-ecosystem
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(
+              os.environ["SUPABASE_DB_URL"],
+              isolation_level="AUTOCOMMIT",
+          )
+          try:
+              with engine.connect() as connection:
+                  connection.execute(text(
+                      "CREATE ROLE onecore_ci_runtime NOLOGIN NOSUPERUSER "
+                      "NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                  ))
+                  connection.execute(text(
+                      "GRANT USAGE ON SCHEMA public TO onecore_ci_runtime"
+                  ))
+                  connection.execute(text(
+                      "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+                      "public.memberships, public.records, public.audit_events "
+                      "TO onecore_ci_runtime"
+                  ))
+                  connection.execute(text(
+                      "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public "
+                      "TO onecore_ci_runtime"
+                  ))
+                  connection.execute(text(
+                      "GRANT EXECUTE ON FUNCTION public.onecore_is_org_admin(integer), "
+                      "public.onecore_is_platform_admin(), "
+                      "public.onecore_is_org_owner(integer) TO onecore_ci_runtime"
+                  ))
+          finally:
+              engine.dispose()
+          PY
       - name: Compile Python modules
         run: python -m compileall -q onecore-ecosystem/app onecore-ecosystem/tests onecore-ecosystem/scripts
       - name: Run tests
