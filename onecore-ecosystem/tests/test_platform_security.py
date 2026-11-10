@@ -185,6 +185,9 @@ def test_alembic_database_url_has_priority_and_falls_back_safely():
     fallback = Settings(
         _env_file=None,
         database_url="postgresql://orm-user:secret@db.project-ref.supabase.co:5432/postgres",
+        # CI defines SUPABASE_DB_URL for its disposable PostgreSQL service.
+        # Clear it here so this assertion exercises the no-legacy-override fallback.
+        supabase_db_url="",
     )
     assert fallback.alembic_connection_url == fallback.database_connection_url
 
