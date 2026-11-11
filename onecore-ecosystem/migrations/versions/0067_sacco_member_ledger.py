@@ -9,11 +9,12 @@ depends_on = None
 
 
 def upgrade():
+    op.create_unique_constraint("uq_sacco_member_org_id", "sacco_members", ["organization_id", "id"])
     op.create_table(
         "sacco_financial_transactions",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("member_id", sa.Integer(), sa.ForeignKey("sacco_members.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("member_id", sa.Integer(), nullable=False),
         sa.Column("branch_id", sa.String(length=36), sa.ForeignKey("branches.id", ondelete="SET NULL"), nullable=True),
         sa.Column("account_type", sa.String(length=16), nullable=False),
         sa.Column("transaction_type", sa.String(length=24), nullable=False),
@@ -29,7 +30,12 @@ def upgrade():
         sa.Column("decision_note", sa.String(length=500), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("organization_id", "id", name="uq_sacco_financial_org_id"),
         sa.UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_financial_org_idempotency"),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "member_id"], ["sacco_members.organization_id", "sacco_members.id"],
+            ondelete="RESTRICT", name="fk_sacco_financial_member_tenant",
+        ),
         sa.CheckConstraint("account_type IN ('savings', 'shares')", name="ck_sacco_financial_account_type"),
         sa.CheckConstraint("transaction_type IN ('deposit', 'withdrawal', 'share_contribution')", name="ck_sacco_financial_transaction_type"),
         sa.CheckConstraint("status IN ('pending_approval', 'posted', 'rejected')", name="ck_sacco_financial_status"),
@@ -50,8 +56,8 @@ def upgrade():
         "sacco_ledger_entries",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("member_id", sa.Integer(), sa.ForeignKey("sacco_members.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("transaction_id", sa.Integer(), sa.ForeignKey("sacco_financial_transactions.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("member_id", sa.Integer(), nullable=False),
+        sa.Column("transaction_id", sa.Integer(), nullable=False),
         sa.Column("branch_id", sa.String(length=36), sa.ForeignKey("branches.id", ondelete="SET NULL"), nullable=True),
         sa.Column("account_type", sa.String(length=16), nullable=False),
         sa.Column("signed_amount", sa.Numeric(18, 2), nullable=False),
@@ -60,6 +66,15 @@ def upgrade():
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("transaction_id", name="uq_sacco_ledger_transaction"),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "member_id"], ["sacco_members.organization_id", "sacco_members.id"],
+            ondelete="RESTRICT", name="fk_sacco_ledger_member_tenant",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "transaction_id"],
+            ["sacco_financial_transactions.organization_id", "sacco_financial_transactions.id"],
+            ondelete="RESTRICT", name="fk_sacco_ledger_transaction_tenant",
+        ),
         sa.CheckConstraint("account_type IN ('savings', 'shares')", name="ck_sacco_ledger_account_type"),
         sa.CheckConstraint("signed_amount <> 0", name="ck_sacco_ledger_nonzero_amount"),
     )
@@ -157,3 +172,4 @@ def downgrade():
     op.drop_index("ix_sacco_financial_transactions_member_id", table_name="sacco_financial_transactions")
     op.drop_index("ix_sacco_financial_transactions_organization_id", table_name="sacco_financial_transactions")
     op.drop_table("sacco_financial_transactions")
+    op.drop_constraint("uq_sacco_member_org_id", "sacco_members", type_="unique")
