@@ -108,6 +108,21 @@ def test_identity_email_outbox_is_account_scoped_and_worker_managed(monkeypatch)
             text("SELECT id FROM identity_email_deliveries")
         ).scalars().all())
         assert visible == {delivery_a_id}
+        api_created_id = connection.execute(
+            insert(IdentityEmailDelivery).values(
+                user_id=user_a_id,
+                purpose="password_reset",
+                event_key=f"api-created:{suffix}",
+                payload_ciphertext="api-ciphertext",
+                status="pending",
+                attempts=0,
+                next_attempt_at=now,
+                expires_at=expires,
+                last_error="",
+                created_at=now,
+                updated_at=now,
+            ).returning(IdentityEmailDelivery.id)
+        ).scalar_one()
 
         with pytest.raises(DBAPIError):
             with connection.begin_nested():
@@ -156,7 +171,7 @@ def test_identity_email_outbox_is_account_scoped_and_worker_managed(monkeypatch)
         worker_visible = set(connection.execute(
             text("SELECT id FROM identity_email_deliveries")
         ).scalars().all())
-        assert worker_visible == {delivery_a_id, delivery_b_id}
+        assert worker_visible == {delivery_a_id, delivery_b_id, api_created_id}
         assert connection.execute(
             text("UPDATE identity_email_deliveries SET status = 'delivered' WHERE id = :id"),
             {"id": delivery_a_id},
@@ -165,7 +180,7 @@ def test_identity_email_outbox_is_account_scoped_and_worker_managed(monkeypatch)
         connection.execute(text("RESET ROLE"))
         connection.execute(
             delete(IdentityEmailDelivery).where(
-                IdentityEmailDelivery.id.in_([delivery_a_id, delivery_b_id])
+                IdentityEmailDelivery.id.in_([delivery_a_id, delivery_b_id, api_created_id])
             )
         )
         connection.execute(delete(User).where(User.id.in_([user_a_id, user_b_id])))
