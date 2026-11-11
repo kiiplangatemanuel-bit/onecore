@@ -44,7 +44,9 @@ from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll table
 from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa settlement models
 from app.core import finance_ops_models  # noqa: F401 - register FX and statutory payroll tables
+from app.core import sacco_models  # noqa: F401 - register SACCO membership tables
 from app.api.finance_payroll_ops import router as finance_payroll_ops_router
+from app.api.sacco import router as sacco_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -97,6 +99,7 @@ app.include_router(school_advanced_router)
 app.include_router(ai_router)
 app.include_router(hr_payroll_router)
 app.include_router(finance_payroll_ops_router)
+app.include_router(sacco_router)
 app.include_router(support_router)
 app.include_router(auth_workflows_router)
 app.include_router(portal_auth_router)
@@ -147,6 +150,11 @@ def accounting_ui():
 def inventory_ui():
     page = Path(__file__).resolve().parent / "web" / "inventory.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
+
+@app.get("/sacco", response_class=HTMLResponse)
+def sacco_ui():
+    page = Path(__file__).resolve().parent / "web" / "sacco.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control":"no-store"})
 
 @app.get("/crm/automation", response_class=HTMLResponse)
 def crm_automation_ui():
@@ -249,7 +257,7 @@ def _verify_rls_database_boundary(connection):
         "accounting_accounts", "accounting_journals", "accounting_journal_lines",
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
-        "school_classes", "school_learners", "accounting_invoices",
+        "school_classes", "school_learners", "accounting_invoices", "sacco_members",
         "status_alert_deliveries",
         # HR and payroll are tenant-owned financial records and must never be
         # served by a production API role unless FORCE ROW LEVEL SECURITY is active.

@@ -106,7 +106,7 @@ jobs:
                   ))
                   connection.execute(text(
                       "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
-                      "public.memberships, public.records, public.audit_events "
+                      "public.memberships, public.records, public.audit_events, public.sacco_members "
                       "TO onecore_ci_runtime"
                   ))
                   connection.execute(text(

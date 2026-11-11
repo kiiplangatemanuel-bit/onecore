@@ -9,6 +9,7 @@ from app.core import pos_completion_models  # noqa: F401 - register POS completi
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import finance_ops_models  # noqa: F401 - register FX and statutory remittance tables
 from app.core import identity_models  # noqa: F401 - register account session and portal assurance tables
+from app.core import sacco_models  # noqa: F401 - register SACCO membership tables
 
 config = context.config
 database_url = str(normalized_database_url(settings.alembic_connection_url))

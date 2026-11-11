@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OneCore SACCO Membership</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#172438;background:#f4f7fb}body{margin:0}header,main,footer{max-width:1080px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center;background:#10243d;color:white;max-width:none}header strong{max-width:1080px;margin:auto}.panel{background:white;border:1px solid #dbe3ed;border-radius:12px;padding:18px}main{display:grid;gap:16px}form{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}label{display:grid;gap:5px;font-weight:600}input,select,button,textarea{font:inherit;padding:10px;border:1px solid #aebdce;border-radius:7px}button{background:#155a9c;color:white;border:0;cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #f0b429;outline-offset:2px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:9px;border-bottom:1px solid #e2e8f0}.muted{color:#5a6878}#status{min-height:1.5em}footer{text-align:center;color:#5a6878;padding-bottom:20px}.actions{display:flex;gap:8px;flex-wrap:wrap}.notice{background:#fff8e7;border:1px solid #f0d18a;border-radius:8px;padding:12px}@media(max-width:650px){header{display:block}table{font-size:14px}.table-wrap{overflow-x:auto}}
+</style>
+</head>
+<body>
+<header><strong>ONECORE TECHNOLOGIES LTD · SACCO / Microfinance</strong><span>Member onboarding and KYC governance</span></header>
+<main>
+<section class="panel" aria-labelledby="signin-title">
+<h1 id="signin-title">Member administration</h1>
+<p class="muted">Sign in with an organization member account. Access tokens are held in page memory only. MFA-enabled accounts should authenticate through the main OneCore workspace first.</p>
+<form id="login">
+<label>Email<input name="email" type="email" autocomplete="username" required></label>
+<label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+<label>Organization ID<input name="organization" inputmode="numeric" required></label>
+<label>Authenticator / recovery code (if required)<input name="mfa_code" autocomplete="one-time-code" maxlength="64"></label>
+<div><button type="submit">Sign in</button></div>
+</form>
+</section>
+<section class="panel" aria-labelledby="member-title">
+<h2 id="member-title">Register member</h2>
+<p class="muted">National ID, date of birth and postal address are encrypted before storage. The API never returns raw identity data in ordinary member listings.</p>
+<form id="member">
+<label>Member number<input name="member_number" maxlength="40" required></label>
+<label>Full name<input name="full_name" maxlength="180" required></label>
+<label>Phone<input name="phone" type="tel" maxlength="20" required></label>
+<label>Email<input name="email" type="email" maxlength="320"></label>
+<label>Branch ID<input name="branch_id" maxlength="36" placeholder="Required for branch-restricted users"></label>
+<label>National ID<input name="national_id" maxlength="20" autocomplete="off" required></label>
+<label>Date of birth<input name="date_of_birth" type="date" required></label>
+<label>Postal address<input name="postal_address" maxlength="500"></label>
+<div><button type="submit">Create pending member</button></div>
+</form>
+</section>
+<section class="panel" aria-labelledby="list-title">
+<h2 id="list-title">Member register</h2>
+<div class="actions"><button id="refresh" type="button">Refresh members</button><label>Status filter<select id="statusFilter"><option value="">All statuses</option><option value="pending_kyc">Pending KYC</option><option value="active">Active</option><option value="rejected">Rejected</option><option value="suspended">Suspended</option><option value="exited">Exited</option></select></label></div>
+<div class="table-wrap"><table><thead><tr><th>Member number</th><th>Name</th><th>Phone</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead><tbody id="members"><tr><td colspan="6">Sign in to load members.</td></tr></tbody></table></div>
+</section>
+<section class="panel" aria-labelledby="kyc-title">
+<h2 id="kyc-title">Protected KYC review</h2>
+<p class="notice">Only organization administrators, SACCO managers and designated KYC approvers can view protected identity details or decide KYC. Every view is audited. The member creator cannot approve or reject that member.</p>
+<form id="kycAccess">
+<label>Member ID<input name="member_id" type="number" min="1" required></label>
+<label>Reason for access (at least 10 characters)<input name="reason" minlength="10" maxlength="300" required></label>
+<div><button type="submit">View protected KYC details</button></div>
+</form>
+<pre id="kycDetails" aria-live="polite">No protected KYC details loaded.</pre>
+<form id="kycReview">
+<label>Decision<select name="decision"><option value="verify">Verify and activate member</option><option value="reject">Reject KYC</option></select></label>
+<label>Review note<input name="note" minlength="5" maxlength="500" required></label>
+<div><button type="submit">Record KYC decision</button></div>
+</form>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<footer>Powered by OneCore Technologies Ltd</footer>
+<script>
+(()=> {
+let token=null, organization=null, selectedMemberId=null;
+const $=id=>document.getElementById(id);
+const status=message=>$('status').textContent=message;
+async function api(path, options={}) {
+ const headers={...(options.headers||{}),Authorization:'Bearer '+token,'X-Organization-ID':organization};
+ if(options.body)headers['Content-Type']='application/json';
+ const response=await fetch('/api/v1'+path,{...options,headers});
+ const data=await response.json().catch(()=>null);
+ if(!response.ok)throw new Error(data?.detail||'Request failed ('+response.status+')');
+ return data;
+}
+function cell(row,value){const td=row.insertCell();td.textContent=value==null?'':String(value);return td;}
+async function refresh(){
+ const query=$('statusFilter').value?('?status='+encodeURIComponent($('statusFilter').value)):'';
+ const data=await api('/sacco/members'+query);
+ const body=$('members');body.replaceChildren();
+ if(!data.items.length){const tr=body.insertRow();const td=tr.insertCell();td.colSpan=6;td.textContent='No members found.';return;}
+ data.items.forEach(member=>{
+  const tr=body.insertRow();cell(tr,member.member_number);cell(tr,member.full_name);cell(tr,member.phone);cell(tr,member.branch_id||'All branches');cell(tr,member.status);
+  const actions=cell(tr,'');const wrap=document.createElement('div');wrap.className='actions';
+  if(member.status==='pending_kyc'){
+   const view=document.createElement('button');view.type='button';view.textContent='Review KYC';
+   view.addEventListener('click',()=>{$('kycAccess').elements.member_id.value=member.id;$('kycAccess').scrollIntoView({behavior:'smooth',block:'center'});});
+   wrap.append(view);
+  }
+  actions.append(wrap);
+ });
+}
+$('login').addEventListener('submit',async event=>{
+ event.preventDefault();const form=new FormData(event.currentTarget);
+ try{
+  const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:form.get('email'),password:form.get('password')})});
+  const data=await response.json();if(!response.ok)throw new Error(data.detail||'Sign-in failed');
+  let auth=data;
+  if(data.mfa_required){
+   const code=String(form.get('mfa_code')||'').trim();
+   if(!code)throw new Error('Enter your authenticator or recovery code, then sign in again.');
+   const challenge=await fetch('/api/v1/auth/mfa/challenge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challenge_token:data.challenge_token,code})});
+   const challengeData=await challenge.json().catch(()=>null);
+   if(!challenge.ok)throw new Error(challengeData?.detail||'MFA verification failed');
+   auth=challengeData;
+  }
+  if(auth.mfa_enrollment_required)throw new Error('MFA enrollment is required. Complete enrollment in the main OneCore workspace, then return here.');
+  if(!auth.access_token)throw new Error('Sign-in did not produce an authenticated session.');
+  const org=String(form.get('organization')).trim();if(!/^[1-9][0-9]*$/.test(org))throw new Error('Organization ID must be a positive number.');
+  token=auth.access_token;organization=org;await refresh();status('Signed in. Member data is scoped to this organization and your authorized branches.');
+ }catch(error){token=null;organization=null;status(error.message);}
+});
+$('member').addEventListener('submit',async event=>{
+ event.preventDefault();if(!token)return status('Sign in first.');
+ const form=new FormData(event.currentTarget);
+ try{
+  const body={member_number:form.get('member_number'),full_name:form.get('full_name'),phone:form.get('phone'),email:form.get('email')||null,branch_id:form.get('branch_id')||null,national_id:form.get('national_id'),date_of_birth:form.get('date_of_birth'),postal_address:form.get('postal_address'),idempotency_key:crypto.randomUUID()};
+  const result=await api('/sacco/members',{method:'POST',body:JSON.stringify(body)});
+  event.currentTarget.reset();status('Member '+result.member_number+' created with status '+result.status+'.');await refresh();
+ }catch(error){status(error.message);}
+});
+$('refresh').addEventListener('click',async()=>{if(!token)return status('Sign in first.');try{await refresh();status('Member register refreshed.');}catch(error){status(error.message);}});
+$('statusFilter').addEventListener('change',async()=>{if(!token)return;try{await refresh();}catch(error){status(error.message);}});
+$('kycAccess').addEventListener('submit',async event=>{
+ event.preventDefault();if(!token)return status('Sign in first.');
+ const form=new FormData(event.currentTarget),memberId=String(form.get('member_id'));
+ try{
+  const data=await api('/sacco/members/'+encodeURIComponent(memberId)+'/kyc-details?reason='+encodeURIComponent(form.get('reason')));
+  selectedMemberId=Number(memberId);$('kycDetails').textContent=JSON.stringify(data,null,2);
+  status('Protected KYC details loaded and access recorded in the audit trail.');
+ }catch(error){selectedMemberId=null;$('kycDetails').textContent='KYC details are unavailable.';status(error.message);}
+});
+$('kycReview').addEventListener('submit',async event=>{
+ event.preventDefault();if(!token)return status('Sign in first.');if(!selectedMemberId)return status('Open protected KYC details before recording a decision.');
+ const form=new FormData(event.currentTarget);
+ try{
+  const result=await api('/sacco/members/'+selectedMemberId+'/kyc-review',{method:'POST',body:JSON.stringify({decision:form.get('decision'),note:form.get('note')})});
+  selectedMemberId=null;$('kycDetails').textContent='No protected KYC details loaded.';event.currentTarget.reset();
+  status('KYC decision recorded. Member status: '+result.status+'.');await refresh();
+ }catch(error){status(error.message);}
+});
+})();
+</script>
+</body>
+</html>
