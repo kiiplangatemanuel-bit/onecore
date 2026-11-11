@@ -122,7 +122,10 @@ def test_identity_email_worker_retries_transient_smtp_failures(monkeypatch, tmp_
         row = db.query(IdentityEmailDelivery).one()
         assert row.status == "pending"
         assert row.attempts == 1
-        assert row.next_attempt_at > datetime.now(timezone.utc)
+        retry_at = row.next_attempt_at
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        assert retry_at > datetime.now(timezone.utc)
         assert row.last_error == "TimeoutError"
     engine.dispose()
 
