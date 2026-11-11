@@ -25,7 +25,7 @@ def _configure_keys(monkeypatch):
 def _payload(**overrides):
     values = {
         "member_number": " mem-0001 ", "full_name": "  Jane   Wanjiku ",
-        "phone": "+254 712 345 678", "email": "JANE@example.test", "branch_id": "branch-a",
+        "phone": "+254 712 345 678", "email": "JANE@example.com", "branch_id": "branch-a",
         "national_id": "12345678", "date_of_birth": "1990-01-02", "postal_address": "Nairobi",
         "idempotency_key": "sacco-member-0001",
     }
@@ -47,7 +47,7 @@ def test_sacco_member_contract_normalizes_fields_and_rejects_invalid_identity_or
     assert payload.member_number == "MEM-0001"
     assert payload.full_name == "Jane Wanjiku"
     assert payload.phone == "+254712345678"
-    assert str(payload.email) == "jane@example.test"
+    assert str(payload.email) == "jane@example.com"
     assert payload.national_id == "12345678"
     with pytest.raises(ValidationError):
         _payload(national_id="123")
