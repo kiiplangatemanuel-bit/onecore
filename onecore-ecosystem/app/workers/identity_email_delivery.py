@@ -178,9 +178,9 @@ def main() -> None:
             processed = run_identity_email_worker()
             if processed:
                 logger.info("Processed %s identity email deliveries", processed)
+            _write_heartbeat()
         except Exception:
             logger.exception("Identity email worker iteration failed")
-        _write_heartbeat()
         time.sleep(10)
 
 
