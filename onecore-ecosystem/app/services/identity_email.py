@@ -1,5 +1,4 @@
 """Encrypted transactional email enqueueing for account verification and recovery."""
-import hashlib
 import json
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -31,8 +30,6 @@ def _validate_delivery_configuration() -> None:
     production = settings.app_env.strip().lower() in {"production", "prod"}
     if production and not settings.public_site_url.strip().startswith("https://"):
         raise RuntimeError("Production transactional email links must use HTTPS")
-    if production and not settings.email_use_starttls:
-        raise RuntimeError("Production SMTP delivery requires STARTTLS")
     if production and not settings.email_use_starttls:
         raise RuntimeError("Production SMTP delivery requires STARTTLS")
 
