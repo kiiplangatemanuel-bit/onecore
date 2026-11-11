@@ -9,7 +9,7 @@ depends_on = None
 
 
 def upgrade():
-    op.create_unique_constraint("uq_sacco_member_org_id", "sacco_members", ["organization_id", "id"])
+    op.create_index("uq_sacco_member_org_id", "sacco_members", ["organization_id", "id"], unique=True)
     op.create_table(
         "sacco_financial_transactions",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -172,4 +172,4 @@ def downgrade():
     op.drop_index("ix_sacco_financial_transactions_member_id", table_name="sacco_financial_transactions")
     op.drop_index("ix_sacco_financial_transactions_organization_id", table_name="sacco_financial_transactions")
     op.drop_table("sacco_financial_transactions")
-    op.drop_constraint("uq_sacco_member_org_id", "sacco_members", type_="unique")
+    op.drop_index("uq_sacco_member_org_id", table_name="sacco_members")
