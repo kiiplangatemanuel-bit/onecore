@@ -40,7 +40,7 @@ def _tables():
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
         "school_classes", "school_learners", "accounting_invoices", "sacco_members",
-        "status_alert_deliveries",
+        "sacco_financial_transactions", "sacco_ledger_entries", "status_alert_deliveries",
         "hr_employees", "hr_leave_requests", "hr_attendance_records",
         "payroll_rule_sets", "payroll_runs", "payroll_payslips",
         "payroll_accounting_mappings", "payroll_accounting_links",
@@ -48,7 +48,7 @@ def _tables():
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings",
         "accounting_fx_revaluations", "accounting_fx_settlements",
-        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance", "sacco_members",
+        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
@@ -101,6 +101,7 @@ def test_production_database_boundary_rejects_missing_critical_rls_table():
     "accounting_fx_rates", "accounting_fx_postings",
     "accounting_fx_revaluations", "accounting_fx_settlements",
     "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+    "sacco_financial_transactions", "sacco_ledger_entries",
 ])
 def test_production_readiness_rejects_each_missing_critical_tenant_rls_table(table_name):
     from app.main import _verify_rls_database_boundary
