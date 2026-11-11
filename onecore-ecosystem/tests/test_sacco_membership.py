@@ -195,7 +195,7 @@ def test_sacco_roles_are_assignable_through_tenant_invitations():
     from app.api.platform_routes import InvitationIn
 
     for role in ("sacco_officer", "sacco_manager", "sacco_kyc_approver", "sacco_treasurer", "sacco_auditor"):
-        assert InvitationIn(email="member@example.test", role=role).role == role
+        assert InvitationIn(email="member@example.com", role=role).role == role
 
 
 def test_sacco_roles_are_least_privilege():
