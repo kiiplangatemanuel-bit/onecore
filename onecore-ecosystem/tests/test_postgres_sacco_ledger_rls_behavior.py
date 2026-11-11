@@ -171,6 +171,13 @@ def test_sacco_financial_rls_and_ledger_immutability(monkeypatch):
             request_fingerprint="6" * 64, created_by=user_b, decided_by=None,
             decided_at=None, decision_note="", created_at=now, updated_at=now,
         ).returning(SaccoFinancialTransaction.id)).scalar_one()
+        transaction_b_extra = connection.execute(insert(SaccoFinancialTransaction).values(
+            organization_id=org_b, member_id=member_b, branch_id=None,
+            account_type="savings", transaction_type="deposit", amount=Decimal("25.00"),
+            currency="KES", reference="B-EXTRA", status="posted", idempotency_key=f"fin-b-extra-{suffix}",
+            request_fingerprint="8" * 64, created_by=user_b, decided_by=None,
+            decided_at=None, decision_note="", created_at=now, updated_at=now,
+        ).returning(SaccoFinancialTransaction.id)).scalar_one()
         ledger_a = connection.execute(insert(SaccoLedgerEntry).values(
             organization_id=org_a, member_id=member_a, transaction_id=transaction_a,
             branch_id=None, account_type="savings", signed_amount=Decimal("100.00"),
@@ -210,9 +217,18 @@ def test_sacco_financial_rls_and_ledger_immutability(monkeypatch):
         with pytest.raises(DBAPIError):
             with connection.begin_nested():
                 connection.execute(insert(SaccoLedgerEntry).values(
-                    organization_id=org_b, member_id=member_b, transaction_id=transaction_b,
+                    organization_id=org_b, member_id=member_b, transaction_id=transaction_b_extra,
                     branch_id=None, account_type="savings", signed_amount=Decimal("1.00"),
                     currency="KES", reference="cross-tenant", created_by=user_a, created_at=now,
+                ))
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(insert(SaccoFinancialTransaction).values(
+                    organization_id=org_a, member_id=member_b, branch_id=None,
+                    account_type="savings", transaction_type="deposit", amount=Decimal("1.00"),
+                    currency="KES", reference="mismatched-tenant-member", status="posted",
+                    idempotency_key=f"mismatch-{suffix}", request_fingerprint="9" * 64,
+                    created_by=user_a, created_at=now, updated_at=now,
                 ))
         assert connection.execute(
             text("UPDATE sacco_financial_transactions SET status = 'rejected' WHERE id = :id"),
