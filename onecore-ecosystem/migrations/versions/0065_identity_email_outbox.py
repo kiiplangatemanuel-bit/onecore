@@ -69,6 +69,18 @@ def upgrade():
             )
         """)
         op.execute("""
+            CREATE POLICY identity_email_owner_cancel ON public.identity_email_deliveries
+            FOR UPDATE
+            USING (
+                user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                AND status IN ('pending', 'sending')
+            )
+            WITH CHECK (
+                user_id = NULLIF(current_setting('app.user_id', true), '')::integer
+                AND status = 'cancelled'
+            )
+        """)
+        op.execute("""
             CREATE POLICY identity_email_worker_update ON public.identity_email_deliveries
             FOR UPDATE
             USING (current_user = 'onecore_identity_email_worker')
@@ -79,6 +91,8 @@ def upgrade():
             BEGIN
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
                     GRANT SELECT, INSERT ON TABLE public.identity_email_deliveries TO onecore_api;
+                    GRANT UPDATE (status, last_error, updated_at)
+                        ON TABLE public.identity_email_deliveries TO onecore_api;
                     GRANT USAGE, SELECT ON SEQUENCE public.identity_email_deliveries_id_seq TO onecore_api;
                 END IF;
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_identity_email_worker') THEN
@@ -94,6 +108,7 @@ def downgrade():
     if bind.dialect.name == "postgresql":
         for policy in (
             "identity_email_worker_update",
+            "identity_email_owner_cancel",
             "identity_email_owner_insert",
             "identity_email_owner_select",
         ):
