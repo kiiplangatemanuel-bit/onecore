@@ -1,9 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet
+from urllib.parse import unquote
 import pytest
 from pydantic import ValidationError
 
 from app.core.database import Base
+from app.core.identity_models import IdentityEmailDelivery
+from app.services.identity_email import decrypt_identity_email_payload
 from app.core.models import (
     AuditEvent, EmailVerification, Membership, Organization, SupportMessage,
     SupportTicket, User,
@@ -87,13 +91,15 @@ def test_registration_schema_requires_strong_password_and_valid_slug():
 
 def test_registration_creates_inactive_user_and_verification_activates_it(monkeypatch):
     import app.api.auth_workflows as workflows
-    sent = {}
-    monkeypatch.setattr(workflows, "_send_verification_email",
-                        lambda email, full_name, token: sent.update(email=email, token=token))
+    monkeypatch.setattr(workflows.settings, "identity_email_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(workflows.settings, "integration_email_enabled", True)
+    monkeypatch.setattr(workflows.settings, "email_host", "smtp.example.test")
+    monkeypatch.setattr(workflows.settings, "email_from", "no-reply@example.test")
+    monkeypatch.setattr(workflows.settings, "public_site_url", "https://onecore.example.test")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
         User.__table__, Organization.__table__, Membership.__table__,
-        EmailVerification.__table__, AuditEvent.__table__,
+        EmailVerification.__table__, IdentityEmailDelivery.__table__, AuditEvent.__table__,
     ])
     with Session(engine) as db:
         payload = OrganizationRegistrationIn(
@@ -107,7 +113,17 @@ def test_registration_creates_inactive_user_and_verification_activates_it(monkey
         assert user.is_active is False
         assert user.phone == "+254700000000"
         assert db.query(Membership).filter_by(user_id=user.id, role="org_admin").count() == 1
-        verified = verify_email(EmailVerificationIn(token=sent["token"]), db)
+        delivery = db.query(IdentityEmailDelivery).filter_by(
+            user_id=user.id, purpose="email_verification"
+        ).one()
+        encrypted_payload = decrypt_identity_email_payload(delivery)
+        verify_url = next(
+            line for line in encrypted_payload["body"].splitlines()
+            if "/verify-email?token=" in line
+        )
+        token = unquote(verify_url.split("token=", 1)[1])
+        assert token not in delivery.payload_ciphertext
+        verified = verify_email(EmailVerificationIn(token=token), db)
         assert verified["status"] == "verified"
         assert db.get(User, user.id).is_active is True
         with pytest.raises(Exception):
