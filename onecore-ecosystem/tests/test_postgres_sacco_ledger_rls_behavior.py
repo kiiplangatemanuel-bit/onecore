@@ -112,7 +112,8 @@ def test_sacco_financial_rls_and_ledger_immutability(monkeypatch):
 
     suffix = uuid.uuid4().hex
     now = datetime.now(timezone.utc)
-    with engine.begin() as connection:
+    with engine.connect() as connection:
+        transaction = connection.begin()
         user_a = connection.execute(insert(User).values(
             email=f"sacco-fin-a-{suffix}@example.test", full_name="SACCO A", phone="",
             password_hash="not-a-real-login-hash", is_active=True, platform_role="customer",
@@ -236,11 +237,4 @@ def test_sacco_financial_rls_and_ledger_immutability(monkeypatch):
                 )
 
         connection.execute(text("RESET ROLE"))
-        connection.execute(delete(SaccoLedgerEntry).where(SaccoLedgerEntry.id.in_([ledger_a, ledger_b])))
-        connection.execute(delete(SaccoFinancialTransaction).where(
-            SaccoFinancialTransaction.id.in_([transaction_a, transaction_b])
-        ))
-        connection.execute(delete(SaccoMember).where(SaccoMember.id.in_([member_a, member_b])))
-        connection.execute(delete(Membership).where(Membership.id.in_([membership_a, membership_b])))
-        connection.execute(delete(Organization).where(Organization.id.in_([org_a, org_b])))
-        connection.execute(delete(User).where(User.id.in_([user_a, user_b])))
+        transaction.rollback()
