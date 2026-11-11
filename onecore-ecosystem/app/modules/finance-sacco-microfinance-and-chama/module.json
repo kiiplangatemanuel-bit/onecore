@@ -7,16 +7,21 @@
     "Tenant- and branch-scoped member registration and safe member listing",
     "Encrypted KYC payload and keyed identity fingerprint",
     "Audited protected KYC access and independent verify/reject review",
-    "PostgreSQL forced RLS and CI runtime-role isolation tests"
+    "Tenant-scoped savings deposits and share contributions",
+    "Four-eyes savings withdrawal approval with balance recheck before posting",
+    "Derived balances from append-only ledger entries",
+    "PostgreSQL forced RLS and CI runtime-role isolation tests for member and financial records"
   ],
   "required_before_production": [
-    "Savings accounts, deposits and withdrawals",
-    "Share/contribution ledger and group/chama workflows",
+    "Savings product configuration, account terms, limits and withdrawal notice policies",
+    "Share redemption, member exit and compensating correction/reversal workflows",
+    "Accounting general-ledger integration, cash/bank reconciliation and financial close controls",
+    "Group/chama membership, contributions, meetings, voting and resolutions",
     "Loan products, applications, affordability assessment, guarantors and collateral",
-    "Multi-level approvals, disbursement, interest, penalties and repayment schedules",
+    "Multi-level loan approval, disbursement, interest, penalties and repayment schedules",
     "Delinquency, restructuring, dividends, statements and portfolio/risk reporting",
-    "Member portals, meetings, voting and resolutions",
-    "Authorized payment integrations and reconciliation",
-    "Full frontend, accessibility, monitoring, backup/restore, security review and UAT"
+    "Member portals and self-service statements",
+    "Authorized payment integrations and settlement reconciliation",
+    "Production role/key rehearsal, monitoring, backup/restore, security review and UAT"
   ]
 }
