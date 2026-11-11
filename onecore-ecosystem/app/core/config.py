@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     clamav_port: int = Field(default=3310, ge=1, le=65535)
     clamav_timeout_seconds: int = Field(default=30, ge=5, le=120)
     status_alert_worker_database_url: str = ""
+    identity_email_encryption_key: str = ""
+    identity_email_worker_database_url: str = ""
 
 
     @property
