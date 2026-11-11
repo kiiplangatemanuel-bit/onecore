@@ -1,5 +1,7 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote
+from cryptography.fernet import Fernet
 import uuid
 
 import pytest
@@ -11,26 +13,26 @@ import app.api.auth_workflows as workflows
 from app.api.auth_workflows import confirm_password_reset, request_password_reset
 from app.core.database import Base
 from app.core.models import AuditEvent, PasswordResetToken, PortalAuthorizationCode, User
-from app.core.identity_models import UserSession
+from app.core.identity_models import IdentityEmailDelivery, UserSession
 from app.core.schemas import PasswordResetConfirmIn, PasswordResetRequestIn
 from app.core.security import create_access_token, current_user, verify_password
+from app.services.identity_email import decrypt_identity_email_payload
 
 
 def _engine():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, UserSession.__table__, AuditEvent.__table__,
+        User.__table__, PasswordResetToken.__table__, PortalAuthorizationCode.__table__, UserSession.__table__, IdentityEmailDelivery.__table__, AuditEvent.__table__,
     ])
     return engine
 
 
 def test_password_reset_request_is_non_enumerating_and_stores_only_token_hash(monkeypatch):
-    sent = {}
-    monkeypatch.setattr(
-        workflows,
-        "_send_password_reset_email",
-        lambda email, full_name, token: sent.update(email=email, full_name=full_name, token=token),
-    )
+    monkeypatch.setattr(workflows.settings, "identity_email_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(workflows.settings, "integration_email_enabled", True)
+    monkeypatch.setattr(workflows.settings, "email_host", "smtp.example.test")
+    monkeypatch.setattr(workflows.settings, "email_from", "no-reply@example.test")
+    monkeypatch.setattr(workflows.settings, "public_site_url", "https://onecore.example.test")
     engine = _engine()
     with Session(engine) as db:
         user = User(email="member@example.com", full_name="Member", password_hash="old-hash", is_active=True)
@@ -44,18 +46,28 @@ def test_password_reset_request_is_non_enumerating_and_stores_only_token_hash(mo
         assert known["status"] == "accepted"
         assert "token" not in known
         row = db.query(PasswordResetToken).filter_by(user_id=user.id).one()
-        assert row.token_hash == hashlib.sha256(sent["token"].encode("utf-8")).hexdigest()
-        assert row.token_hash != sent["token"]
+        delivery = db.query(IdentityEmailDelivery).filter_by(
+            user_id=user.id, purpose="password_reset"
+        ).one()
+        encrypted_payload = decrypt_identity_email_payload(delivery)
+        reset_url = next(
+            line for line in encrypted_payload["body"].splitlines()
+            if "/reset-password#token=" in line
+        )
+        raw_token = unquote(reset_url.split("#token=", 1)[1])
+        assert row.token_hash == hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        assert raw_token not in delivery.payload_ciphertext
         assert row.expires_at is not None
-        assert sent["email"] == user.email
+        assert encrypted_payload["recipient_email"] == user.email
     engine.dispose()
 
 
-def test_password_reset_delivery_failure_rolls_back_token_without_account_disclosure(monkeypatch):
-    def fail_delivery(*_args):
-        raise RuntimeError("SMTP unavailable")
-
-    monkeypatch.setattr(workflows, "_send_password_reset_email", fail_delivery)
+def test_password_reset_queue_failure_rolls_back_token_without_account_disclosure(monkeypatch):
+    monkeypatch.setattr(workflows.settings, "identity_email_encryption_key", "")
+    monkeypatch.setattr(workflows.settings, "integration_email_enabled", True)
+    monkeypatch.setattr(workflows.settings, "email_host", "smtp.example.test")
+    monkeypatch.setattr(workflows.settings, "email_from", "no-reply@example.test")
+    monkeypatch.setattr(workflows.settings, "public_site_url", "https://onecore.example.test")
     engine = _engine()
     with Session(engine) as db:
         user = User(email="member@example.com", full_name="Member", password_hash="old-hash", is_active=True)
@@ -64,6 +76,7 @@ def test_password_reset_delivery_failure_rolls_back_token_without_account_disclo
         response = request_password_reset(PasswordResetRequestIn(email="member@example.com"), db)
         assert response["status"] == "accepted"
         assert db.query(PasswordResetToken).count() == 0
+        assert db.query(IdentityEmailDelivery).count() == 0
         assert db.query(AuditEvent).count() == 0
     engine.dispose()
 
@@ -90,6 +103,17 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
         )
         db.add(row)
+        pending_delivery = IdentityEmailDelivery(
+            user_id=user.id,
+            purpose="password_reset",
+            event_key="password-reset:pending",
+            payload_ciphertext="encrypted-payload",
+            status="pending",
+            attempts=0,
+            next_attempt_at=now,
+            expires_at=now + timedelta(minutes=30),
+        )
+        db.add(pending_delivery)
         portal_code = PortalAuthorizationCode(
             code_hash=hashlib.sha256(b"one-time-portal-code").hexdigest(),
             user_id=user.id,
@@ -112,6 +136,8 @@ def test_password_reset_consumes_token_and_invalidates_existing_access_tokens():
         assert tracked_session.revoked_at is not None
         assert tracked_session.revoked_reason == "password_reset"
         assert row.consumed_at is not None
+        db.refresh(pending_delivery)
+        assert pending_delivery.status == "cancelled"
         assert portal_code.consumed_at is not None
         assert user.auth_version == 1
         assert verify_password("a-new-secure-password", user.password_hash)
