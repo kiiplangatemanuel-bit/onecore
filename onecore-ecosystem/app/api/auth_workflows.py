@@ -1,10 +1,7 @@
 import hashlib
 import logging
 import secrets
-import smtplib
-from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -14,9 +11,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, EmailVerification, Membership, Organization, PasswordResetToken, PortalAuthorizationCode, User
-from app.core.identity_models import UserSession
+from app.core.identity_models import IdentityEmailDelivery, UserSession
 from app.core.schemas import EmailVerificationIn, OrganizationRegistrationIn, PasswordResetRequestIn, PasswordResetConfirmIn
 from app.core.security import hash_password, set_verified_user_context
+from app.services.identity_email import queue_password_reset_email, queue_verification_email
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
@@ -24,64 +22,6 @@ logger = logging.getLogger(__name__)
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _send_verification_email(email: str, full_name: str, token: str):
-    required = (
-        settings.integration_email_enabled and settings.email_host
-        and settings.email_from and settings.public_site_url
-    )
-    if not required:
-        raise HTTPException(
-            status_code=503,
-            detail="Organization registration is temporarily unavailable because verification email is not configured.",
-        )
-    verify_url = settings.public_site_url.rstrip("/") + "/verify-email?token=" + token
-    message = EmailMessage()
-    message["Subject"] = "Verify your OneCore account"
-    message["From"] = settings.email_from
-    message["To"] = email
-    message.set_content(
-        f"Hello {full_name},\n\n"
-        "Thank you for registering your organization with OneCore. "
-        "Verify your email address within 24 hours using this link:\n\n"
-        f"{verify_url}\n\n"
-        "If you did not request this registration, you can ignore this email."
-    )
-    with smtplib.SMTP(settings.email_host, settings.email_port, timeout=15) as smtp:
-        if settings.email_use_starttls:
-            smtp.starttls()
-        if settings.email_username:
-            smtp.login(settings.email_username, settings.email_password)
-        smtp.send_message(message)
-
-
-def _send_password_reset_email(email: str, full_name: str, token: str):
-    required = (
-        settings.integration_email_enabled and settings.email_host
-        and settings.email_from and settings.public_site_url
-    )
-    if not required:
-        raise RuntimeError("Password reset email delivery is not configured")
-    # Keep the secret in the URL fragment so it is not sent to web-server access logs.
-    reset_url = settings.public_site_url.rstrip("/") + "/reset-password#token=" + quote(token, safe="")
-    message = EmailMessage()
-    message["Subject"] = "Reset your OneCore password"
-    message["From"] = settings.email_from
-    message["To"] = email
-    message.set_content(
-        f"Hello {full_name or 'OneCore user'},\n\n"
-        "A password reset was requested for your OneCore account. "
-        "Use this link within 30 minutes to choose a new password:\n\n"
-        f"{reset_url}\n\n"
-        "If you did not request this change, ignore this email. Your current password will remain active."
-    )
-    with smtplib.SMTP(settings.email_host, settings.email_port, timeout=15) as smtp:
-        if settings.email_use_starttls:
-            smtp.starttls()
-        if settings.email_username:
-            smtp.login(settings.email_username, settings.email_password)
-        smtp.send_message(message)
 
 
 @router.post("/register-organization", status_code=202)
@@ -116,11 +56,21 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
             user_id=user.id, organization_id=organization.id,
             role="org_admin", branch_scope="*", is_active=True,
         ))
+        verification_expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        verification_token_hash = _token_hash(token)
         db.add(EmailVerification(
-            user_id=user.id, token_hash=_token_hash(token),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            user_id=user.id, token_hash=verification_token_hash,
+            expires_at=verification_expires_at,
         ))
-        _send_verification_email(email, payload.full_name, token)
+        queue_verification_email(
+            db,
+            user_id=user.id,
+            email=email,
+            full_name=payload.full_name,
+            token=token,
+            token_hash=verification_token_hash,
+            expires_at=verification_expires_at,
+        )
         db.add(AuditEvent(
             actor_user_id=user.id, organization_id=organization.id,
             action="organization.registration.requested",
@@ -133,9 +83,9 @@ def register_organization(payload: OrganizationRegistrationIn, db: Session = Dep
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "An account or organization with these details already exists.")
-    except (OSError, smtplib.SMTPException) as exc:
+    except RuntimeError as exc:
         db.rollback()
-        raise HTTPException(503, "Verification email could not be sent. Please try again later.") from exc
+        raise HTTPException(503, "Verification email delivery is not configured. Please try again later.") from exc
 
     return {
         "status": "verification_required",
@@ -159,8 +109,21 @@ def verify_email(payload: EmailVerificationIn, db: Session = Depends(get_db)):
     user = db.get(User, verification.user_id)
     if not user:
         raise HTTPException(400, "Verification account could not be found.")
+    set_verified_user_context(db, user.id)
     user.is_active = True
     verification.consumed_at = datetime.now(timezone.utc)
+    db.query(IdentityEmailDelivery).filter(
+        IdentityEmailDelivery.user_id == user.id,
+        IdentityEmailDelivery.purpose == "email_verification",
+        IdentityEmailDelivery.status.in_(["pending", "sending"]),
+    ).update(
+        {
+            IdentityEmailDelivery.status: "cancelled",
+            IdentityEmailDelivery.last_error: "token_consumed",
+            IdentityEmailDelivery.updated_at: datetime.now(timezone.utc),
+        },
+        synchronize_session=False,
+    )
     membership = db.query(Membership).filter_by(user_id=user.id, is_active=True).first()
     db.add(AuditEvent(
         actor_user_id=user.id,
@@ -189,7 +152,10 @@ def request_password_reset(payload: PasswordResetRequestIn, db: Session = Depend
 
     now = datetime.now(timezone.utc)
     raw_token = secrets.token_urlsafe(36)
+    token_hash = _token_hash(raw_token)
+    expires_at = now + timedelta(minutes=30)
     try:
+        set_verified_user_context(db, user.id)
         db.query(PasswordResetToken).filter(
             PasswordResetToken.user_id == user.id,
             PasswordResetToken.consumed_at.is_(None),
@@ -197,10 +163,22 @@ def request_password_reset(payload: PasswordResetRequestIn, db: Session = Depend
             {PasswordResetToken.consumed_at: now},
             synchronize_session=False,
         )
+        db.query(IdentityEmailDelivery).filter(
+            IdentityEmailDelivery.user_id == user.id,
+            IdentityEmailDelivery.purpose == "password_reset",
+            IdentityEmailDelivery.status.in_(["pending", "sending"]),
+        ).update(
+            {
+                IdentityEmailDelivery.status: "cancelled",
+                IdentityEmailDelivery.last_error: "superseded",
+                IdentityEmailDelivery.updated_at: now,
+            },
+            synchronize_session=False,
+        )
         db.add(PasswordResetToken(
             user_id=user.id,
-            token_hash=_token_hash(raw_token),
-            expires_at=now + timedelta(minutes=30),
+            token_hash=token_hash,
+            expires_at=expires_at,
         ))
         db.add(AuditEvent(
             actor_user_id=user.id,
@@ -208,12 +186,23 @@ def request_password_reset(payload: PasswordResetRequestIn, db: Session = Depend
             resource_type="user",
             resource_id=str(user.id),
         ))
-        db.flush()
-        _send_password_reset_email(user.email, user.full_name, raw_token)
+        queue_password_reset_email(
+            db,
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            token=raw_token,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
         db.commit()
-    except (OSError, smtplib.SMTPException, RuntimeError):
+    except RuntimeError as exc:
         db.rollback()
-        logger.exception("Password reset email delivery failed for user id %s", user.id)
+        logger.warning(
+            "Password reset email could not be queued for user id %s (%s)",
+            user.id,
+            type(exc).__name__,
+        )
     return generic_response
 
 
@@ -258,6 +247,18 @@ def confirm_password_reset(payload: PasswordResetConfirmIn, db: Session = Depend
         PasswordResetToken.consumed_at.is_(None),
     ).update(
         {PasswordResetToken.consumed_at: now},
+        synchronize_session=False,
+    )
+    db.query(IdentityEmailDelivery).filter(
+        IdentityEmailDelivery.user_id == user.id,
+        IdentityEmailDelivery.purpose == "password_reset",
+        IdentityEmailDelivery.status.in_(["pending", "sending"]),
+    ).update(
+        {
+            IdentityEmailDelivery.status: "cancelled",
+            IdentityEmailDelivery.last_error: "token_consumed",
+            IdentityEmailDelivery.updated_at: now,
+        },
         synchronize_session=False,
     )
     db.add(AuditEvent(

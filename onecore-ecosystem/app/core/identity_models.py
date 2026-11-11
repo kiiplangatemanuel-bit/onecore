@@ -1,7 +1,7 @@
 """Account-owned identity records that are not scoped to a business tenant."""
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -54,3 +54,53 @@ class PortalAuthorizationAssurance(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+
+class IdentityEmailDelivery(Base):
+    """Encrypted, account-owned transactional email queued for asynchronous delivery."""
+
+    __tablename__ = "identity_email_deliveries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_key", name="uq_identity_email_user_event"),
+        CheckConstraint(
+            "purpose IN ('email_verification', 'password_reset')",
+            name="ck_identity_email_purpose",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'delivered', 'failed', 'cancelled')",
+            name="ck_identity_email_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_identity_email_attempts"),
+        Index(
+            "ix_identity_email_delivery_due",
+            "status",
+            "next_attempt_at",
+            "updated_at",
+        ),
+        Index(
+            "ix_identity_email_delivery_user_purpose",
+            "user_id",
+            "purpose",
+            "status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    # Recipient, subject, body and one-time link are Fernet-encrypted as one payload.
+    payload_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
