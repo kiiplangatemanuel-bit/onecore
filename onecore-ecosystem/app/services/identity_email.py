@@ -33,6 +33,8 @@ def _validate_delivery_configuration() -> None:
         raise RuntimeError("Production transactional email links must use HTTPS")
     if production and not settings.email_use_starttls:
         raise RuntimeError("Production SMTP delivery requires STARTTLS")
+    if production and not settings.email_use_starttls:
+        raise RuntimeError("Production SMTP delivery requires STARTTLS")
 
 
 def _enqueue(
