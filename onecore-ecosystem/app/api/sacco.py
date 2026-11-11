@@ -1,25 +1,33 @@
-"""SACCO membership onboarding and auditable four-eyes KYC review."""
+"""SACCO member onboarding, protected KYC review and savings/share ledger."""
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.authorization import branch_scope_ids, can_access_branch
 from app.core.database import get_db
-from app.core.models import AuditEvent, Branch, Membership, User
-from app.core.sacco_models import SaccoMember
-from app.core.sacco_schemas import SaccoKycReviewIn, SaccoMemberCreateIn
+from app.core.models import AuditEvent, Branch, Membership, Organization, User
+from app.core.sacco_models import SaccoFinancialTransaction, SaccoLedgerEntry, SaccoMember
+from app.core.sacco_schemas import (
+    SaccoFinancialTransactionIn, SaccoKycReviewIn, SaccoMemberCreateIn,
+    SaccoWithdrawalDecisionIn,
+)
 from app.core.security import current_user
 from app.core.tenancy import active_membership
-from app.services.sacco_membership import KYCConfigurationError, decrypt_kyc_payload, encrypt_kyc_payload, identity_fingerprint, request_fingerprint
+from app.services.sacco_membership import (
+    KYCConfigurationError, decrypt_kyc_payload, encrypt_kyc_payload,
+    identity_fingerprint, request_fingerprint, transaction_fingerprint,
+)
 
-router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-membership"])
+router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-membership-and-ledger"])
 KYC_ACCESS_WINDOW = timedelta(minutes=30)
 SACCO_ROLE_PERMISSIONS = {
-    "org_admin": {"read", "create", "update", "review"},
-    "sacco_manager": {"read", "create", "update", "review"},
+    "org_admin": {"read", "create", "update", "review", "deposit", "withdraw", "share_contribute", "approve_withdrawal"},
+    "sacco_manager": {"read", "create", "update", "review", "deposit", "withdraw", "share_contribute", "approve_withdrawal"},
     "sacco_officer": {"read", "create"},
     "sacco_kyc_approver": {"read", "review"},
-    "sacco_treasurer": {"read", "create"},
+    "sacco_treasurer": {"read", "deposit", "withdraw", "share_contribute"},
     "sacco_auditor": {"read"},
 }
 
@@ -83,6 +91,38 @@ def _audit(db: Session, user: User, membership: Membership, action: str, member_
         organization_id=membership.organization_id, actor_user_id=user.id,
         action=action, resource_type="sacco_member", resource_id=str(member_id), detail=detail[:500],
     ))
+
+
+def _audit_financial(
+    db: Session, user: User, membership: Membership, action: str,
+    transaction_id: int, detail: str = "",
+) -> None:
+    db.add(AuditEvent(
+        organization_id=membership.organization_id, actor_user_id=user.id,
+        action=action, resource_type="sacco_financial_transaction",
+        resource_id=str(transaction_id), detail=detail[:500],
+    ))
+
+
+def _financial_out(row: SaccoFinancialTransaction, *, replayed: bool = False) -> dict:
+    return {
+        "id": row.id, "organization_id": row.organization_id, "member_id": row.member_id,
+        "branch_id": row.branch_id, "account_type": row.account_type,
+        "transaction_type": row.transaction_type, "amount": format(row.amount, ".2f"),
+        "currency": row.currency, "reference": row.reference, "status": row.status,
+        "created_by": row.created_by, "decided_by": row.decided_by,
+        "decided_at": row.decided_at, "decision_note": row.decision_note,
+        "created_at": row.created_at, "replayed": replayed,
+    }
+
+
+def _ledger_balance(db: Session, organization_id: int, member_id: int, account_type: str) -> Decimal:
+    total = db.query(func.coalesce(func.sum(SaccoLedgerEntry.signed_amount), 0)).filter(
+        SaccoLedgerEntry.organization_id == organization_id,
+        SaccoLedgerEntry.member_id == member_id,
+        SaccoLedgerEntry.account_type == account_type,
+    ).scalar()
+    return Decimal(str(total or "0")).quantize(Decimal("0.01"))
 
 
 @router.post("/members", status_code=201)
@@ -235,3 +275,176 @@ def review_member_kyc(
     db.commit()
     db.refresh(row)
     return _member_out(row)
+
+
+@router.post("/members/{member_id}/transactions", status_code=201)
+def create_member_transaction(
+    member_id: int,
+    payload: SaccoFinancialTransactionIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    action = {
+        "deposit": "deposit",
+        "withdrawal": "withdraw",
+        "share_contribution": "share_contribute",
+    }[payload.transaction_type]
+    _require_sacco_permission(membership, action)
+    member = _member_for_membership(db, membership, member_id, for_update=True)
+    fingerprint = transaction_fingerprint({
+        "member_id": member.id,
+        "account_type": payload.account_type,
+        "transaction_type": payload.transaction_type,
+        "amount": format(payload.amount, ".2f"),
+        "reference": payload.reference,
+    })
+    existing = db.query(SaccoFinancialTransaction).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key,
+    ).first()
+    if existing:
+        if existing.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for a different financial transaction")
+        return _financial_out(existing, replayed=True)
+    if member.status != "active":
+        raise HTTPException(409, "Financial transactions require an active, KYC-verified member")
+    organization = db.get(Organization, membership.organization_id)
+    if not organization:
+        raise HTTPException(404, "Organization not found")
+
+    status = "pending_approval" if payload.transaction_type == "withdrawal" else "posted"
+    row = SaccoFinancialTransaction(
+        organization_id=membership.organization_id, member_id=member.id,
+        branch_id=member.branch_id, account_type=payload.account_type,
+        transaction_type=payload.transaction_type, amount=payload.amount,
+        currency=organization.currency, reference=payload.reference, status=status,
+        idempotency_key=payload.idempotency_key, request_fingerprint=fingerprint,
+        created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        if status == "posted":
+            db.add(SaccoLedgerEntry(
+                organization_id=membership.organization_id, member_id=member.id,
+                transaction_id=row.id, branch_id=member.branch_id,
+                account_type=payload.account_type, signed_amount=payload.amount,
+                currency=organization.currency, reference=payload.reference,
+                created_by=user.id,
+            ))
+            _audit_financial(
+                db, user, membership, "sacco.transaction.posted", row.id,
+                f"type={payload.transaction_type};account={payload.account_type};amount={payload.amount:.2f};currency={organization.currency}",
+            )
+        else:
+            _audit_financial(
+                db, user, membership, "sacco.withdrawal.requested", row.id,
+                f"amount={payload.amount:.2f};currency={organization.currency}",
+            )
+        db.commit()
+        db.refresh(row)
+        return _financial_out(row)
+    except IntegrityError:
+        db.rollback()
+        replay = db.query(SaccoFinancialTransaction).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key,
+        ).first()
+        if replay and replay.request_fingerprint == fingerprint:
+            return _financial_out(replay, replayed=True)
+        raise HTTPException(409, "Financial idempotency key conflicts with an existing transaction")
+
+
+@router.get("/members/{member_id}/transactions")
+def list_member_transactions(
+    member_id: int,
+    account_type: str | None = Query(default=None, pattern=r"^(savings|shares)$"),
+    status: str | None = Query(default=None, pattern=r"^(pending_approval|posted|rejected)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_sacco_permission(membership, "read")
+    member = _member_for_membership(db, membership, member_id)
+    query = db.query(SaccoFinancialTransaction).filter_by(
+        organization_id=membership.organization_id, member_id=member.id,
+    )
+    if account_type:
+        query = query.filter(SaccoFinancialTransaction.account_type == account_type)
+    if status:
+        query = query.filter(SaccoFinancialTransaction.status == status)
+    total = query.count()
+    rows = query.order_by(
+        SaccoFinancialTransaction.created_at.desc(), SaccoFinancialTransaction.id.desc()
+    ).offset(offset).limit(limit).all()
+    return {"items": [_financial_out(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/members/{member_id}/balances")
+def member_balances(
+    member_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_sacco_permission(membership, "read")
+    member = _member_for_membership(db, membership, member_id)
+    organization = db.get(Organization, membership.organization_id)
+    if not organization:
+        raise HTTPException(404, "Organization not found")
+    return {
+        "member_id": member.id, "member_number": member.member_number,
+        "currency": organization.currency,
+        "savings_balance": format(_ledger_balance(db, membership.organization_id, member.id, "savings"), ".2f"),
+        "share_balance": format(_ledger_balance(db, membership.organization_id, member.id, "shares"), ".2f"),
+    }
+
+
+@router.post("/transactions/{transaction_id}/decision")
+def decide_member_withdrawal(
+    transaction_id: int,
+    payload: SaccoWithdrawalDecisionIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_sacco_permission(membership, "approve_withdrawal")
+    row = db.query(SaccoFinancialTransaction).filter_by(
+        id=transaction_id, organization_id=membership.organization_id,
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "SACCO financial transaction not found")
+    member = _member_for_membership(db, membership, row.member_id, for_update=True)
+    if row.transaction_type != "withdrawal" or row.account_type != "savings":
+        raise HTTPException(409, "Only savings withdrawal requests require this decision")
+    if row.status != "pending_approval":
+        raise HTTPException(409, "Only pending withdrawal requests can be decided")
+    if row.created_by == user.id:
+        raise HTTPException(403, "The withdrawal requester cannot approve or reject their own request")
+
+    if payload.decision == "approve":
+        balance = _ledger_balance(db, membership.organization_id, member.id, "savings")
+        if row.amount > balance:
+            raise HTTPException(409, "Insufficient available savings balance for this withdrawal")
+        db.add(SaccoLedgerEntry(
+            organization_id=membership.organization_id, member_id=member.id,
+            transaction_id=row.id, branch_id=member.branch_id,
+            account_type="savings", signed_amount=-row.amount,
+            currency=row.currency, reference=row.reference, created_by=user.id,
+        ))
+        row.status = "posted"
+        action = "sacco.withdrawal.approved"
+    else:
+        row.status = "rejected"
+        action = "sacco.withdrawal.rejected"
+    row.decided_by = user.id
+    row.decided_at = datetime.now(timezone.utc)
+    row.decision_note = payload.note
+    _audit_financial(
+        db, user, membership, action, row.id,
+        f"decision={payload.decision};amount={row.amount:.2f};currency={row.currency}",
+    )
+    db.commit()
+    db.refresh(row)
+    return _financial_out(row)
