@@ -11,7 +11,10 @@ together with Fernet; plaintext tokens are not stored in the outbox or token tab
 
 The outbox is account-owned and protected by PostgreSQL forced row-level security.
 The API may select/insert only rows for the transaction-local `app.user_id`. It
-cannot update delivery state or delete rows. The dedicated
+may cancel only its own `pending`/`sending` rows using column-limited updates to
+`status`, `last_error` and `updated_at`; the RLS check permits only the `cancelled`
+state. It cannot mark a message delivered, change retry scheduling or delete rows.
+The dedicated
 `onecore_identity_email_worker` role can select and update the queue, but it is
 not a superuser, table owner or RLS bypass role.
 
@@ -63,9 +66,10 @@ Configure the worker service with:
 - `APP_ENV=production`
 - The same `IDENTITY_EMAIL_ENCRYPTION_KEY` and SMTP settings as the API
 
-The API runtime role (`onecore_api`) receives SELECT and INSERT only. If the role
-was not present when migration 0065 ran, apply the documented grants manually after
-review; do not grant UPDATE or DELETE to the API role.
+The API runtime role (`onecore_api`) receives SELECT, INSERT and column-limited
+cancellation updates only. If the role was not present when migration 0065 ran,
+apply the reviewed SELECT/INSERT/sequence and column-level cancellation grants
+manually; do not grant general UPDATE or DELETE to the API role.
 
 Start the optional Docker Compose worker profile:
 
