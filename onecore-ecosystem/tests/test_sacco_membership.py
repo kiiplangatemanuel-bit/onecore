@@ -191,6 +191,13 @@ def test_sacco_workspace_exposes_member_and_kyc_controls():
     assert "/sacco/members" in html
     assert "Powered by OneCore Technologies Ltd" in html
 
+def test_sacco_roles_are_assignable_through_tenant_invitations():
+    from app.api.platform_routes import InvitationIn
+
+    for role in ("sacco_officer", "sacco_manager", "sacco_kyc_approver", "sacco_treasurer", "sacco_auditor"):
+        assert InvitationIn(email="member@example.test", role=role).role == role
+
+
 def test_sacco_roles_are_least_privilege():
     from app.core.authorization import require_permission
     from fastapi import HTTPException
