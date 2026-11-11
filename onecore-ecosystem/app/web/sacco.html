@@ -17,6 +17,7 @@
 <label>Email<input name="email" type="email" autocomplete="username" required></label>
 <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
 <label>Organization ID<input name="organization" inputmode="numeric" required></label>
+<label>Authenticator / recovery code (if required)<input name="mfa_code" autocomplete="one-time-code" maxlength="64"></label>
 <div><button type="submit">Sign in</button></div>
 </form>
 </section>
@@ -93,9 +94,19 @@ $('login').addEventListener('submit',async event=>{
  try{
   const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:form.get('email'),password:form.get('password')})});
   const data=await response.json();if(!response.ok)throw new Error(data.detail||'Sign-in failed');
-  if(!data.access_token)throw new Error('This account requires MFA or enrollment. Sign in through the main OneCore workspace, then return to this page.');
+  let auth=data;
+  if(data.mfa_required){
+   const code=String(form.get('mfa_code')||'').trim();
+   if(!code)throw new Error('Enter your authenticator or recovery code, then sign in again.');
+   const challenge=await fetch('/api/v1/auth/mfa/challenge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({challenge_token:data.challenge_token,code})});
+   const challengeData=await challenge.json().catch(()=>null);
+   if(!challenge.ok)throw new Error(challengeData?.detail||'MFA verification failed');
+   auth=challengeData;
+  }
+  if(auth.mfa_enrollment_required)throw new Error('MFA enrollment is required. Complete enrollment in the main OneCore workspace, then return here.');
+  if(!auth.access_token)throw new Error('Sign-in did not produce an authenticated session.');
   const org=String(form.get('organization')).trim();if(!/^[1-9][0-9]*$/.test(org))throw new Error('Organization ID must be a positive number.');
-  token=data.access_token;organization=org;await refresh();status('Signed in. Member data is scoped to this organization and your authorized branches.');
+  token=auth.access_token;organization=org;await refresh();status('Signed in. Member data is scoped to this organization and your authorized branches.');
  }catch(error){token=null;organization=null;status(error.message);}
 });
 $('member').addEventListener('submit',async event=>{
