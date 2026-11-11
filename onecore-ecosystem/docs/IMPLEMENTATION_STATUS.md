@@ -7,7 +7,7 @@ evidence has been reviewed. The categories are functional groupings, not 75 sepa
 microservices.
 
 **Reconciled:** 11 November 2026  
-**Implementation code head reviewed:** `7d988b1fec90ead942aa5f09c6813b34a11c3afa` (tracker-only reconciliation follows)
+**Implementation code head reviewed:** `efbacd5d8b0aaef3a52cc9403e67421a5be9c714` (tracker-only reconciliation follows)
 
 ## Verified on current main
 
@@ -29,15 +29,19 @@ coverage:
 - PostgreSQL tenant RLS policies and forced-RLS catalog checks. The current CI
   additionally assumes a non-owner `NOLOGIN NOSUPERUSER NOBYPASSRLS` role and
   tests actual tenant read/write isolation and append-only audit behavior on
-  `records`, `memberships` and `audit_events`, plus account-owner outbox isolation
-  and worker-only delivery-state updates on `identity_email_deliveries`.
-- Alembic migration chain through `0065_identity_email_outbox`, with CI upgrade,
+  `records`, `memberships`, `audit_events`, `sacco_members`,
+  `sacco_financial_transactions` and `sacco_ledger_entries`, plus account-owner
+  outbox isolation and worker-only delivery-state updates on
+  `identity_email_deliveries`. SACCO financial rows also have tenant-consistent
+  composite foreign keys and a PostgreSQL append-only ledger trigger.
+- Alembic migration chain through `0067_sacco_member_ledger`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
-  Procurement, POS, School, Hospital, Pharmacy/Laboratory and HR/Payroll. These
-  are partial applications with real models/migrations, APIs, validation,
-  authorization, audit and tests; their presence does not mean their full master
-  requirements or production acceptance are complete.
+  Procurement, POS, School, Hospital, Pharmacy/Laboratory, HR/Payroll and a
+  partial SACCO member/KYC plus savings/share subledger. These are partial
+  applications with real models/migrations, APIs, validation, authorization,
+  audit and tests; their presence does not mean their full master requirements
+  or production acceptance are complete.
 - OneCore attribution uses the required footer wording: **Powered by OneCore Technologies Ltd**.
 
 ## Verification evidence
@@ -65,6 +69,29 @@ coverage:
   dependency audit, Python compilation, main frontend build, all ten portal builds,
   and **421 pytest tests with 8 warnings**. This is CI evidence, not live SMTP
   deliverability or a production Supabase role rehearsal.
+
+## SACCO member/KYC and savings/share ledger verification
+
+- [PR #131](https://github.com/kiiplangatemanuel-bit/onecore/pull/131) added
+  tenant/branch-scoped SACCO member onboarding, encrypted KYC data, audited
+  protected-detail access and independent KYC decisions. Merge commit
+  [6cacf6a](https://github.com/kiiplangatemanuel-bit/onecore/commit/6cacf6af2aa40d4b6b4116750d884e11d0ece06a).
+  Post-merge main run
+  [43015657364](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43015657364)
+  passed 432 tests with 8 warnings.
+- [PR #132](https://github.com/kiiplangatemanuel-bit/onecore/pull/132) added
+  savings deposits, share contributions, independent savings withdrawal approval,
+  derived balances, organization-scoped idempotency, tenant-consistent composite
+  foreign keys and an append-only PostgreSQL ledger trigger. Merge commit
+  [efbacd5](https://github.com/kiiplangatemanuel-bit/onecore/commit/efbacd5d8b0aaef3a52cc9403e67421a5be9c714).
+  PR CI run
+  [43017721334](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43017721334)
+  and post-merge main run
+  [43018186856](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43018186856)
+  both passed 444 tests with 8 warnings. Migration upgrade/downgrade/re-upgrade,
+  dependency audit, Python compilation, main frontend build and all ten portal
+  builds passed. Vercel previews for the developers, admin and community portals
+  were rate-limited; the main OneCore deployment status was successful.
 
 ## Identity email outbox increment (11 November 2026)
 
@@ -98,10 +125,47 @@ queue-age alerts and an operator-safe dead-letter replay workflow. SMTP delivery
 at-least-once, so a crash after provider acceptance can cause a duplicate. No live
 provider delivery or production deployment is claimed.
 
+
+## SACCO member, KYC and savings/share ledger increments (11 November 2026)
+
+The SACCO/Microfinance/Chama category is now partially implemented on main; it is
+not a complete lending or cooperative platform.
+
+- PR #131 introduced tenant/branch-scoped member registration, encrypted national
+  ID/date-of-birth/address payloads, keyed duplicate detection, audited protected
+  KYC reads and four-eyes verify/reject decisions. The member register does not
+  expose raw identity data in ordinary list/detail responses.
+- PR #132 introduced savings deposits and share contributions as separate
+  subledgers, pending savings withdrawals, independent manager approval/rejection,
+  balance rechecks under a member-row lock, organization-scoped idempotency and
+  derived balances. The ledger stores signed entries and does not permit direct
+  updates/deletes.
+- Migration 0066_sacco_membership_kyc creates the member/KYC register;
+  0067_sacco_member_ledger adds financial workflow and ledger tables, forced RLS,
+  tenant-consistent composite foreign keys, restricted onecore_api grants and an
+  immutable-ledger trigger.
+- API and UI are available under /api/v1/sacco and /sacco. Documentation:
+  docs/SACCO_MEMBERSHIP_KYC.md and docs/SACCO_SAVINGS_LEDGER.md.
+- CI run 43018186856 on main passed 444 tests with 8 warnings, including PostgreSQL
+  RLS behavior, append-only ledger enforcement, migration upgrade/downgrade/
+  re-upgrade, dependency audit, compilation, main frontend build and all ten
+  portal builds.
+
+Remaining SACCO/Microfinance/Chama scope: savings product terms, limits and
+interest; share redemption/member exit/dividends; compensating reversals and
+accounting general-ledger/cashbook reconciliation; groups/chama contributions,
+meetings and voting; loan products, credit assessment, guarantors/collateral,
+approval matrices, disbursement, interest/penalty accrual, repayments, arrears and
+restructuring; member statements/portals; verified M-Pesa/bank integration;
+portfolio/risk reports; production role rehearsal, monitoring, backup/restore,
+security review and UAT. Internal deposit/share entries are not proof of settled
+cash, bank or M-Pesa payments.
+
 ## Current outstanding work and release blockers
 
 1. **Production database role rehearsal:** provision the actual Supabase API,
-   identity-email worker and other worker roles with reviewed least-privilege grants,
+   identity-email worker and other worker roles (including SACCO financial table
+   grants and ledger insert-only privileges) with reviewed least-privilege grants,
    NOBYPASSRLS, no tenant-table ownership and correct login membership. For the
    identity-email worker, set IDENTITY_EMAIL_WORKER_DATABASE_URL and
    ONECORE_DATABASE_RUNTIME_ROLE=onecore_identity_email_worker. Run the RLS behavior
@@ -131,12 +195,13 @@ provider delivery or production deployment is claimed.
    credentials, provider sandbox/UAT, callbacks, reconciliation and formal
    approval. No provider certification or live transaction processing is claimed.
 6. **Specialist scope:** Accounting, CRM, Procurement, POS, School, Hospital,
-   Pharmacy/Laboratory and HR/Payroll still need feature-by-feature completion,
-   fuller user workflows and UAT. No dedicated SACCO, Microfinance or Chama
-   domain vertical slice is yet evidenced on main. Hotel, Restaurant, Property,
-   Services, E-commerce, Website Builder, central CMS and other product categories
-   likewise need their own reviewed vertical slices; a catalogue folder or manifest
-   is not implementation evidence.
+   Pharmacy/Laboratory, HR/Payroll and SACCO/Microfinance/Chama still need
+   feature-by-feature completion, fuller user workflows and UAT. SACCO currently
+   covers member/KYC and a limited savings/share subledger; groups, lending,
+   dividends, statements, GL integration and verified payment workflows remain
+   open. Hotel, Restaurant, Property, Services, E-commerce, Website Builder,
+   central CMS and other product categories likewise need their own reviewed
+   vertical slices; a catalogue folder or manifest is not implementation evidence.
 7. **Frontend and quality:** complete responsive workspaces, English/Kiswahili
    coverage, accessibility, browser/device compatibility, end-to-end workflows,
    security review, penetration testing, load/concurrency testing and customer UAT
