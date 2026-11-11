@@ -22,11 +22,6 @@ ROLE_PERMISSIONS = {
     "payroll_approver": {"read"},
     "payroll_payment": {"read"},
     "payroll_accounting": {"read"},
-    "sacco_officer": {"read", "create"},
-    "sacco_manager": {"read", "create", "update", "manage"},
-    "sacco_kyc_approver": {"read", "manage"},
-    "sacco_treasurer": {"read", "create"},
-    "sacco_auditor": {"read"},
 }
 
 def require_permission(membership, action: str) -> None:
