@@ -1,7 +1,10 @@
-"""Validated contracts for the SACCO membership/KYC vertical slice."""
+"""Validated contracts for SACCO membership, KYC and savings/share workflows."""
 import re
 from datetime import date
+from decimal import Decimal
+from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
 
 class SaccoMemberCreateIn(BaseModel):
     member_number: str = Field(min_length=2, max_length=40, pattern=r"^[A-Z0-9][A-Z0-9/_-]{1,39}$")
@@ -67,4 +70,43 @@ class SaccoKycReviewIn(BaseModel):
         value = " ".join(str(value or "").split())
         if len(value) < 5:
             raise ValueError("A review note of at least five characters is required")
+        return value
+
+
+class SaccoFinancialTransactionIn(BaseModel):
+    account_type: Literal["savings", "shares"]
+    transaction_type: Literal["deposit", "withdrawal", "share_contribution"]
+    amount: Decimal = Field(gt=Decimal("0"), max_digits=18, decimal_places=2)
+    reference: str = Field(default="", max_length=120)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+    @field_validator("reference")
+    @classmethod
+    def normalize_reference(cls, value):
+        return " ".join(str(value or "").split())
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_financial_idempotency_key(cls, value):
+        return value.strip()
+
+    @model_validator(mode="after")
+    def transaction_matches_account(self):
+        if self.account_type == "savings" and self.transaction_type not in {"deposit", "withdrawal"}:
+            raise ValueError("Savings accounts support deposits and withdrawals only")
+        if self.account_type == "shares" and self.transaction_type != "share_contribution":
+            raise ValueError("Share accounts support share contributions only in this release")
+        return self
+
+
+class SaccoWithdrawalDecisionIn(BaseModel):
+    decision: Literal["approve", "reject"]
+    note: str = Field(min_length=5, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_decision_note(cls, value):
+        value = " ".join(str(value or "").split())
+        if len(value) < 5:
+            raise ValueError("A decision note of at least five characters is required")
         return value
