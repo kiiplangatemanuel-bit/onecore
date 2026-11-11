@@ -198,17 +198,23 @@ def test_sacco_roles_are_assignable_through_tenant_invitations():
         assert InvitationIn(email="member@example.com", role=role).role == role
 
 
-def test_sacco_roles_are_least_privilege():
+def test_sacco_roles_are_module_scoped_and_least_privilege():
+    from app.api.sacco import _require_sacco_permission
     from app.core.authorization import require_permission
     from fastapi import HTTPException
 
-    require_permission(SimpleNamespace(role="sacco_officer"), "create")
-    require_permission(SimpleNamespace(role="sacco_auditor"), "read")
-    require_permission(SimpleNamespace(role="sacco_kyc_approver"), "manage")
+    _require_sacco_permission(SimpleNamespace(role="sacco_officer"), "create")
+    _require_sacco_permission(SimpleNamespace(role="sacco_auditor"), "read")
+    _require_sacco_permission(SimpleNamespace(role="sacco_kyc_approver"), "review")
     with pytest.raises(HTTPException):
-        require_permission(SimpleNamespace(role="sacco_officer"), "manage")
+        _require_sacco_permission(SimpleNamespace(role="sacco_officer"), "review")
     with pytest.raises(HTTPException):
-        require_permission(SimpleNamespace(role="sacco_auditor"), "create")
+        _require_sacco_permission(SimpleNamespace(role="sacco_auditor"), "create")
+    # SACCO roles must not inherit generic manage/create rights in other modules.
+    with pytest.raises(HTTPException):
+        require_permission(SimpleNamespace(role="sacco_manager"), "manage")
+    with pytest.raises(HTTPException):
+        require_permission(SimpleNamespace(role="sacco_officer"), "create")
 
 
 def test_sacco_workspace_supports_mfa_challenge_and_never_persists_token():
