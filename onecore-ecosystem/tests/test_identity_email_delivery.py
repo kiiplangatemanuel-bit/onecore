@@ -132,8 +132,9 @@ def test_identity_email_worker_cancels_expired_messages_without_sending(monkeypa
     database = tmp_path / "worker-expired.db"
     engine = _engine(database)
     with Session(engine) as db:
-        row = _queue(db, datetime.now(timezone.utc) - timedelta(seconds=1))
+        row = _queue(db)
         # Simulate an outbox row queued before the token expired.
+        row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         row.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=2)
         db.commit()
     engine.dispose()
