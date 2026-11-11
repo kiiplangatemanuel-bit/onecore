@@ -85,7 +85,7 @@ def test_production_database_boundary_rejects_tables_without_forced_rls():
 
 def test_production_database_boundary_rejects_missing_critical_rls_table():
     from app.main import _verify_rls_database_boundary
-    tables = _tables()[:-1]
+    tables = [row for row in _tables() if row["relname"] != "sacco_members"]
     with pytest.raises(RuntimeError, match="RLS schema"):
         _verify_rls_database_boundary(_Connection(
             {"role_name": "onecore_api", "is_superuser": False, "bypasses_rls": False}, tables
