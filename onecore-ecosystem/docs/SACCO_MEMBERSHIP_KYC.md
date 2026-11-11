@@ -40,7 +40,16 @@ Generate independent keys and store them only in the deployment secret manager:
 - SACCO_KYC_ENCRYPTION_KEY: Fernet key generated with Fernet.generate_key().
 - SACCO_KYC_HMAC_KEY: at least 32 random bytes encoded as a secret string.
 
-The migration adds forced PostgreSQL RLS on sacco_members. CI provisions a disposable NOBYPASSRLS role and tests cross-tenant reads/writes. Production Supabase roles and grants still require a separate rehearsal.
+The migration adds forced PostgreSQL RLS on sacco_members. If onecore_api exists when the migration runs, the migration grants SELECT/INSERT and only the KYC review columns for UPDATE. If that role is created later, apply the reviewed grants below after role provisioning:
+
+```sql
+GRANT SELECT, INSERT ON TABLE public.sacco_members TO onecore_api;
+GRANT UPDATE (status, review_note, reviewed_by, reviewed_at, updated_at)
+  ON TABLE public.sacco_members TO onecore_api;
+GRANT USAGE, SELECT ON SEQUENCE public.sacco_members_id_seq TO onecore_api;
+```
+
+CI provisions a disposable NOBYPASSRLS role and tests cross-tenant reads/writes. Production Supabase roles, grants and key custody still require a separate rehearsal.
 
 ## Remaining scope
 
