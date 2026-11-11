@@ -128,6 +128,36 @@ def test_member_creation_idempotency_branch_scope_and_four_eyes_kyc_review(monke
         assert reviewed["status"] == "active" and reviewed["reviewed_by"] == reviewer.id
         assert db.query(AuditEvent).filter_by(action="sacco.member.kyc_details_accessed").count() == 1
         assert db.query(AuditEvent).filter_by(action="sacco.member.kyc_reviewed").count() == 1
+
+        rejected_payload = _payload(member_number="MEM-0002", national_id="87654321", idempotency_key="sacco-member-0002")
+        rejected_member = create_member(rejected_payload, creator, officer, db)
+        get_member_kyc_details(rejected_member["id"], "Second identity document review", reviewer, approver, db)
+        rejected = review_member_kyc(
+            rejected_member["id"],
+            SaccoKycReviewIn(decision="reject", note="Identity document could not be verified"),
+            reviewer, approver, db,
+        )
+        assert rejected["status"] == "rejected"
+        with pytest.raises(HTTPException) as second_decision:
+            review_member_kyc(
+                rejected_member["id"],
+                SaccoKycReviewIn(decision="verify", note="Attempted second decision"),
+                reviewer, approver, db,
+            )
+        assert second_decision.value.status_code == 409
+
+        with pytest.raises(HTTPException) as duplicate_identity:
+            create_member(
+                _payload(member_number="MEM-0003", idempotency_key="sacco-member-0003"),
+                creator, officer, db,
+            )
+        assert duplicate_identity.value.status_code == 409
+        with pytest.raises(HTTPException) as duplicate_number:
+            create_member(
+                _payload(member_number="MEM-0001", national_id="11223344", idempotency_key="sacco-member-0004"),
+                creator, officer, db,
+            )
+        assert duplicate_number.value.status_code == 409
         other_org = Organization(name="Other tenant", slug="other-tenant")
         db.add(other_org)
         db.commit()
@@ -160,3 +190,23 @@ def test_sacco_workspace_exposes_member_and_kyc_controls():
     assert 'id="member"' in html and 'id="members"' in html and 'id="kycDetails"' in html
     assert "/sacco/members" in html
     assert "Powered by OneCore Technologies Ltd" in html
+
+def test_sacco_roles_are_least_privilege():
+    from app.core.authorization import require_permission
+    from fastapi import HTTPException
+
+    require_permission(SimpleNamespace(role="sacco_officer"), "create")
+    require_permission(SimpleNamespace(role="sacco_auditor"), "read")
+    require_permission(SimpleNamespace(role="sacco_kyc_approver"), "manage")
+    with pytest.raises(HTTPException):
+        require_permission(SimpleNamespace(role="sacco_officer"), "manage")
+    with pytest.raises(HTTPException):
+        require_permission(SimpleNamespace(role="sacco_auditor"), "create")
+
+
+def test_sacco_workspace_supports_mfa_challenge_and_never_persists_token():
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "sacco.html"
+    html = page.read_text(encoding="utf-8")
+    assert 'name="mfa_code"' in html
+    assert "/api/v1/auth/mfa/challenge" in html
+    assert "sessionStorage" not in html and "localStorage" not in html
