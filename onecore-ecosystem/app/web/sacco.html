@@ -56,12 +56,33 @@
 <div><button type="submit">Record KYC decision</button></div>
 </form>
 </section>
+<section class="panel" aria-labelledby="financial-title">
+<h2 id="financial-title">Member savings and share ledger</h2>
+<p class="muted">Savings deposits and share contributions are recorded in separate member subledgers. Savings withdrawals remain pending until a different authorized manager approves them. This workspace records internal transactions; it does not verify M-Pesa or bank payments.</p>
+<form id="financial">
+<label>Member ID<input name="member_id" type="number" min="1" required></label>
+<label>Account<select name="account_type"><option value="savings">Savings</option><option value="shares">Shares</option></select></label>
+<label>Transaction<select name="transaction_type"><option value="deposit">Savings deposit</option><option value="withdrawal">Savings withdrawal request</option><option value="share_contribution">Share contribution</option></select></label>
+<label>Amount<input name="amount" type="number" min="0.01" step="0.01" required></label>
+<label>Internal receipt / reference<input name="reference" maxlength="120"></label>
+<div><button type="submit">Record transaction</button></div>
+</form>
+<div class="actions"><button id="refreshFinancial" type="button">Refresh balances and transactions</button></div>
+<p id="balances" class="muted" aria-live="polite">Select a member to view balances.</p>
+<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Amount</th><th>Status</th><th>Reference</th><th>Action</th></tr></thead><tbody id="financialTransactions"><tr><td colspan="7">No member selected.</td></tr></tbody></table></div>
+<form id="withdrawalDecision">
+<label>Pending withdrawal ID<input name="transaction_id" type="number" min="1" required></label>
+<label>Decision<select name="decision"><option value="approve">Approve</option><option value="reject">Reject</option></select></label>
+<label>Decision note<input name="note" minlength="5" maxlength="500" required></label>
+<div><button type="submit">Submit withdrawal decision</button></div>
+</form>
+</section>
 <p id="status" role="status" aria-live="polite"></p>
 </main>
 <footer>Powered by OneCore Technologies Ltd</footer>
 <script>
 (()=> {
-let token=null, organization=null, selectedMemberId=null;
+let token=null, organization=null, selectedMemberId=null, selectedFinancialMemberId=null;
 const $=id=>document.getElementById(id);
 const status=message=>$('status').textContent=message;
 async function api(path, options={}) {
@@ -81,12 +102,37 @@ async function refresh(){
  data.items.forEach(member=>{
   const tr=body.insertRow();cell(tr,member.member_number);cell(tr,member.full_name);cell(tr,member.phone);cell(tr,member.branch_id||'All branches');cell(tr,member.status);
   const actions=cell(tr,'');const wrap=document.createElement('div');wrap.className='actions';
+  const finance=document.createElement('button');finance.type='button';finance.textContent='Open savings';
+  finance.addEventListener('click',()=>{selectedFinancialMemberId=member.id;$('financial').elements.member_id.value=member.id;refreshFinancial(member.id).catch(error=>status(error.message));});
+  wrap.append(finance);
   if(member.status==='pending_kyc'){
    const view=document.createElement('button');view.type='button';view.textContent='Review KYC';
    view.addEventListener('click',()=>{$('kycAccess').elements.member_id.value=member.id;$('kycAccess').scrollIntoView({behavior:'smooth',block:'center'});});
    wrap.append(view);
   }
   actions.append(wrap);
+ });
+}
+async function refreshFinancial(memberId){
+ if(!token)return status('Sign in first.');
+ const id=Number(memberId);if(!Number.isInteger(id)||id<1)return status('Enter a valid member ID.');
+ selectedFinancialMemberId=id;
+ const [balances,history]=await Promise.all([
+  api('/sacco/members/'+id+'/balances'),
+  api('/sacco/members/'+id+'/transactions')
+ ]);
+ $('balances').textContent=balances.member_number+' · Savings: '+balances.currency+' '+balances.savings_balance+' · Shares: '+balances.currency+' '+balances.share_balance;
+ const body=$('financialTransactions');body.replaceChildren();
+ if(!history.items.length){const tr=body.insertRow();const td=tr.insertCell();td.colSpan=7;td.textContent='No financial transactions recorded.';return;}
+ history.items.forEach(item=>{
+  const tr=body.insertRow();cell(tr,new Date(item.created_at).toLocaleString());cell(tr,item.transaction_type);cell(tr,item.account_type);
+  cell(tr,item.currency+' '+item.amount);cell(tr,item.status);cell(tr,item.reference);
+  const action=cell(tr,'');
+  if(item.status==='pending_approval'&&item.transaction_type==='withdrawal'){
+   const button=document.createElement('button');button.type='button';button.textContent='Decide';
+   button.addEventListener('click',()=>{$('withdrawalDecision').elements.transaction_id.value=item.id;$('withdrawalDecision').scrollIntoView({behavior:'smooth',block:'center'});});
+   action.append(button);
+  }
  });
 }
 $('login').addEventListener('submit',async event=>{
@@ -136,6 +182,32 @@ $('kycReview').addEventListener('submit',async event=>{
   const result=await api('/sacco/members/'+selectedMemberId+'/kyc-review',{method:'POST',body:JSON.stringify({decision:form.get('decision'),note:form.get('note')})});
   selectedMemberId=null;$('kycDetails').textContent='No protected KYC details loaded.';event.currentTarget.reset();
   status('KYC decision recorded. Member status: '+result.status+'.');await refresh();
+ }catch(error){status(error.message);}
+});
+$('financial').addEventListener('submit',async event=>{
+ event.preventDefault();if(!token)return status('Sign in first.');
+ const form=new FormData(event.currentTarget),memberId=Number(form.get('member_id'));
+ if(!Number.isInteger(memberId)||memberId<1)return status('Enter a valid member ID.');
+ try{
+  const body={account_type:form.get('account_type'),transaction_type:form.get('transaction_type'),amount:String(form.get('amount')),reference:form.get('reference')||'',idempotency_key:crypto.randomUUID()};
+  const result=await api('/sacco/members/'+memberId+'/transactions',{method:'POST',body:JSON.stringify(body)});
+  selectedFinancialMemberId=memberId;
+  status(result.transaction_type+' recorded with status '+result.status+'.');
+  await refreshFinancial(memberId);
+ }catch(error){status(error.message);}
+});
+$('refreshFinancial').addEventListener('click',async()=>{
+ const id=selectedFinancialMemberId||Number($('financial').elements.member_id.value);
+ try{await refreshFinancial(id);status('Member balances and transaction history refreshed.');}catch(error){status(error.message);}
+});
+$('withdrawalDecision').addEventListener('submit',async event=>{
+ event.preventDefault();if(!token)return status('Sign in first.');
+ const form=new FormData(event.currentTarget),transactionId=Number(form.get('transaction_id'));
+ if(!Number.isInteger(transactionId)||transactionId<1)return status('Enter a valid withdrawal ID.');
+ try{
+  const result=await api('/sacco/transactions/'+transactionId+'/decision',{method:'POST',body:JSON.stringify({decision:form.get('decision'),note:form.get('note')})});
+  event.currentTarget.reset();status('Withdrawal decision recorded: '+result.status+'.');
+  if(selectedFinancialMemberId)await refreshFinancial(selectedFinancialMemberId);
  }catch(error){status(error.message);}
 });
 })();
