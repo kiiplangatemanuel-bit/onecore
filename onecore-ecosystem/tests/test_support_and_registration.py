@@ -125,6 +125,8 @@ def test_registration_creates_inactive_user_and_verification_activates_it(monkey
         assert token not in delivery.payload_ciphertext
         verified = verify_email(EmailVerificationIn(token=token), db)
         assert verified["status"] == "verified"
+        db.refresh(delivery)
+        assert delivery.status == "cancelled"
         assert db.get(User, user.id).is_active is True
         with pytest.raises(Exception):
             verify_email(EmailVerificationIn(token=token), db)
