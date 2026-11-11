@@ -39,7 +39,7 @@ def _tables():
         "accounting_accounts", "accounting_journals", "accounting_journal_lines",
         "crm_contacts", "crm_leads", "procurement_suppliers",
         "procurement_purchase_orders", "pos_shifts", "pos_sales",
-        "school_classes", "school_learners", "accounting_invoices",
+        "school_classes", "school_learners", "accounting_invoices", "sacco_members",
         "status_alert_deliveries",
         "hr_employees", "hr_leave_requests", "hr_attendance_records",
         "payroll_rule_sets", "payroll_runs", "payroll_payslips",
@@ -48,7 +48,7 @@ def _tables():
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings",
         "accounting_fx_revaluations", "accounting_fx_settlements",
-        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+        "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance", "sacco_members",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
