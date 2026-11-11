@@ -133,6 +133,14 @@ def test_identity_email_outbox_is_account_scoped_and_worker_managed(monkeypatch)
                     text("UPDATE identity_email_deliveries SET status = 'delivered' WHERE id = :id"),
                     {"id": delivery_a_id},
                 )
+        assert connection.execute(
+            text(
+                "UPDATE identity_email_deliveries "
+                "SET status = 'cancelled', last_error = 'token_consumed', updated_at = now() "
+                "WHERE id = :id"
+            ),
+            {"id": delivery_a_id},
+        ).rowcount == 1
 
         connection.execute(text("RESET ROLE"))
         connection.execute(text(f'SET LOCAL ROLE "{WORKER_ROLE}"'))
