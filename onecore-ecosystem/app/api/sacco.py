@@ -44,8 +44,13 @@ def _member_query(db: Session, membership: Membership):
     return query
 
 
-def _member_for_membership(db: Session, membership: Membership, member_id: int) -> SaccoMember:
-    row = _member_query(db, membership).filter(SaccoMember.id == member_id).first()
+def _member_for_membership(
+    db: Session, membership: Membership, member_id: int, *, for_update: bool = False
+) -> SaccoMember:
+    query = _member_query(db, membership).filter(SaccoMember.id == member_id)
+    if for_update:
+        query = query.with_for_update()
+    row = query.first()
     if not row:
         raise HTTPException(404, "SACCO member not found")
     return row
@@ -193,7 +198,7 @@ def review_member_kyc(
     db: Session = Depends(get_db),
 ):
     _require_kyc_approver(membership)
-    row = _member_for_membership(db, membership, member_id)
+    row = _member_for_membership(db, membership, member_id, for_update=True)
     if row.status != "pending_kyc":
         raise HTTPException(409, "Only members awaiting KYC review can be decided")
     if row.created_by == user.id:
