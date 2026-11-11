@@ -27,7 +27,7 @@ SACCO_ROLE_PERMISSIONS = {
     "sacco_manager": {"read", "create", "update", "review", "deposit", "withdraw", "share_contribute", "approve_withdrawal"},
     "sacco_officer": {"read", "create"},
     "sacco_kyc_approver": {"read", "review"},
-    "sacco_treasurer": {"read", "deposit", "withdraw", "share_contribute"},
+    "sacco_treasurer": {"read", "create", "deposit", "withdraw", "share_contribute"},
     "sacco_auditor": {"read"},
 }
 
