@@ -2,8 +2,8 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy import (
-    CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, Text,
-    UniqueConstraint,
+    CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Numeric,
+    String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
@@ -17,6 +17,7 @@ class SaccoMember(Base):
     """Member register. Government identity data is encrypted separately from searchable fields."""
     __tablename__ = "sacco_members"
     __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_sacco_member_org_id"),
         UniqueConstraint("organization_id", "member_number", name="uq_sacco_member_org_number"),
         UniqueConstraint("organization_id", "identity_fingerprint", name="uq_sacco_member_org_identity"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_member_org_idempotency"),
@@ -48,7 +49,12 @@ class SaccoFinancialTransaction(Base):
     """Mutable workflow envelope; posted value is represented only by an immutable ledger entry."""
     __tablename__ = "sacco_financial_transactions"
     __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_sacco_financial_org_id"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_financial_org_idempotency"),
+        ForeignKeyConstraint(
+            ["organization_id", "member_id"], ["sacco_members.organization_id", "sacco_members.id"],
+            ondelete="RESTRICT", name="fk_sacco_financial_member_tenant",
+        ),
         CheckConstraint("account_type IN ('savings', 'shares')", name="ck_sacco_financial_account_type"),
         CheckConstraint("transaction_type IN ('deposit', 'withdrawal', 'share_contribution')", name="ck_sacco_financial_transaction_type"),
         CheckConstraint("status IN ('pending_approval', 'posted', 'rejected')", name="ck_sacco_financial_status"),
@@ -63,7 +69,7 @@ class SaccoFinancialTransaction(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id", ondelete="RESTRICT"), nullable=False, index=True)
+    member_id: Mapped[int] = mapped_column(nullable=False, index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     account_type: Mapped[str] = mapped_column(String(16), nullable=False)
     transaction_type: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -86,14 +92,23 @@ class SaccoLedgerEntry(Base):
     __tablename__ = "sacco_ledger_entries"
     __table_args__ = (
         UniqueConstraint("transaction_id", name="uq_sacco_ledger_transaction"),
+        ForeignKeyConstraint(
+            ["organization_id", "member_id"], ["sacco_members.organization_id", "sacco_members.id"],
+            ondelete="RESTRICT", name="fk_sacco_ledger_member_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "transaction_id"],
+            ["sacco_financial_transactions.organization_id", "sacco_financial_transactions.id"],
+            ondelete="RESTRICT", name="fk_sacco_ledger_transaction_tenant",
+        ),
         CheckConstraint("account_type IN ('savings', 'shares')", name="ck_sacco_ledger_account_type"),
         CheckConstraint("signed_amount <> 0", name="ck_sacco_ledger_nonzero_amount"),
         Index("ix_sacco_ledger_org_member_account", "organization_id", "member_id", "account_type", "created_at"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    member_id: Mapped[int] = mapped_column(ForeignKey("sacco_members.id", ondelete="RESTRICT"), nullable=False, index=True)
-    transaction_id: Mapped[int] = mapped_column(ForeignKey("sacco_financial_transactions.id", ondelete="RESTRICT"), nullable=False)
+    member_id: Mapped[int] = mapped_column(nullable=False, index=True)
+    transaction_id: Mapped[int] = mapped_column(nullable=False)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     account_type: Mapped[str] = mapped_column(String(16), nullable=False)
     signed_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
