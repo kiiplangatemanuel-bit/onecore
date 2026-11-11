@@ -17,7 +17,7 @@ class SaccoMember(Base):
     """Member register. Government identity data is encrypted separately from searchable fields."""
     __tablename__ = "sacco_members"
     __table_args__ = (
-        UniqueConstraint("organization_id", "id", name="uq_sacco_member_org_id"),
+        Index("uq_sacco_member_org_id", "organization_id", "id", unique=True),
         UniqueConstraint("organization_id", "member_number", name="uq_sacco_member_org_number"),
         UniqueConstraint("organization_id", "identity_fingerprint", name="uq_sacco_member_org_identity"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_member_org_idempotency"),
