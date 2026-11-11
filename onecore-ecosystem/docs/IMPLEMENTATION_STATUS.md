@@ -6,8 +6,8 @@ validation, integration, testing, documentation, deployment, monitoring and UAT
 evidence has been reviewed. The categories are functional groupings, not 75 separate
 microservices.
 
-**Reconciled:** 10 November 2026  
-**Implementation code head reviewed:** `f419c33756280cb43b896c4cc44bf0a97f01df48` (tracker-only reconciliation follows)
+**Reconciled:** 11 November 2026  
+**Implementation code head reviewed:** `7d988b1fec90ead942aa5f09c6813b34a11c3afa` (tracker-only reconciliation follows)
 
 ## Verified on current main
 
@@ -16,7 +16,9 @@ coverage:
 
 - Account registration, email verification and password reset using hashed,
   expiring, single-use tokens; password changes invalidate prior authentication
-  versions. SMTP delivery still requires deployment configuration.
+  versions. Verification/reset messages now enter a Fernet-encrypted transactional
+  outbox and are sent by a separate least-privilege worker; SMTP/provider setup still
+  requires deployment configuration.
 - JWT authentication, Argon2 password verification, PKCE-based portal sign-in,
   account TOTP enrollment/verification, encrypted authenticator seeds, hashed
   single-use recovery codes, privileged-role MFA enforcement, durable sessions,
@@ -27,8 +29,9 @@ coverage:
 - PostgreSQL tenant RLS policies and forced-RLS catalog checks. The current CI
   additionally assumes a non-owner `NOLOGIN NOSUPERUSER NOBYPASSRLS` role and
   tests actual tenant read/write isolation and append-only audit behavior on
-  `records`, `memberships` and `audit_events`.
-- Alembic migration chain through `0064_identity_sessions`, with CI upgrade,
+  `records`, `memberships` and `audit_events`, plus account-owner outbox isolation
+  and worker-only delivery-state updates on `identity_email_deliveries`.
+- Alembic migration chain through `0065_identity_email_outbox`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
   Procurement, POS, School, Hospital, Pharmacy/Laboratory and HR/Payroll. These
@@ -50,16 +53,60 @@ coverage:
   passed: 414 tests, 8 warnings. Migration upgrade/downgrade/re-upgrade,
   dependency audit, Python compilation, main frontend build and all ten portal
   builds passed.
-- The RLS behavior test uses a disposable CI-only role with grants limited to
-  memberships, records and audit events. It is not evidence that the production
+- The RLS behavior tests use disposable CI-only roles. The tenant suite covers
+  memberships, records and audit events; the identity-email suite separately checks
+  account-owner visibility/inserts, cancellation-only API updates and a
+  NOBYPASSRLS worker's queue access. This is not evidence that the production
   Supabase runtime roles have been provisioned or tested.
+- [PR #130](https://github.com/kiiplangatemanuel-bit/onecore/pull/130) added the
+  encrypted identity-email outbox and worker. CI run
+  [43008701790](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43008701790)
+  passed: migration upgrade/downgrade/re-upgrade, PostgreSQL RLS behavior,
+  dependency audit, Python compilation, main frontend build, all ten portal builds,
+  and **421 pytest tests with 8 warnings**. This is CI evidence, not live SMTP
+  deliverability or a production Supabase role rehearsal.
+
+## Identity email outbox increment (11 November 2026)
+
+Merged to main in [PR #130](https://github.com/kiiplangatemanuel-bit/onecore/pull/130),
+squash commit [7d988b1](https://github.com/kiiplangatemanuel-bit/onecore/commit/7d988b1fec90ead942aa5f09c6813b34a11c3afa):
+
+- Registration verification and password-reset requests create an outbox row in
+  the same transaction as the one-time token and existing audit event. SMTP I/O is
+  no longer performed inside the public API request.
+- Recipient, subject, body and one-time link are Fernet-encrypted using the separate
+  IDENTITY_EMAIL_ENCRYPTION_KEY. The token tables continue to store only token
+  digests; outbox idempotency keys are derived from those digests.
+- A dedicated worker claims rows with SKIP LOCKED, enforces expiry, retries with
+  bounded exponential backoff, recovers stale sending rows and records delivery
+  state/attempt count without logging message contents.
+- PostgreSQL forced RLS limits API reads/inserts to the account owner. API column
+  grants and policy permit cancellation of that account's pending/sending messages
+  only; only onecore_identity_email_worker can mark delivery outcomes.
+- Added CI-only worker role provisioning, PostgreSQL RLS tests, SQLite encryption/
+  retry/expiry tests, a Compose communications profile and
+  docs/IDENTITY_EMAIL_DELIVERY.md.
+
+CI run 43008701790 passed 421 tests, 8 warnings, migration upgrade/downgrade/
+re-upgrade, dependency audit, Python compilation, main frontend build and ten portal
+builds. See the verification evidence above.
+
+Remaining identity-email work: configure and rehearse the actual Supabase worker
+login role and API grants; supply the separate Fernet key and SMTP/STARTTLS settings;
+verify sender-domain SPF/DKIM/DMARC and deliverability; add bounce/complaint handling,
+queue-age alerts and an operator-safe dead-letter replay workflow. SMTP delivery is
+at-least-once, so a crash after provider acceptance can cause a duplicate. No live
+provider delivery or production deployment is claimed.
 
 ## Current outstanding work and release blockers
 
-1. **Production database role rehearsal:** provision the actual Supabase API and
-   worker roles with reviewed least-privilege grants, `NOBYPASSRLS`, no tenant-table
-   ownership and correct login membership. Run the RLS behavior suite against the
-   target Supabase project. CI uses a disposable local PostgreSQL role only.
+1. **Production database role rehearsal:** provision the actual Supabase API,
+   identity-email worker and other worker roles with reviewed least-privilege grants,
+   NOBYPASSRLS, no tenant-table ownership and correct login membership. For the
+   identity-email worker, set IDENTITY_EMAIL_WORKER_DATABASE_URL and
+   ONECORE_DATABASE_RUNTIME_ROLE=onecore_identity_email_worker. Run the RLS behavior
+   suite against the target Supabase project. CI uses disposable local PostgreSQL
+   roles only.
 2. **Backups and disaster recovery:** scheduled backup run
    [42746373375](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42746373375)
    stopped at its configuration preflight because these repository secrets are
@@ -74,9 +121,11 @@ coverage:
    Consequently no production `/health`, `/ready`, OpenAPI or provider-configuration
    probe has been verified.
 4. **Identity and communications:** organization-level MFA policy, passkeys/WebAuthn,
-   external OIDC/SSO, distributed rate limiting/lockout, a durable identity-email
-   outbox, and live SMTP domain authentication/deliverability remain open. The
-   current account MFA and session controls do not close these items.
+   external OIDC/SSO, distributed rate limiting/lockout, live SMTP domain
+   authentication/deliverability, bounce/complaint handling and the full multi-channel
+   notification engine remain open. The identity-email outbox is implemented, but
+   production still needs the dedicated worker role/URL, encryption key, SMTP sender
+   configuration and operational queue monitoring.
 5. **External integrations:** M-Pesa, eTIMS, SHA, bank, SMS, email, WhatsApp, AI,
    biometric and hardware connections still require authorized production
    credentials, provider sandbox/UAT, callbacks, reconciliation and formal
