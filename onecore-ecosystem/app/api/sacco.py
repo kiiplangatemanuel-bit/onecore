@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from app.core.authorization import branch_scope_ids, can_access_branch, require_permission
+from app.core.authorization import branch_scope_ids, can_access_branch
 from app.core.database import get_db
 from app.core.models import AuditEvent, Branch, Membership, User
 from app.core.sacco_models import SaccoMember
@@ -14,12 +14,24 @@ from app.services.sacco_membership import KYCConfigurationError, decrypt_kyc_pay
 
 router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-membership"])
 KYC_ACCESS_WINDOW = timedelta(minutes=30)
+SACCO_ROLE_PERMISSIONS = {
+    "org_admin": {"read", "create", "update", "review"},
+    "sacco_manager": {"read", "create", "update", "review"},
+    "sacco_officer": {"read", "create"},
+    "sacco_kyc_approver": {"read", "review"},
+    "sacco_treasurer": {"read", "create"},
+    "sacco_auditor": {"read"},
+}
+
+
+def _require_sacco_permission(membership: Membership, action: str) -> None:
+    role = (membership.role or "").strip().lower()
+    if action not in SACCO_ROLE_PERMISSIONS.get(role, set()):
+        raise HTTPException(403, "Insufficient SACCO permissions")
 
 
 def _require_kyc_approver(membership: Membership) -> None:
-    role = (membership.role or "").strip().lower()
-    if role not in {"org_admin", "sacco_manager", "sacco_kyc_approver"}:
-        raise HTTPException(403, "A SACCO KYC approver role is required")
+    _require_sacco_permission(membership, "review")
 
 
 def _validate_branch(db: Session, membership: Membership, branch_id: str | None) -> None:
@@ -80,7 +92,7 @@ def create_member(
     membership: Membership = Depends(active_membership),
     db: Session = Depends(get_db),
 ):
-    require_permission(membership, "create")
+    _require_sacco_permission(membership, "create")
     _validate_branch(db, membership, payload.branch_id)
     safe_payload = payload.model_dump(mode="json", exclude={"idempotency_key"})
     try:
@@ -148,7 +160,7 @@ def list_members(
     membership: Membership = Depends(active_membership),
     db: Session = Depends(get_db),
 ):
-    require_permission(membership, "read")
+    _require_sacco_permission(membership, "read")
     query = _member_query(db, membership)
     if branch_id:
         _validate_branch(db, membership, branch_id)
@@ -166,7 +178,7 @@ def get_member(
     membership: Membership = Depends(active_membership),
     db: Session = Depends(get_db),
 ):
-    require_permission(membership, "read")
+    _require_sacco_permission(membership, "read")
     return _member_out(_member_for_membership(db, membership, member_id))
 
 
