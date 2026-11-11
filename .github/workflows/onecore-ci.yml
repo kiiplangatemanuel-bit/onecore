@@ -118,6 +118,10 @@ jobs:
                       "TO onecore_ci_runtime"
                   ))
                   connection.execute(text(
+                      "GRANT UPDATE (status, last_error, updated_at) "
+                      "ON TABLE public.identity_email_deliveries TO onecore_ci_runtime"
+                  ))
+                  connection.execute(text(
                       "GRANT EXECUTE ON FUNCTION public.onecore_is_org_admin(integer), "
                       "public.onecore_is_platform_admin(), "
                       "public.onecore_is_org_owner(integer) TO onecore_ci_runtime"
