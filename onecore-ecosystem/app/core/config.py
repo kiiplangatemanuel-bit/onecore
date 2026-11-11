@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     status_alert_worker_database_url: str = ""
     identity_email_encryption_key: str = ""
     identity_email_worker_database_url: str = ""
+    sacco_kyc_encryption_key: str = ""
+    sacco_kyc_hmac_key: str = ""
 
 
     @property
