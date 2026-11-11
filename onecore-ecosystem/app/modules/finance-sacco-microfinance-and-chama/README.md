@@ -21,4 +21,4 @@ See docs/SACCO_MEMBERSHIP_KYC.md for roles, key configuration, endpoints and ope
 ## Remaining implementation
 Savings accounts, deposits/withdrawals, immutable share/contribution ledger, groups/chama, loan products and applications, affordability assessment, guarantors/collateral, multi-level approvals, disbursement, interest/penalty schedules, repayments, arrears/restructuring, dividends, statements, member portals, meetings/voting, portfolio risk analytics, M-Pesa/bank integrations, monitoring, backup/restore, end-to-end UAT and production role rehearsal remain outstanding.
 
-The module must remain partial/disabled for production use until its complete category-specific acceptance evidence is reviewed.
+Do not mark or expose this partial slice as a production-ready SACCO, Microfinance or Chama product until the complete category-specific acceptance evidence is reviewed.
