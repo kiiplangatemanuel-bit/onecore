@@ -72,6 +72,7 @@ def upgrade():
         sa.Column("member_id", sa.Integer(), nullable=False),
         sa.Column("product_id", sa.Integer(), nullable=False),
         sa.Column("branch_id", sa.String(36), sa.ForeignKey("branches.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("currency", sa.String(3), nullable=False),
         sa.Column("requested_amount", sa.Numeric(18, 2), nullable=False),
         sa.Column("term_months", sa.Integer(), nullable=False),
         sa.Column("annual_interest_rate", sa.Numeric(7, 4), nullable=False),
