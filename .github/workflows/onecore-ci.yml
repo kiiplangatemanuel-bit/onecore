@@ -82,6 +82,13 @@ jobs:
                   connection.execute(text(
                       "GRANT USAGE ON SCHEMA public TO onecore_api"
                   ))
+                  connection.execute(text(
+                      "CREATE ROLE onecore_api NOLOGIN NOSUPERUSER "
+                      "NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                  ))
+                  connection.execute(text(
+                      "GRANT USAGE ON SCHEMA public TO onecore_api"
+                  ))
           finally:
               engine.dispose()
           PY
