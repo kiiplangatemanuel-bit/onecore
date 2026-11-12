@@ -1,5 +1,5 @@
 """Tenant-scoped SACCO loan products, origination, security and projected schedules."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -79,7 +79,7 @@ class SaccoLoanApplication(Base):
     purpose: Mapped[str] = mapped_column(String(500), nullable=False)
     monthly_net_income: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     monthly_existing_debt: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"), server_default="0")
-    first_repayment_date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    first_repayment_date: Mapped[date] = mapped_column(Date, nullable=False)
     assessment_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
     debt_service_ratio_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_monthly_installment: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
@@ -173,7 +173,7 @@ class SaccoLoanInstallment(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     application_id: Mapped[int] = mapped_column(nullable=False, index=True)
     installment_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    due_date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
     principal_due: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     interest_due: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     total_due: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
