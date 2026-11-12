@@ -11,11 +11,13 @@ from app.core.models import AuditEvent, Branch, Membership, Organization, User
 from app.core.sacco_models import (SaccoFinancialTransaction, SaccoLedgerEntry, SaccoMember, SaccoLoanProduct, SaccoLoanApplication, SaccoLoanLedgerEntry)
 from app.core.sacco_schemas import (
     SaccoFinancialTransactionIn, SaccoKycReviewIn, SaccoMemberCreateIn,
-    SaccoWithdrawalDecisionIn,
+    SaccoWithdrawalDecisionIn, SaccoLoanProductCreateIn, SaccoLoanApplicationCreateIn,
+    SaccoLoanAssessmentIn, SaccoLoanDecisionIn, SaccoLoanDisbursementIn, SaccoLoanRepaymentIn,
 )
 from app.core.security import current_user
 from app.core.tenancy import active_membership
-from app.services.sacco_lending import calculate_debt_service_ratio, calculate_flat_loan_terms, allocate_repayment\nfrom app.services.sacco_membership import (
+from app.services.sacco_lending import calculate_debt_service_ratio, calculate_flat_loan_terms, allocate_repayment
+from app.services.sacco_membership import (
     KYCConfigurationError, decrypt_kyc_payload, encrypt_kyc_payload,
     identity_fingerprint, request_fingerprint, transaction_fingerprint,
 )
@@ -25,7 +27,9 @@ KYC_ACCESS_WINDOW = timedelta(minutes=30)
 SACCO_ROLE_PERMISSIONS = {
     "org_admin": {"read", "create", "update", "review", "deposit", "withdraw", "share_contribute", "approve_withdrawal", "manage_loan_products", "create_loan", "assess_loan", "decide_loan", "disburse_loan", "repay_loan"},
     "sacco_manager": {"read", "create", "update", "review", "deposit", "withdraw", "share_contribute", "approve_withdrawal", "manage_loan_products", "create_loan", "assess_loan", "decide_loan", "disburse_loan", "repay_loan"},
-    "sacco_officer": {"read", "create", "create_loan"},\n    "sacco_credit_officer": {"read", "create_loan", "assess_loan"},\n    "sacco_credit_approver": {"read", "decide_loan"},
+    "sacco_officer": {"read", "create", "create_loan"},
+    "sacco_credit_officer": {"read", "create_loan", "assess_loan"},
+    "sacco_credit_approver": {"read", "decide_loan"},
     "sacco_kyc_approver": {"read", "review"},
     "sacco_treasurer": {"read", "create", "deposit", "withdraw", "share_contribute", "disburse_loan", "repay_loan"},
     "sacco_auditor": {"read"},
