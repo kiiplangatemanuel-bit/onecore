@@ -29,17 +29,19 @@ coverage:
 - PostgreSQL tenant RLS policies and forced-RLS catalog checks. CI uses a
   non-owner NOLOGIN NOSUPERUSER NOBYPASSRLS behavior role and verifies actual
   tenant read/write isolation on records, memberships, audit_events, sacco_members,
-  sacco_financial_transactions, sacco_ledger_entries and all five SACCO loan tables
-  (products, applications, guarantors, collateral and projected installments).
-  Separate PostgreSQL catalog tests verify the onecore_api role's column-level loan
-  workflow grants and absence of table-level UPDATE/DELETE on product/installment
-  tables. Identity-email owner/worker RLS is tested separately. This is disposable
+  sacco_financial_transactions, sacco_ledger_entries and all six SACCO loan tables
+  (products, applications, guarantors, collateral, projected installments and
+  disbursement evidence). PostgreSQL catalog tests verify the onecore_api role's
+  column-level loan/disbursement grants and absence of table-level UPDATE/DELETE on
+  product, installment and disbursement tables. Identity-email owner/worker RLS is
+  tested separately. This is disposable
   CI PostgreSQL evidence, not production Supabase role provisioning.
-- Alembic migration chain through `0068_sacco_loan_origination`, with CI upgrade,
+- Alembic migration chain through `0069_sacco_loan_disbursement`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
   Procurement, POS, School, Hospital, Pharmacy/Laboratory, HR/Payroll and a
-  partial SACCO member/KYC, savings/share subledger and loan-origination workflow. These are partial
+  partial SACCO member/KYC, savings/share subledger, loan origination and staff-reviewed
+  disbursement-evidence workflow. These are partial
   applications with real models/migrations, APIs, validation, authorization,
   audit and tests; their presence does not mean their full master requirements
   or production acceptance are complete.
@@ -94,7 +96,7 @@ coverage:
   builds passed. Vercel previews for the developers, admin and community portals
   were rate-limited; the main OneCore deployment status was successful.
 
-## SACCO loan origination and credit governance increment (12 November 2026)
+## SACCO loan origination, credit governance and disbursement increment (12 November 2026)
 
 Merged in [PR #133](https://github.com/kiiplangatemanuel-bit/onecore/pull/133),
 squash commit [37e0414](https://github.com/kiiplangatemanuel-bit/onecore/commit/37e04146cb56cb1b741a95ced3ea2870471d5658):
@@ -109,9 +111,19 @@ squash commit [37e0414](https://github.com/kiiplangatemanuel-bit/onecore/commit/
 - Credit assessment calculates an estimated monthly installment and debt-service
   ratio. Guarantor consent and collateral verification require independent staff
   attestations; approval is separate from both application creation and assessment.
-- Approval stops at approved_pending_disbursement and creates a projected
-  reducing-balance schedule. No provider disbursement, repayment, accrual or
-  settlement is initiated or claimed.
+- Approval creates a projected reducing-balance schedule. PR #134 adds a full-principal
+  disbursement evidence request and independent treasurer review. Only a verified
+  review changes the application to active and activates the schedule. This is a staff
+  attestation against an external statement/voucher reference; it does not initiate or
+  independently confirm a bank/M-Pesa payment. No partial disbursement, repayments,
+  accrual or settlement posting is included.
+- Migration 0069 adds tenant-consistent disbursement evidence, organization-scoped
+  idempotency, unique organization/channel/reference protection, one-pending/one-
+  verified indexes, forced PostgreSQL RLS and column-level onecore_api review grants.
+  A database trigger prevents activation without verified evidence, requires an
+  independent active treasurer/admin reviewer, and makes reviewed evidence immutable.
+- The /sacco workspace now supports evidence submission, history and independent
+  review. API and UI label this as staff-reviewed evidence, not provider settlement.
 - The CI-only onecore_api role is created before migrations so migration grants
   are exercised. PostgreSQL tests verify tenant RLS and column-level grants;
   docs/SACCO_LOAN_ORIGINATION.md records the workflow and explicit gaps.
@@ -156,7 +168,7 @@ at-least-once, so a crash after provider acceptance can cause a duplicate. No li
 provider delivery or production deployment is claimed.
 
 
-## SACCO member, KYC, savings/share and loan-origination increments (11–12 November 2026)
+## SACCO member/KYC, savings/share, loan origination and disbursement increments (11–12 November 2026)
 
 The SACCO/Microfinance/Chama category is partially implemented on main; it is
 not a complete lending, cooperative or microfinance platform.
@@ -172,22 +184,30 @@ not a complete lending, cooperative or microfinance platform.
 - PR #133 added loan products, idempotent member applications, reducing-balance
   affordability assessment, staff-recorded guarantor consent, collateral
   verification, independent credit approval and projected installment schedules.
-  The workflow ends at approved_pending_disbursement; no actual disbursement or
-  repayment posting is implemented.
-- Migrations 0066_sacco_membership_kyc, 0067_sacco_member_ledger and
-  0068_sacco_loan_origination create the domain tables, tenant-consistent composite
-  foreign keys, forced RLS and restricted onecore_api grants. PostgreSQL CI also
-  tests loan-table tenant isolation and column-level privileges.
+- PR #134 added full-principal disbursement evidence requests, manager/treasurer
+  segregation, idempotency, unique external-reference protection, rejection/retry,
+  database-enforced four-eyes review and schedule activation after staff verification.
+  It does not initiate or independently validate a provider payment.
+- Migrations 0066_sacco_membership_kyc, 0067_sacco_member_ledger,
+  0068_sacco_loan_origination and 0069_sacco_loan_disbursement create the domain
+  tables, tenant-consistent composite foreign keys, forced RLS and restricted
+  onecore_api grants. PostgreSQL CI tests tenant isolation, the activation/review
+  triggers and column-level privileges.
 - API and UI are available under /api/v1/sacco and /sacco. Documentation:
   docs/SACCO_MEMBERSHIP_KYC.md, docs/SACCO_SAVINGS_LEDGER.md and
   docs/SACCO_LOAN_ORIGINATION.md.
-- Post-merge main run 43206767455 passed 459 tests with 8 warnings, migration
-  upgrade/downgrade/re-upgrade, dependency audit, Python compilation, main frontend
-  build and all ten portal builds.
+- PR #134 [43212371483](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43212371483)
+  and post-merge main run
+  [43212591873](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43212591873)
+  both passed **463 tests with 8 warnings**, migration upgrade/downgrade/re-upgrade,
+  PostgreSQL RLS and grant tests, dependency audit, Python compilation, main frontend
+  build and all ten portal builds. Merge commit:
+  [539527e](https://github.com/kiiplangatemanuel-bit/onecore/commit/539527e02a91d5d3a7081dfc9cce873d42daf768).
 
 Remaining SACCO/Microfinance/Chama scope: product update/deactivation and fees;
-verified loan disbursement and settlement; schedule activation only after confirmed
-value date/amount; repayments and allocation waterfall; partial/early settlement;
+live bank/M-Pesa disbursement initiation, callback/statement reconciliation and
+provider-confirmed settlement (the new workflow is staff attestation only);
+repayment receipts and allocation waterfall; partial/early settlement;
 interest and penalty accrual; arrears ageing, collections, rescheduling,
 restructuring, write-offs and reversals; member statements and digital self-service;
 guarantor exposure aggregation and member-wide credit limits; collateral document
@@ -235,9 +255,11 @@ Internal deposit/share entries are not proof of settled cash, bank or M-Pesa pay
 6. **Specialist scope:** Accounting, CRM, Procurement, POS, School, Hospital,
    Pharmacy/Laboratory, HR/Payroll and SACCO/Microfinance/Chama still need
    feature-by-feature completion, fuller user workflows and UAT. SACCO currently
-   covers member/KYC, a limited savings/share subledger and loan origination through
-   projected schedules; verified disbursement, repayments, accruals, arrears,
-   groups/chama, dividends, statements and GL integration remain open. Hotel, Restaurant, Property, Services, E-commerce, Website Builder,
+   covers member/KYC, a limited savings/share subledger, loan origination and
+   staff-reviewed full-principal disbursement evidence/schedule activation. Live
+   provider settlement, repayments, accruals, arrears, groups/chama, dividends,
+   statements and GL integration remain open. Hotel, Restaurant, Property, Services,
+   E-commerce, Website Builder,
    central CMS and other product categories likewise need their own reviewed
    vertical slices; a catalogue folder or manifest is not implementation evidence.
 7. **Frontend and quality:** complete responsive workspaces, English/Kiswahili
