@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint,
-    Index, Integer, Numeric, String, Text, UniqueConstraint,
+    Index, Integer, Numeric, String, Text, UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
