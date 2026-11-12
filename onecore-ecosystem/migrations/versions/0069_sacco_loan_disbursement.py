@@ -138,9 +138,7 @@ def upgrade():
             LANGUAGE plpgsql
             AS $sacco_loan_activation$
             BEGIN
-                IF NEW.status = 'active' AND
-                   (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) AND
-                   NOT EXISTS (
+                IF NEW.status = 'active' AND NOT EXISTS (
                        SELECT 1 FROM public.sacco_loan_disbursements d
                        WHERE d.organization_id = NEW.organization_id
                          AND d.application_id = NEW.id
