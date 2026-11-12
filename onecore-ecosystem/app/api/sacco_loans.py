@@ -714,6 +714,8 @@ def request_loan_disbursement(
         raise HTTPException(409, "Disbursement currency must match the approved loan product")
     if payload.value_date >= application.first_repayment_date:
         raise HTTPException(409, "Disbursement value date must precede the first contractual repayment date")
+    if application.decided_at and payload.value_date < application.decided_at.date():
+        raise HTTPException(409, "Disbursement value date cannot precede the credit approval date")
 
     pending = db.query(SaccoLoanDisbursement).filter_by(
         organization_id=membership.organization_id, application_id=application.id,
