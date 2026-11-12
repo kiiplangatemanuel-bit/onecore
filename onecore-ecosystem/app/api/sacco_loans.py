@@ -1,0 +1,648 @@
+"""Tenant- and branch-scoped SACCO loan origination, credit checks and approvals."""
+from datetime import date, datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.core.authorization import branch_scope_ids, can_access_branch
+from app.core.database import get_db
+from app.core.models import AuditEvent, Branch, Membership, Organization, User
+from app.core.sacco_models import SaccoMember
+from app.core.sacco_loan_models import (
+    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanGuarantor,
+    SaccoLoanInstallment, SaccoLoanProduct,
+)
+from app.core.sacco_loan_schemas import (
+    SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
+    SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanGuarantorConsentIn,
+    SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
+)
+from app.core.security import current_user
+from app.core.tenancy import active_membership
+from app.services.sacco_loans import monthly_installment, projected_schedule
+from app.services.sacco_membership import transaction_fingerprint
+
+router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-loans"])
+
+LOAN_PERMISSIONS = {
+    "org_admin": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide"},
+    "sacco_manager": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide"},
+    "sacco_officer": {"read", "create_application", "add_guarantor", "add_collateral"},
+    "sacco_treasurer": {"read"},
+    "sacco_credit_officer": {"read", "create_application", "add_guarantor", "add_collateral", "assess"},
+    "sacco_credit_approver": {"read", "decide"},
+    "sacco_guarantor_verifier": {"read", "record_consent", "verify_collateral"},
+    "sacco_auditor": {"read"},
+}
+
+
+def _require_permission(membership: Membership, action: str) -> None:
+    role = (membership.role or "").strip().lower()
+    if action not in LOAN_PERMISSIONS.get(role, set()):
+        raise HTTPException(403, "Insufficient SACCO loan permissions")
+
+
+def _validate_branch(db: Session, membership: Membership, branch_id: str | None) -> None:
+    allowed = branch_scope_ids(membership)
+    if branch_id is None:
+        if allowed is not None:
+            raise HTTPException(403, "Select an authorized branch for this membership")
+        return
+    branch = db.query(Branch).filter_by(
+        id=branch_id, organization_id=membership.organization_id, is_active=True
+    ).first()
+    if not branch or not can_access_branch(membership, branch_id):
+        raise HTTPException(404, "Branch not found")
+
+
+def _product_query(db: Session, membership: Membership):
+    query = db.query(SaccoLoanProduct).filter(
+        SaccoLoanProduct.organization_id == membership.organization_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        query = query.filter(or_(
+            SaccoLoanProduct.branch_id.is_(None),
+            SaccoLoanProduct.branch_id.in_(allowed) if allowed else SaccoLoanProduct.branch_id.is_(None),
+        ))
+    return query
+
+
+def _application_query(db: Session, membership: Membership):
+    query = db.query(SaccoLoanApplication).filter(
+        SaccoLoanApplication.organization_id == membership.organization_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            query = query.filter(SaccoLoanApplication.id == -1)
+        else:
+            query = query.filter(SaccoLoanApplication.branch_id.in_(allowed))
+    return query
+
+
+def _member_for_membership(db: Session, membership: Membership, member_id: int) -> SaccoMember:
+    query = db.query(SaccoMember).filter_by(
+        organization_id=membership.organization_id, id=member_id
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            query = query.filter(SaccoMember.id == -1)
+        else:
+            query = query.filter(SaccoMember.branch_id.in_(allowed))
+    member = query.first()
+    if not member:
+        raise HTTPException(404, "SACCO member not found")
+    return member
+
+
+def _application_for_membership(
+    db: Session, membership: Membership, application_id: int, *, for_update: bool = False
+) -> SaccoLoanApplication:
+    query = _application_query(db, membership).filter(SaccoLoanApplication.id == application_id)
+    if for_update:
+        query = query.with_for_update()
+    application = query.first()
+    if not application:
+        raise HTTPException(404, "SACCO loan application not found")
+    return application
+
+
+def _product_for_application(
+    db: Session, membership: Membership, application: SaccoLoanApplication
+) -> SaccoLoanProduct:
+    product = _product_query(db, membership).filter(
+        SaccoLoanProduct.id == application.product_id
+    ).first()
+    if not product:
+        raise HTTPException(404, "SACCO loan product not found")
+    return product
+
+
+def _audit(
+    db: Session, user: User, membership: Membership, action: str,
+    resource_type: str, resource_id: int, detail: str = "",
+) -> None:
+    db.add(AuditEvent(
+        organization_id=membership.organization_id, actor_user_id=user.id,
+        action=action, resource_type=resource_type, resource_id=str(resource_id),
+        detail=detail[:500],
+    ))
+
+
+def _product_out(row: SaccoLoanProduct) -> dict:
+    return {
+        "id": row.id, "organization_id": row.organization_id, "branch_id": row.branch_id,
+        "code": row.code, "name": row.name, "currency": row.currency,
+        "minimum_principal": format(row.minimum_principal, ".2f"),
+        "maximum_principal": format(row.maximum_principal, ".2f"),
+        "annual_interest_rate_bps": row.annual_interest_rate_bps,
+        "minimum_term_months": row.minimum_term_months,
+        "maximum_term_months": row.maximum_term_months,
+        "minimum_guarantors": row.minimum_guarantors,
+        "maximum_debt_service_ratio_bps": row.maximum_debt_service_ratio_bps,
+        "requires_collateral": row.requires_collateral, "is_active": row.is_active,
+        "created_at": row.created_at,
+    }
+
+
+def _application_out(row: SaccoLoanApplication) -> dict:
+    return {
+        "id": row.id, "organization_id": row.organization_id, "product_id": row.product_id,
+        "member_id": row.member_id, "branch_id": row.branch_id,
+        "principal": format(row.principal, ".2f"), "term_months": row.term_months,
+        "purpose": row.purpose, "monthly_net_income": format(row.monthly_net_income, ".2f"),
+        "monthly_existing_debt": format(row.monthly_existing_debt, ".2f"),
+        "first_repayment_date": row.first_repayment_date.isoformat(),
+        "assessment_status": row.assessment_status,
+        "debt_service_ratio_bps": row.debt_service_ratio_bps,
+        "estimated_monthly_installment": (
+            format(row.estimated_monthly_installment, ".2f")
+            if row.estimated_monthly_installment is not None else None
+        ),
+        "assessment_note": row.assessment_note, "assessed_by": row.assessed_by,
+        "assessed_at": row.assessed_at, "status": row.status,
+        "decided_by": row.decided_by, "decided_at": row.decided_at,
+        "decision_note": row.decision_note, "created_by": row.created_by,
+        "created_at": row.created_at,
+    }
+
+
+def _guarantor_out(row: SaccoLoanGuarantor) -> dict:
+    return {
+        "id": row.id, "application_id": row.application_id, "member_id": row.member_id,
+        "guaranteed_amount": format(row.guaranteed_amount, ".2f"),
+        "consent_status": row.consent_status, "consent_method": row.consent_method,
+        "consent_reference": row.consent_reference, "consent_note": row.consent_note,
+        "consent_recorded_by": row.consent_recorded_by, "consent_at": row.consent_at,
+        "created_by": row.created_by, "created_at": row.created_at,
+    }
+
+
+def _collateral_out(row: SaccoLoanCollateral) -> dict:
+    return {
+        "id": row.id, "application_id": row.application_id,
+        "collateral_type": row.collateral_type, "description": row.description,
+        "declared_value": format(row.declared_value, ".2f"),
+        "document_reference": row.document_reference, "status": row.status,
+        "verification_note": row.verification_note, "verified_by": row.verified_by,
+        "verified_at": row.verified_at, "created_by": row.created_by,
+    }
+
+
+def _installment_out(row: SaccoLoanInstallment) -> dict:
+    return {
+        "id": row.id, "installment_number": row.installment_number,
+        "due_date": row.due_date.isoformat(), "principal_due": format(row.principal_due, ".2f"),
+        "interest_due": format(row.interest_due, ".2f"), "total_due": format(row.total_due, ".2f"),
+        "currency": row.currency, "status": row.status,
+    }
+
+
+def _advance_application(db: Session, membership: Membership, application: SaccoLoanApplication, product: SaccoLoanProduct) -> None:
+    guarantors = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, application_id=application.id,
+        consent_status="accepted",
+    ).all()
+    guarantor_total = sum((row.guaranteed_amount for row in guarantors), Decimal("0.00"))
+    guarantors_ready = (
+        len(guarantors) >= product.minimum_guarantors
+        and (product.minimum_guarantors == 0 or guarantor_total >= application.principal)
+    )
+    collateral_ready = True
+    if product.requires_collateral:
+        collateral = db.query(SaccoLoanCollateral).filter_by(
+            organization_id=membership.organization_id, application_id=application.id,
+            status="verified",
+        ).all()
+        collateral_ready = sum((row.declared_value for row in collateral), Decimal("0.00")) >= application.principal
+    if application.assessment_status != "eligible":
+        application.status = "pending_assessment"
+    elif not guarantors_ready or not collateral_ready:
+        application.status = "pending_guarantors"
+    else:
+        application.status = "pending_approval"
+
+
+@router.post("/loan-products", status_code=201)
+def create_loan_product(
+    payload: SaccoLoanProductCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "manage_products")
+    _validate_branch(db, membership, payload.branch_id)
+    organization = db.get(Organization, membership.organization_id)
+    if not organization:
+        raise HTTPException(404, "Organization not found")
+    if payload.currency != (organization.currency or "").upper():
+        raise HTTPException(409, "Loan product currency must match the organization's configured currency")
+    duplicate = _product_query(db, membership).filter(SaccoLoanProduct.code == payload.code).first()
+    if duplicate:
+        raise HTTPException(409, "Loan product code already exists")
+    row = SaccoLoanProduct(
+        organization_id=membership.organization_id, branch_id=payload.branch_id,
+        code=payload.code, name=payload.name, currency=payload.currency,
+        minimum_principal=payload.minimum_principal, maximum_principal=payload.maximum_principal,
+        annual_interest_rate_bps=payload.annual_interest_rate_bps,
+        minimum_term_months=payload.minimum_term_months, maximum_term_months=payload.maximum_term_months,
+        minimum_guarantors=payload.minimum_guarantors,
+        maximum_debt_service_ratio_bps=payload.maximum_debt_service_ratio_bps,
+        requires_collateral=payload.requires_collateral, is_active=True, created_by=user.id,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        _audit(db, user, membership, "sacco.loan_product.created", "sacco_loan_product", row.id,
+               f"code={row.code};currency={row.currency};branch_id={row.branch_id or ''}")
+        db.commit()
+        db.refresh(row)
+        return _product_out(row)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Loan product code conflicts with an existing product")
+
+
+@router.get("/loan-products")
+def list_loan_products(
+    active_only: bool = True,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    query = _product_query(db, membership)
+    if active_only:
+        query = query.filter(SaccoLoanProduct.is_active.is_(True))
+    rows = query.order_by(SaccoLoanProduct.code.asc(), SaccoLoanProduct.id.asc()).all()
+    return {"items": [_product_out(row) for row in rows]}
+
+
+@router.post("/loan-applications", status_code=201)
+def create_loan_application(
+    payload: SaccoLoanApplicationCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "create_application")
+    member = _member_for_membership(db, membership, payload.member_id)
+    if member.status != "active":
+        raise HTTPException(409, "Loan applications require an active, KYC-verified member")
+    product = _product_query(db, membership).filter(
+        SaccoLoanProduct.id == payload.product_id, SaccoLoanProduct.is_active.is_(True)
+    ).first()
+    if not product:
+        raise HTTPException(404, "Active loan product not found")
+    if product.branch_id and product.branch_id != member.branch_id:
+        raise HTTPException(409, "Loan product is not available to the member's branch")
+    if payload.principal < product.minimum_principal or payload.principal > product.maximum_principal:
+        raise HTTPException(422, "Requested principal is outside the loan product limits")
+    if not product.minimum_term_months <= payload.term_months <= product.maximum_term_months:
+        raise HTTPException(422, "Requested term is outside the loan product limits")
+    fingerprint = transaction_fingerprint(payload.model_dump(mode="json", exclude={"idempotency_key"}))
+    replay = db.query(SaccoLoanApplication).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if replay:
+        if replay.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for a different loan application")
+        return _application_out(replay)
+    row = SaccoLoanApplication(
+        organization_id=membership.organization_id, product_id=product.id, member_id=member.id,
+        branch_id=member.branch_id, principal=payload.principal, term_months=payload.term_months,
+        purpose=payload.purpose, monthly_net_income=payload.monthly_net_income,
+        monthly_existing_debt=payload.monthly_existing_debt,
+        first_repayment_date=payload.first_repayment_date, assessment_status="pending",
+        status="pending_assessment", created_by=user.id, idempotency_key=payload.idempotency_key,
+        request_fingerprint=fingerprint,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        _audit(db, user, membership, "sacco.loan_application.created", "sacco_loan_application", row.id,
+               f"product_id={product.id};member_id={member.id};status=pending_assessment")
+        db.commit()
+        db.refresh(row)
+        return _application_out(row)
+    except IntegrityError:
+        db.rollback()
+        replay = db.query(SaccoLoanApplication).filter_by(
+            organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+        ).first()
+        if replay and replay.request_fingerprint == fingerprint:
+            return _application_out(replay)
+        raise HTTPException(409, "Loan application idempotency key conflicts with an existing request")
+
+
+@router.get("/loan-applications")
+def list_loan_applications(
+    status: str | None = Query(default=None, pattern=r"^(pending_assessment|pending_guarantors|pending_approval|approved_pending_disbursement|rejected)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    query = _application_query(db, membership)
+    if status:
+        query = query.filter(SaccoLoanApplication.status == status)
+    total = query.count()
+    rows = query.order_by(SaccoLoanApplication.created_at.desc(), SaccoLoanApplication.id.desc()).offset(offset).limit(limit).all()
+    return {"items": [_application_out(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/loan-applications/{application_id}")
+def get_loan_application(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    return _application_out(_application_for_membership(db, membership, application_id))
+
+
+@router.post("/loan-applications/{application_id}/guarantors", status_code=201)
+def add_loan_guarantor(
+    application_id: int,
+    payload: SaccoLoanGuarantorCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "add_guarantor")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    if application.status not in {"pending_assessment", "pending_guarantors"}:
+        raise HTTPException(409, "Guarantors cannot be changed after an application reaches approval")
+    member = _member_for_membership(db, membership, payload.member_id)
+    if member.status != "active":
+        raise HTTPException(409, "Only active members can guarantee a loan")
+    if member.id == application.member_id:
+        raise HTTPException(422, "A borrower cannot guarantee their own loan")
+    duplicate = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, application_id=application.id, member_id=member.id
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "This member is already recorded as a guarantor")
+    product = _product_for_application(db, membership, application)
+    existing_total = db.query(func.coalesce(func.sum(SaccoLoanGuarantor.guaranteed_amount), 0)).filter(
+        SaccoLoanGuarantor.organization_id == membership.organization_id,
+        SaccoLoanGuarantor.application_id == application.id,
+        SaccoLoanGuarantor.consent_status.in_(["pending", "accepted"]),
+    ).scalar()
+    if Decimal(str(existing_total or "0")) + payload.guaranteed_amount > application.principal:
+        raise HTTPException(422, "Combined pending and accepted guarantees cannot exceed the loan principal")
+    row = SaccoLoanGuarantor(
+        organization_id=membership.organization_id, application_id=application.id,
+        member_id=member.id, guaranteed_amount=payload.guaranteed_amount,
+        consent_status="pending", created_by=user.id,
+    )
+    db.add(row)
+    _advance_application(db, membership, application, product)
+    db.flush()
+    _audit(db, user, membership, "sacco.loan_guarantor.added", "sacco_loan_guarantor", row.id,
+           f"application_id={application.id};member_id={member.id};consent_status=pending")
+    db.commit()
+    db.refresh(row)
+    return _guarantor_out(row)
+
+
+@router.get("/loan-applications/{application_id}/guarantors")
+def list_loan_guarantors(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    rows = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).order_by(SaccoLoanGuarantor.id.asc()).all()
+    return {"items": [_guarantor_out(row) for row in rows]}
+
+
+@router.post("/loan-guarantors/{guarantor_id}/consent")
+def record_loan_guarantor_consent(
+    guarantor_id: int,
+    payload: SaccoLoanGuarantorConsentIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "record_consent")
+    row = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, id=guarantor_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Loan guarantor record not found")
+    application = _application_for_membership(db, membership, row.application_id, for_update=True)
+    if application.status in {"approved_pending_disbursement", "rejected"}:
+        raise HTTPException(409, "Guarantor consent is locked after the credit decision")
+    if row.consent_status != "pending":
+        raise HTTPException(409, "Guarantor consent has already been recorded")
+    if application.created_by == user.id or row.created_by == user.id:
+        raise HTTPException(403, "The application or guarantor recorder cannot attest the guarantor's consent")
+    row.consent_status = "accepted" if payload.decision == "accept" else "rejected"
+    row.consent_method = "in_person_documented"
+    row.consent_reference = payload.consent_reference
+    row.consent_note = payload.note
+    row.consent_recorded_by = user.id
+    row.consent_at = datetime.now(timezone.utc)
+    product = _product_for_application(db, membership, application)
+    _advance_application(db, membership, application, product)
+    _audit(db, user, membership, "sacco.loan_guarantor.consent_recorded", "sacco_loan_guarantor", row.id,
+           f"application_id={application.id};decision={payload.decision};method=in_person_documented")
+    db.commit()
+    db.refresh(row)
+    return _guarantor_out(row)
+
+
+@router.post("/loan-applications/{application_id}/collateral", status_code=201)
+def add_loan_collateral(
+    application_id: int,
+    payload: SaccoLoanCollateralCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "add_collateral")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    if application.status not in {"pending_assessment", "pending_guarantors"}:
+        raise HTTPException(409, "Collateral cannot be changed after an application reaches approval")
+    row = SaccoLoanCollateral(
+        organization_id=membership.organization_id, application_id=application.id,
+        collateral_type=payload.collateral_type, description=payload.description,
+        declared_value=payload.declared_value, document_reference=payload.document_reference,
+        status="pending_verification", created_by=user.id,
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, user, membership, "sacco.loan_collateral.recorded", "sacco_loan_collateral", row.id,
+           f"application_id={application.id};type={row.collateral_type};status=pending_verification")
+    db.commit()
+    db.refresh(row)
+    return _collateral_out(row)
+
+
+@router.get("/loan-applications/{application_id}/collateral")
+def list_loan_collateral(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    rows = db.query(SaccoLoanCollateral).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).order_by(SaccoLoanCollateral.id.asc()).all()
+    return {"items": [_collateral_out(row) for row in rows]}
+
+
+@router.post("/loan-collateral/{collateral_id}/verification")
+def verify_loan_collateral(
+    collateral_id: int,
+    payload: SaccoLoanCollateralVerificationIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "verify_collateral")
+    row = db.query(SaccoLoanCollateral).filter_by(
+        organization_id=membership.organization_id, id=collateral_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Loan collateral record not found")
+    application = _application_for_membership(db, membership, row.application_id, for_update=True)
+    if application.status in {"approved_pending_disbursement", "rejected"}:
+        raise HTTPException(409, "Collateral verification is locked after the credit decision")
+    if row.status != "pending_verification":
+        raise HTTPException(409, "Collateral has already been verified or rejected")
+    if application.created_by == user.id or row.created_by == user.id:
+        raise HTTPException(403, "The application or collateral recorder cannot verify their own submission")
+    row.status = "verified" if payload.decision == "verify" else "rejected"
+    row.verification_note = payload.note
+    row.verified_by = user.id
+    row.verified_at = datetime.now(timezone.utc)
+    product = _product_for_application(db, membership, application)
+    _advance_application(db, membership, application, product)
+    _audit(db, user, membership, "sacco.loan_collateral.verified", "sacco_loan_collateral", row.id,
+           f"application_id={application.id};decision={payload.decision}")
+    db.commit()
+    db.refresh(row)
+    return _collateral_out(row)
+
+
+@router.post("/loan-applications/{application_id}/assessment")
+def assess_loan_application(
+    application_id: int,
+    payload: SaccoLoanAssessmentIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "assess")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    if application.status not in {"pending_assessment", "pending_guarantors"}:
+        raise HTTPException(409, "Only applications awaiting assessment or guarantors can be assessed")
+    if application.created_by == user.id:
+        raise HTTPException(403, "The loan application creator cannot perform its credit assessment")
+    product = _product_for_application(db, membership, application)
+    payment = monthly_installment(application.principal, product.annual_interest_rate_bps, application.term_months)
+    ratio = int((
+        ((application.monthly_existing_debt + payment) / application.monthly_net_income) * Decimal("10000")
+    ).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    application.estimated_monthly_installment = payment
+    application.debt_service_ratio_bps = ratio
+    application.assessment_status = "eligible" if ratio <= product.maximum_debt_service_ratio_bps else "ineligible"
+    application.assessment_note = payload.note
+    application.assessed_by = user.id
+    application.assessed_at = datetime.now(timezone.utc)
+    _advance_application(db, membership, application, product)
+    _audit(db, user, membership, "sacco.loan_application.assessed", "sacco_loan_application", application.id,
+           f"assessment={application.assessment_status};dsr_bps={ratio};status={application.status}")
+    db.commit()
+    db.refresh(application)
+    return _application_out(application)
+
+
+@router.post("/loan-applications/{application_id}/decision")
+def decide_loan_application(
+    application_id: int,
+    payload: SaccoLoanDecisionIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "decide")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    if application.status != "pending_approval" or application.assessment_status != "eligible":
+        raise HTTPException(409, "Application must pass assessment, guarantor and collateral checks before approval")
+    if application.created_by == user.id or application.assessed_by == user.id:
+        raise HTTPException(403, "The application creator or credit assessor cannot decide the same loan")
+    product = _product_for_application(db, membership, application)
+    if payload.decision == "approve":
+        schedule = projected_schedule(
+            application.principal, product.annual_interest_rate_bps,
+            application.term_months, application.first_repayment_date,
+        )
+        for item in schedule:
+            db.add(SaccoLoanInstallment(
+                organization_id=membership.organization_id, application_id=application.id,
+                installment_number=item["installment_number"], due_date=item["due_date"],
+                principal_due=item["principal_due"], interest_due=item["interest_due"],
+                total_due=item["total_due"], currency=product.currency, status="projected",
+            ))
+        application.status = "approved_pending_disbursement"
+    else:
+        application.status = "rejected"
+    application.decided_by = user.id
+    application.decided_at = datetime.now(timezone.utc)
+    application.decision_note = payload.note
+    _audit(db, user, membership, "sacco.loan_application.decided", "sacco_loan_application", application.id,
+           f"decision={payload.decision};status={application.status}")
+    db.commit()
+    db.refresh(application)
+    return _application_out(application)
+
+
+@router.get("/loan-applications/{application_id}/schedule")
+def get_loan_schedule(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    rows = db.query(SaccoLoanInstallment).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).order_by(SaccoLoanInstallment.installment_number.asc()).all()
+    return {"application_id": application.id, "status": application.status,
+            "schedule_type": "projected_until_verified_disbursement",
+            "items": [_installment_out(row) for row in rows]}
+
+
+@router.get("/loan-applications/{application_id}/summary")
+def get_loan_application_summary(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    product = _product_for_application(db, membership, application)
+    guarantors = db.query(SaccoLoanGuarantor).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).all()
+    collateral = db.query(SaccoLoanCollateral).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).all()
+    return {
+        "application": _application_out(application),
+        "product": _product_out(product),
+        "guarantors": [_guarantor_out(row) for row in guarantors],
+        "collateral": [_collateral_out(row) for row in collateral],
+    }
