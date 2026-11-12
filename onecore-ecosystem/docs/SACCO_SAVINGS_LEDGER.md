@@ -62,7 +62,7 @@ The migration only applies grants when onecore_api exists. Production Supabase r
 - Share redemption, member exit, dividend declarations and allocation.
 - Compensating reversals, corrections, maker-checker cashbook controls and full GL posting.
 - Group/chama membership, group contributions, meetings, attendance, voting and resolutions.
-- Loan products, applications, affordability/credit assessment, guarantors, collateral, approval matrices, disbursement, interest/penalty accrual, schedules, repayments, arrears and restructuring.
+- Verified loan disbursement and settlement, repayment allocation, interest/penalty accrual, arrears, collections, restructuring, write-offs, member statements and portfolio/risk reporting. Loan products, applications, affordability screening, staff-recorded guarantor consent, collateral verification, independent approval and projected schedules are now documented in docs/SACCO_LOAN_ORIGINATION.md.
 - Member statements, portals, notifications and portfolio/risk reports.
 - M-Pesa/bank adapters, verified callbacks, settlement reconciliation, provider UAT and production approval.
 - Production role rehearsal, queue/ledger monitoring, backup/restore, security review, load testing and member UAT.

@@ -75,6 +75,13 @@ jobs:
                   connection.execute(text(
                       "GRANT USAGE ON SCHEMA public TO onecore_identity_email_worker"
                   ))
+                  connection.execute(text(
+                      "CREATE ROLE onecore_api NOLOGIN NOSUPERUSER "
+                      "NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                  ))
+                  connection.execute(text(
+                      "GRANT USAGE ON SCHEMA public TO onecore_api"
+                  ))
           finally:
               engine.dispose()
           PY
@@ -107,7 +114,10 @@ jobs:
                   connection.execute(text(
                       "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
                       "public.memberships, public.records, public.audit_events, public.sacco_members, "
-                      "public.sacco_financial_transactions, public.sacco_ledger_entries "
+                      "public.sacco_financial_transactions, public.sacco_ledger_entries, "
+                      "public.sacco_loan_products, public.sacco_loan_applications, "
+                      "public.sacco_loan_guarantors, public.sacco_loan_collateral, "
+                      "public.sacco_loan_installments "
                       "TO onecore_ci_runtime"
                   ))
                   connection.execute(text(
