@@ -13,8 +13,8 @@ from app.core.database import engine
 from app.core.models import Membership, Organization, User
 from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
-    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanGuarantor,
-    SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
+    SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
 )
 
 CI_RUNTIME_ROLE = os.getenv("ONECORE_CI_RLS_ROLE", "").strip()
@@ -119,7 +119,16 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                 interest_due=Decimal("10.00"), total_due=Decimal("90.00"),
                 currency="KES", status="projected", created_at=now,
             ).returning(SaccoLoanInstallment.id)).scalar_one()
-            return product_id, application_id, guarantor_id, collateral_id, installment_id
+            disbursement_id = connection.execute(insert(SaccoLoanDisbursement).values(
+                organization_id=organization_id, application_id=application_id,
+                amount=Decimal("1000.00"), currency="KES", channel="bank_transfer",
+                external_reference=f"DISBURSE-{prefix}-{suffix[:8]}", value_date=date.today(),
+                status="pending_verification", request_note="RLS fixture disbursement evidence",
+                requested_by=user_id, reviewed_by=None, reviewed_at=None, review_note="",
+                idempotency_key=f"loan-disbursement-{prefix}-{suffix}",
+                request_fingerprint="9" * 64, created_at=now, updated_at=now,
+            ).returning(SaccoLoanDisbursement.id)).scalar_one()
+            return product_id, application_id, guarantor_id, collateral_id, installment_id, disbursement_id
 
         a_ids = seed_tenant(org_a, member_a, user_a, "A")
         b_ids = seed_tenant(org_b, member_b, user_b, "B")
@@ -139,6 +148,7 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
             ("sacco_loan_guarantors", a_ids[2], b_ids[2]),
             ("sacco_loan_collateral", a_ids[3], b_ids[3]),
             ("sacco_loan_installments", a_ids[4], b_ids[4]),
+            ("sacco_loan_disbursements", a_ids[5], b_ids[5]),
         ]
         for table, visible_id, hidden_id in models:
             visible = set(connection.execute(
@@ -171,6 +181,17 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                     assessment_status="pending", status="pending_assessment",
                     created_by=user_a, idempotency_key=f"forbidden-app-{suffix}",
                     request_fingerprint="f" * 64, created_at=now, updated_at=now,
+                ))
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(insert(SaccoLoanDisbursement).values(
+                    organization_id=org_b, application_id=b_ids[1],
+                    amount=Decimal("1000.00"), currency="KES", channel="bank_transfer",
+                    external_reference=f"FORBIDDEN-{suffix}", value_date=date.today(),
+                    status="pending_verification", request_note="Cross-tenant disbursement",
+                    requested_by=user_a, reviewed_by=None, reviewed_at=None, review_note="",
+                    idempotency_key=f"forbidden-disbursement-{suffix}",
+                    request_fingerprint="8" * 64, created_at=now, updated_at=now,
                 ))
         connection.execute(text("RESET ROLE"))
         transaction.rollback()
