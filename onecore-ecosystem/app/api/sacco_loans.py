@@ -790,12 +790,19 @@ def verify_loan_disbursement(
         row.requested_by, application.created_by, application.assessed_by, application.decided_by
     }:
         raise HTTPException(403, "Disbursement reviewer must be independent of application and evidence preparation")
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    row.review_note = payload.note
+    row.updated_at = datetime.now(timezone.utc)
     if payload.decision == "verify":
         if application.status != "approved_pending_disbursement":
             raise HTTPException(409, "Loan is no longer awaiting disbursement")
         if row.value_date >= application.first_repayment_date:
             raise HTTPException(409, "Disbursement date conflicts with the first contractual repayment date")
         row.status = "verified"
+        # Flush evidence first: the PostgreSQL application trigger requires a
+        # visible verified disbursement before allowing the loan to become active.
+        db.flush([row])
         application.status = "active"
         db.query(SaccoLoanInstallment).filter(
             SaccoLoanInstallment.organization_id == membership.organization_id,
@@ -807,10 +814,6 @@ def verify_loan_disbursement(
     else:
         row.status = "rejected"
         action = "sacco.loan_disbursement.rejected"
-    row.reviewed_by = user.id
-    row.reviewed_at = datetime.now(timezone.utc)
-    row.review_note = payload.note
-    row.updated_at = datetime.now(timezone.utc)
     _audit(db, user, membership, action, "sacco_loan_disbursement", row.id,
            f"application_id={application.id};decision={payload.decision};application_status={application.status}")
     db.commit()
