@@ -142,6 +142,12 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
         assert flags[0] is False and flags[1] is False
         connection.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": str(user_a)})
 
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text(
+                    "UPDATE sacco_loan_applications SET status = 'active' WHERE id = :id"
+                ), {"id": a_ids[1]})
+
         models = [
             ("sacco_loan_products", a_ids[0], b_ids[0]),
             ("sacco_loan_applications", a_ids[1], b_ids[1]),
