@@ -156,7 +156,15 @@ def downgrade():
         op.execute("DROP POLICY IF EXISTS sacco_loan_disbursement_tenant_scope ON public.sacco_loan_disbursements")
         op.execute("ALTER TABLE public.sacco_loan_disbursements NO FORCE ROW LEVEL SECURITY")
         op.execute("ALTER TABLE public.sacco_loan_disbursements DISABLE ROW LEVEL SECURITY")
-        op.execute("REVOKE UPDATE (status) ON TABLE public.sacco_loan_installments FROM onecore_api")
+        op.execute("""
+            DO $sacco_loan_disbursement_revoke$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
+                    REVOKE UPDATE (status) ON TABLE public.sacco_loan_installments FROM onecore_api;
+                END IF;
+            END
+            $sacco_loan_disbursement_revoke$
+        """)
     op.drop_index("uq_sacco_loan_disbursement_verified", table_name="sacco_loan_disbursements")
     op.drop_index("uq_sacco_loan_disbursement_pending", table_name="sacco_loan_disbursements")
     op.drop_index("ix_sacco_loan_disbursement_org_created", table_name="sacco_loan_disbursements")
