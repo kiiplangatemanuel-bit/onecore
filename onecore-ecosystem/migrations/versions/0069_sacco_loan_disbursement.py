@@ -47,6 +47,10 @@ def upgrade():
         sa.CheckConstraint("amount > 0", name="ck_sacco_loan_disbursement_amount"),
         sa.CheckConstraint("length(currency) = 3", name="ck_sacco_loan_disbursement_currency"),
         sa.CheckConstraint(
+            "length(trim(external_reference)) >= 3 AND external_reference = upper(external_reference)",
+            name="ck_sacco_loan_disbursement_reference",
+        ),
+        sa.CheckConstraint(
             "channel IN ('bank_transfer', 'mpesa', 'cash', 'cheque')",
             name="ck_sacco_loan_disbursement_channel",
         ),
