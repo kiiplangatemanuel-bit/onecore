@@ -9,15 +9,13 @@ depends_on = None
 
 
 def upgrade():
-    op.drop_constraint(
-        "ck_sacco_loan_application_status", "sacco_loan_applications", type_="check"
-    )
-    op.create_check_constraint(
-        "ck_sacco_loan_application_status",
-        "sacco_loan_applications",
-        "status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', "
-        "'approved_pending_disbursement', 'active', 'rejected')",
-    )
+    with op.batch_alter_table("sacco_loan_applications") as batch:
+        batch.drop_constraint("ck_sacco_loan_application_status", type_="check")
+        batch.create_check_constraint(
+            "ck_sacco_loan_application_status",
+            "status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', "
+            "'approved_pending_disbursement', 'active', 'rejected')",
+        )
     op.create_table(
         "sacco_loan_disbursements",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -165,12 +163,10 @@ def downgrade():
     op.drop_index("ix_sacco_loan_disbursements_application_id", table_name="sacco_loan_disbursements")
     op.drop_index("ix_sacco_loan_disbursements_organization_id", table_name="sacco_loan_disbursements")
     op.drop_table("sacco_loan_disbursements")
-    op.drop_constraint(
-        "ck_sacco_loan_application_status", "sacco_loan_applications", type_="check"
-    )
-    op.create_check_constraint(
-        "ck_sacco_loan_application_status",
-        "sacco_loan_applications",
-        "status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', "
-        "'approved_pending_disbursement', 'rejected')",
-    )
+    with op.batch_alter_table("sacco_loan_applications") as batch:
+        batch.drop_constraint("ck_sacco_loan_application_status", type_="check")
+        batch.create_check_constraint(
+            "ck_sacco_loan_application_status",
+            "status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', "
+            "'approved_pending_disbursement', 'rejected')",
+        )
