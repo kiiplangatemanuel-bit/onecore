@@ -804,7 +804,7 @@ def verify_loan_disbursement(
         row.status = "verified"
         # Flush evidence first: the PostgreSQL application trigger requires a
         # visible verified disbursement before allowing the loan to become active.
-        db.flush([row])
+        db.flush()
         application.status = "active"
         db.query(SaccoLoanInstallment).filter(
             SaccoLoanInstallment.organization_id == membership.organization_id,
