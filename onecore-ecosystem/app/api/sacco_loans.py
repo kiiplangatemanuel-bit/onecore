@@ -12,12 +12,13 @@ from app.core.database import get_db
 from app.core.models import AuditEvent, Branch, Membership, Organization, User
 from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
-    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanGuarantor,
-    SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
+    SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
 )
 from app.core.sacco_loan_schemas import (
     SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
-    SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanGuarantorConsentIn,
+    SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementCreateIn,
+    SaccoLoanDisbursementVerificationIn, SaccoLoanGuarantorConsentIn,
     SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
 )
 from app.core.security import current_user
@@ -28,10 +29,10 @@ from app.services.sacco_membership import transaction_fingerprint
 router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-loans"])
 
 LOAN_PERMISSIONS = {
-    "org_admin": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide"},
-    "sacco_manager": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide"},
+    "org_admin": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement", "verify_disbursement"},
+    "sacco_manager": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement"},
     "sacco_officer": {"read", "create_application", "add_guarantor", "add_collateral"},
-    "sacco_treasurer": {"read"},
+    "sacco_treasurer": {"read", "verify_disbursement"},
     "sacco_credit_officer": {"read", "create_application", "add_guarantor", "add_collateral", "assess"},
     "sacco_credit_approver": {"read", "decide"},
     "sacco_guarantor_verifier": {"read", "record_consent", "verify_collateral"},
@@ -361,7 +362,7 @@ def create_loan_application(
 
 @router.get("/loan-applications")
 def list_loan_applications(
-    status: str | None = Query(default=None, pattern=r"^(pending_assessment|pending_guarantors|pending_approval|approved_pending_disbursement|rejected)$"),
+    status: str | None = Query(default=None, pattern=r"^(pending_assessment|pending_guarantors|pending_approval|approved_pending_disbursement|active|rejected)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     membership: Membership = Depends(active_membership),
@@ -642,7 +643,10 @@ def get_loan_schedule(
         organization_id=membership.organization_id, application_id=application.id
     ).order_by(SaccoLoanInstallment.installment_number.asc()).all()
     return {"application_id": application.id, "status": application.status,
-            "schedule_type": "projected_until_verified_disbursement",
+            "schedule_type": (
+                "activated_after_staff_verified_disbursement"
+                if application.status == "active" else "projected_until_verified_disbursement"
+            ),
             "items": [_installment_out(row) for row in rows]}
 
 
@@ -665,3 +669,155 @@ def get_loan_application_summary(
         "guarantors": [_guarantor_out(row) for row in guarantors],
         "collateral": [_collateral_out(row) for row in collateral],
     }
+
+
+
+def _disbursement_out(row: SaccoLoanDisbursement) -> dict:
+    return {
+        "id": row.id, "application_id": row.application_id,
+        "amount": format(row.amount, ".2f"), "currency": row.currency,
+        "channel": row.channel, "external_reference": row.external_reference,
+        "value_date": row.value_date.isoformat(), "status": row.status,
+        "request_note": row.request_note, "requested_by": row.requested_by,
+        "reviewed_by": row.reviewed_by, "reviewed_at": row.reviewed_at,
+        "review_note": row.review_note, "created_at": row.created_at,
+    }
+
+
+@router.post("/loan-applications/{application_id}/disbursements", status_code=201)
+def request_loan_disbursement(
+    application_id: int,
+    payload: SaccoLoanDisbursementCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "request_disbursement")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    fingerprint = transaction_fingerprint(payload.model_dump(mode="json", exclude={"idempotency_key"}))
+    replay = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if replay:
+        if replay.application_id != application.id or replay.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for different disbursement evidence")
+        return _disbursement_out(replay)
+
+    if application.status != "approved_pending_disbursement":
+        raise HTTPException(409, "Only an approved loan awaiting disbursement can be disbursed")
+    if user.id in {application.created_by, application.assessed_by, application.decided_by}:
+        raise HTTPException(403, "The application creator, assessor or credit approver cannot request its disbursement")
+    product = _product_for_application(db, membership, application)
+    if payload.amount != application.principal:
+        raise HTTPException(422, "This workflow requires one full-principal disbursement; partial disbursement is not supported")
+    if payload.currency != product.currency:
+        raise HTTPException(409, "Disbursement currency must match the approved loan product")
+    if payload.value_date >= application.first_repayment_date:
+        raise HTTPException(409, "Disbursement value date must precede the first contractual repayment date")
+    if application.decided_at and payload.value_date < application.decided_at.date():
+        raise HTTPException(409, "Disbursement value date cannot precede the credit approval date")
+
+    pending = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, application_id=application.id,
+        status="pending_verification",
+    ).first()
+    if pending:
+        raise HTTPException(409, "A disbursement evidence request is already awaiting review")
+    verified = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, application_id=application.id,
+        status="verified",
+    ).first()
+    if verified:
+        raise HTTPException(409, "This loan already has a verified disbursement")
+
+    row = SaccoLoanDisbursement(
+        organization_id=membership.organization_id, application_id=application.id,
+        amount=payload.amount, currency=payload.currency, channel=payload.channel,
+        external_reference=payload.external_reference, value_date=payload.value_date,
+        status="pending_verification", request_note=payload.request_note,
+        requested_by=user.id, idempotency_key=payload.idempotency_key,
+        request_fingerprint=fingerprint,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        _audit(db, user, membership, "sacco.loan_disbursement.requested",
+               "sacco_loan_disbursement", row.id,
+               f"application_id={application.id};amount={row.amount};currency={row.currency};channel={row.channel}")
+        db.commit()
+        db.refresh(row)
+        return _disbursement_out(row)
+    except IntegrityError:
+        db.rollback()
+        replay = db.query(SaccoLoanDisbursement).filter_by(
+            organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+        ).first()
+        if replay and replay.request_fingerprint == fingerprint:
+            return _disbursement_out(replay)
+        raise HTTPException(409, "A disbursement request is already pending or the idempotency key conflicts")
+
+
+@router.get("/loan-applications/{application_id}/disbursements")
+def list_loan_disbursements(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    rows = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, application_id=application.id
+    ).order_by(SaccoLoanDisbursement.created_at.desc(), SaccoLoanDisbursement.id.desc()).all()
+    return {"items": [_disbursement_out(row) for row in rows]}
+
+
+@router.post("/loan-disbursements/{disbursement_id}/verification")
+def verify_loan_disbursement(
+    disbursement_id: int,
+    payload: SaccoLoanDisbursementVerificationIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "verify_disbursement")
+    row = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, id=disbursement_id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "SACCO loan disbursement not found")
+    application = _application_for_membership(db, membership, row.application_id, for_update=True)
+    if row.status != "pending_verification":
+        raise HTTPException(409, "Only pending disbursement evidence can be reviewed")
+    if user.id in {
+        row.requested_by, application.created_by, application.assessed_by, application.decided_by
+    }:
+        raise HTTPException(403, "Disbursement reviewer must be independent of application and evidence preparation")
+    row.reviewed_by = user.id
+    row.reviewed_at = datetime.now(timezone.utc)
+    row.review_note = payload.note
+    row.updated_at = datetime.now(timezone.utc)
+    if payload.decision == "verify":
+        if application.status != "approved_pending_disbursement":
+            raise HTTPException(409, "Loan is no longer awaiting disbursement")
+        if row.value_date >= application.first_repayment_date:
+            raise HTTPException(409, "Disbursement date conflicts with the first contractual repayment date")
+        row.status = "verified"
+        # Flush evidence first: the PostgreSQL application trigger requires a
+        # visible verified disbursement before allowing the loan to become active.
+        db.flush()
+        application.status = "active"
+        db.query(SaccoLoanInstallment).filter(
+            SaccoLoanInstallment.organization_id == membership.organization_id,
+            SaccoLoanInstallment.application_id == application.id,
+            SaccoLoanInstallment.status == "projected",
+            SaccoLoanInstallment.due_date <= date.today(),
+        ).update({"status": "due"}, synchronize_session=False)
+        action = "sacco.loan_disbursement.verified"
+    else:
+        row.status = "rejected"
+        action = "sacco.loan_disbursement.rejected"
+    _audit(db, user, membership, action, "sacco_loan_disbursement", row.id,
+           f"application_id={application.id};decision={payload.decision};application_status={application.status}")
+    db.commit()
+    db.refresh(row)
+    return _disbursement_out(row)

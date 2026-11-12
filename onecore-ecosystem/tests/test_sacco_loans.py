@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,12 +13,13 @@ from app.core.database import Base
 from app.core.models import AuditEvent, Branch, Membership, Organization, User
 from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
-    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanGuarantor,
-    SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
+    SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
 )
 from app.core.sacco_loan_schemas import (
     SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
-    SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanGuarantorConsentIn,
+    SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementCreateIn,
+    SaccoLoanDisbursementVerificationIn, SaccoLoanGuarantorConsentIn,
     SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
 )
 
@@ -30,6 +31,7 @@ def _database():
         AuditEvent.__table__, SaccoMember.__table__, SaccoLoanProduct.__table__,
         SaccoLoanApplication.__table__, SaccoLoanGuarantor.__table__,
         SaccoLoanCollateral.__table__, SaccoLoanInstallment.__table__,
+        SaccoLoanDisbursement.__table__,
     ])
     return engine, Session(engine)
 
@@ -132,6 +134,32 @@ def test_loan_application_contract_requires_future_due_date_and_safe_financial_i
         _application_payload(1, 1, monthly_existing_debt="-1")
     with pytest.raises(ValidationError):
         _application_payload(1, 1, purpose="short")
+
+
+def test_loan_disbursement_contract_normalizes_and_rejects_invalid_evidence():
+    payload = SaccoLoanDisbursementCreateIn(
+        amount="1000.00", currency="kes", channel="bank_transfer",
+        external_reference="  BANK-REF-001  ", value_date=date.today(),
+        request_note="  Approved bank evidence reviewed  ",
+        idempotency_key="  loan-disbursement-key-001  ",
+    )
+    assert payload.currency == "KES"
+    assert payload.external_reference == "BANK-REF-001"
+    assert payload.request_note == "Approved bank evidence reviewed"
+    assert payload.idempotency_key == "loan-disbursement-key-001"
+
+    with pytest.raises(ValidationError):
+        SaccoLoanDisbursementCreateIn(
+            amount="1000.00", currency="KES", channel="unsupported",
+            external_reference="BANK-REF-002", value_date=date.today(),
+            request_note="Valid request note", idempotency_key="loan-disbursement-key-002",
+        )
+    with pytest.raises(ValidationError):
+        SaccoLoanDisbursementCreateIn(
+            amount="1000.00", currency="KES", channel="cash",
+            external_reference="CASH-REF-001", value_date=date.today() + timedelta(days=1),
+            request_note="Valid request note", idempotency_key="loan-disbursement-key-003",
+        )
 
 
 def test_loan_origination_requires_independent_assessment_guarantor_consent_and_collateral():
@@ -330,6 +358,212 @@ def test_loan_schedule_calculation_handles_zero_interest_and_month_end():
     assert rows[-1]["principal_due"] == Decimal("333.34")
 
 
+
+def test_loan_disbursement_requires_independent_review_and_activates_schedule():
+    from app.api.sacco_loans import (
+        list_loan_disbursements, request_loan_disbursement,
+        verify_loan_disbursement, get_loan_schedule,
+    )
+
+    engine, db = _database()
+    try:
+        creator, manager, approver, org, borrower, _ = _seed(db)
+        product = _create_product(db, manager, org)
+        application_out = _create_application(db, creator, org, borrower, product["id"])
+        application = db.query(SaccoLoanApplication).filter_by(
+            organization_id=org.id, id=application_out["id"]
+        ).one()
+        application.assessment_status = "eligible"
+        application.assessed_by = manager.id
+        application.assessed_at = datetime.now(timezone.utc)
+        application.status = "approved_pending_disbursement"
+        application.decided_by = approver.id
+        application.decided_at = datetime.now(timezone.utc)
+        application.decision_note = "Independent credit approval"
+        db.add(SaccoLoanInstallment(
+            organization_id=org.id, application_id=application.id,
+            installment_number=1, due_date=application.first_repayment_date,
+            principal_due=Decimal("10000.00"), interest_due=Decimal("0.00"),
+            total_due=Decimal("10000.00"), currency="KES", status="projected",
+        ))
+        requester = User(
+            email="loan-disbursement-requester@example.test",
+            full_name="Disbursement Requester", password_hash="unused",
+        )
+        reviewer = User(
+            email="loan-disbursement-reviewer@example.test",
+            full_name="Disbursement Reviewer", password_hash="unused",
+        )
+        db.add_all([requester, reviewer])
+        db.commit()
+
+        payload = SaccoLoanDisbursementCreateIn(
+            amount="10000.00", currency="KES", channel="bank_transfer",
+            external_reference="BANK-STATEMENT-REF-001", value_date=date.today(),
+            request_note="Bank statement settlement evidence attached to finance file",
+            idempotency_key="loan-disbursement-001",
+        )
+        requester_membership = _membership(org.id, "sacco_manager")
+        reviewer_membership = _membership(org.id, "sacco_treasurer")
+
+        with pytest.raises(HTTPException) as creator_cannot_request:
+            request_loan_disbursement(
+                application.id, payload, creator, requester_membership, db
+            )
+        assert creator_cannot_request.value.status_code == 403
+
+        with pytest.raises(HTTPException) as unauthorized:
+            request_loan_disbursement(
+                application.id, payload, requester, _membership(org.id, "sacco_officer"), db
+            )
+        assert unauthorized.value.status_code == 403
+
+        with pytest.raises(HTTPException) as wrong_amount:
+            request_loan_disbursement(
+                application.id,
+                payload.model_copy(update={"amount": Decimal("9000.00"), "idempotency_key": "loan-disbursement-002"}),
+                requester, requester_membership, db,
+            )
+        assert wrong_amount.value.status_code == 422
+
+        pending = request_loan_disbursement(
+            application.id, payload, requester, requester_membership, db
+        )
+        assert pending["status"] == "pending_verification"
+        replay = request_loan_disbursement(
+            application.id, payload, requester, requester_membership, db
+        )
+        assert replay["id"] == pending["id"]
+
+        with pytest.raises(HTTPException) as changed_replay:
+            request_loan_disbursement(
+                application.id,
+                payload.model_copy(update={"external_reference": "DIFFERENT-REF"}),
+                requester, requester_membership, db,
+            )
+        assert changed_replay.value.status_code == 409
+
+        with pytest.raises(HTTPException) as duplicate_pending:
+            request_loan_disbursement(
+                application.id,
+                payload.model_copy(update={"idempotency_key": "loan-disbursement-003"}),
+                requester, requester_membership, db,
+            )
+        assert duplicate_pending.value.status_code == 409
+
+        decision = SaccoLoanDisbursementVerificationIn(
+            decision="verify", note="Bank statement and approved voucher independently checked"
+        )
+        with pytest.raises(HTTPException) as requester_cannot_review:
+            verify_loan_disbursement(
+                pending["id"], decision, requester, _membership(org.id, "org_admin"), db
+            )
+        assert requester_cannot_review.value.status_code == 403
+
+        verified = verify_loan_disbursement(
+            pending["id"], decision, reviewer, reviewer_membership, db
+        )
+        assert verified["status"] == "verified"
+        db.refresh(application)
+        assert application.status == "active"
+
+        schedule = get_loan_schedule(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert schedule["schedule_type"] == "activated_after_staff_verified_disbursement"
+        assert schedule["items"][0]["status"] == "projected"
+
+        history = list_loan_disbursements(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert len(history["items"]) == 1
+        assert history["items"][0]["external_reference"] == "BANK-STATEMENT-REF-001"
+
+        events = db.query(AuditEvent).filter(
+            AuditEvent.organization_id == org.id,
+            AuditEvent.resource_type == "sacco_loan_disbursement",
+        ).all()
+        assert {event.action for event in events} >= {
+            "sacco.loan_disbursement.requested", "sacco.loan_disbursement.verified"
+        }
+        with pytest.raises(HTTPException) as duplicate_verify:
+            verify_loan_disbursement(
+                pending["id"], decision, reviewer, reviewer_membership, db
+            )
+        assert duplicate_verify.value.status_code == 409
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_rejected_loan_disbursement_can_be_resubmitted_without_duplicate_activation():
+    from app.api.sacco_loans import request_loan_disbursement, verify_loan_disbursement
+
+    engine, db = _database()
+    try:
+        creator, manager, approver, org, borrower, _ = _seed(db)
+        product = _create_product(db, manager, org)
+        application_out = _create_application(db, creator, org, borrower, product["id"])
+        application = db.query(SaccoLoanApplication).filter_by(id=application_out["id"]).one()
+        application.assessment_status = "eligible"
+        application.assessed_by = manager.id
+        application.assessed_at = datetime.now(timezone.utc)
+        application.status = "approved_pending_disbursement"
+        application.decided_by = approver.id
+        application.decided_at = datetime.now(timezone.utc)
+        requester = User(email="loan-retry-requester@example.test", full_name="Requester", password_hash="unused")
+        reviewer = User(email="loan-retry-reviewer@example.test", full_name="Reviewer", password_hash="unused")
+        db.add_all([requester, reviewer])
+        db.commit()
+
+        payload = SaccoLoanDisbursementCreateIn(
+            amount="10000.00", currency="KES", channel="cash",
+            external_reference="CASH-VOUCHER-001", value_date=date.today(),
+            request_note="Cash voucher evidence recorded for independent review",
+            idempotency_key="loan-retry-disbursement-001",
+        )
+        pending = request_loan_disbursement(
+            application.id, payload, requester, _membership(org.id, "sacco_manager"), db
+        )
+        rejected = verify_loan_disbursement(
+            pending["id"],
+            SaccoLoanDisbursementVerificationIn(
+                decision="reject", note="Voucher evidence does not reconcile to the approved amount"
+            ),
+            reviewer, _membership(org.id, "sacco_treasurer"), db,
+        )
+        assert rejected["status"] == "rejected"
+        db.refresh(application)
+        assert application.status == "approved_pending_disbursement"
+
+        with pytest.raises(HTTPException) as reused_reference:
+            request_loan_disbursement(
+                application.id,
+                SaccoLoanDisbursementCreateIn(
+                    amount="10000.00", currency="KES", channel="cash",
+                    external_reference="cash-voucher-001", value_date=date.today(),
+                    request_note="Retry with the same external voucher reference",
+                    idempotency_key="loan-retry-disbursement-reused",
+                ),
+                requester, _membership(org.id, "sacco_manager"), db,
+            )
+        assert reused_reference.value.status_code == 409
+
+        replacement = request_loan_disbursement(
+            application.id,
+            payload.model_copy(update={
+                "external_reference": "CASH-VOUCHER-002",
+                "idempotency_key": "loan-retry-disbursement-002",
+            }),
+            requester, _membership(org.id, "sacco_manager"), db,
+        )
+        assert replacement["status"] == "pending_verification"
+        assert replacement["id"] != pending["id"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_sacco_loan_routes_migration_and_workspace_are_registered():
     from app.main import app
 
@@ -338,12 +572,20 @@ def test_sacco_loan_routes_migration_and_workspace_are_registered():
     assert "/api/v1/sacco/loan-applications" in paths
     assert "/api/v1/sacco/loan-applications/{application_id}/assessment" in paths
     assert "/api/v1/sacco/loan-applications/{application_id}/decision" in paths
+    assert "/api/v1/sacco/loan-applications/{application_id}/disbursements" in paths
+    assert "/api/v1/sacco/loan-disbursements/{disbursement_id}/verification" in paths
     root = Path(__file__).resolve().parents[1]
     migration = (root / "migrations" / "versions" / "0068_sacco_loan_origination.py").read_text(encoding="utf-8")
     assert 'revision = "0068_sacco_loan_origination"' in migration
     assert 'down_revision = "0067_sacco_member_ledger"' in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
     assert "REVOKE UPDATE, DELETE" in migration
+    disbursement_migration = (root / "migrations" / "versions" / "0069_sacco_loan_disbursement.py").read_text(encoding="utf-8")
+    assert 'revision = "0069_sacco_loan_disbursement"' in disbursement_migration
+    assert 'down_revision = "0068_sacco_loan_origination"' in disbursement_migration
+    assert "FORCE ROW LEVEL SECURITY" in disbursement_migration
+    assert "uq_sacco_loan_disbursement_verified" in disbursement_migration
     page = (root / "app" / "web" / "sacco.html").read_text(encoding="utf-8")
     assert 'id="loanProduct"' in page and 'id="loanApplication"' in page
+    assert 'id="loanDisbursement"' in page and 'id="loanDisbursementVerify"' in page
     assert "Powered by OneCore Technologies Ltd" in page
