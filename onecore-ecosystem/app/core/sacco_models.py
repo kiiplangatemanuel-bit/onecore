@@ -177,6 +177,7 @@ class SaccoLoanApplication(Base):
     member_id: Mapped[int] = mapped_column(nullable=False, index=True)
     product_id: Mapped[int] = mapped_column(nullable=False, index=True)
     branch_id: Mapped[str | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
     requested_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     term_months: Mapped[int] = mapped_column(Integer, nullable=False)
     annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
