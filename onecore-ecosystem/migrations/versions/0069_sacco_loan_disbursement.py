@@ -38,6 +38,7 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("organization_id", "id", name="uq_sacco_loan_disbursement_org_id"),
         sa.UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_loan_disbursement_org_idempotency"),
+        sa.UniqueConstraint("organization_id", "channel", "external_reference", name="uq_sacco_loan_disbursement_org_channel_reference"),
         sa.ForeignKeyConstraint(
             ["organization_id", "application_id"],
             ["sacco_loan_applications.organization_id", "sacco_loan_applications.id"],
