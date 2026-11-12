@@ -84,7 +84,7 @@ def _application_query(db: Session, membership: Membership):
     return query
 
 
-def _member_for_membership(db: Session, membership: Membership, member_id: int) -> SaccoMember:
+def _member_for_membership(db: Session, membership: Membership, member_id: int, *, for_update: bool = False) -> SaccoMember:
     query = db.query(SaccoMember).filter_by(
         organization_id=membership.organization_id, id=member_id
     )
@@ -94,10 +94,30 @@ def _member_for_membership(db: Session, membership: Membership, member_id: int) 
             query = query.filter(SaccoMember.id == -1)
         else:
             query = query.filter(SaccoMember.branch_id.in_(allowed))
+    if for_update:
+        query = query.with_for_update()
     member = query.first()
     if not member:
         raise HTTPException(404, "SACCO member not found")
     return member
+
+
+def _guarantor_query(db: Session, membership: Membership, application_id: int):
+    query = db.query(SaccoLoanGuarantor).join(
+        SaccoMember,
+        (SaccoMember.id == SaccoLoanGuarantor.member_id)
+        & (SaccoMember.organization_id == SaccoLoanGuarantor.organization_id),
+    ).filter(
+        SaccoLoanGuarantor.organization_id == membership.organization_id,
+        SaccoLoanGuarantor.application_id == application_id,
+    )
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            query = query.filter(SaccoMember.id == -1)
+        else:
+            query = query.filter(SaccoMember.branch_id.in_(allowed))
+    return query
 
 
 def _application_for_membership(
@@ -290,7 +310,7 @@ def create_loan_application(
     db: Session = Depends(get_db),
 ):
     _require_permission(membership, "create_application")
-    member = _member_for_membership(db, membership, payload.member_id)
+    member = _member_for_membership(db, membership, payload.member_id, for_update=True)
     if member.status != "active":
         raise HTTPException(409, "Loan applications require an active, KYC-verified member")
     product = _product_query(db, membership).filter(
@@ -378,7 +398,7 @@ def add_loan_guarantor(
     application = _application_for_membership(db, membership, application_id, for_update=True)
     if application.status not in {"pending_assessment", "pending_guarantors"}:
         raise HTTPException(409, "Guarantors cannot be changed after an application reaches approval")
-    member = _member_for_membership(db, membership, payload.member_id)
+    member = _member_for_membership(db, membership, payload.member_id, for_update=True)
     if member.status != "active":
         raise HTTPException(409, "Only active members can guarantee a loan")
     if member.id == application.member_id:
@@ -419,9 +439,7 @@ def list_loan_guarantors(
 ):
     _require_permission(membership, "read")
     application = _application_for_membership(db, membership, application_id)
-    rows = db.query(SaccoLoanGuarantor).filter_by(
-        organization_id=membership.organization_id, application_id=application.id
-    ).order_by(SaccoLoanGuarantor.id.asc()).all()
+    rows = _guarantor_query(db, membership, application.id).order_by(SaccoLoanGuarantor.id.asc()).all()
     return {"items": [_guarantor_out(row) for row in rows]}
 
 
@@ -440,6 +458,9 @@ def record_loan_guarantor_consent(
     if not row:
         raise HTTPException(404, "Loan guarantor record not found")
     application = _application_for_membership(db, membership, row.application_id, for_update=True)
+    guarantor_member = _member_for_membership(db, membership, row.member_id, for_update=True)
+    if guarantor_member.status != "active":
+        raise HTTPException(409, "Only active members can remain guarantors")
     if application.status in {"approved_pending_disbursement", "rejected"}:
         raise HTTPException(409, "Guarantor consent is locked after the credit decision")
     if row.consent_status != "pending":
@@ -634,9 +655,7 @@ def get_loan_application_summary(
     _require_permission(membership, "read")
     application = _application_for_membership(db, membership, application_id)
     product = _product_for_application(db, membership, application)
-    guarantors = db.query(SaccoLoanGuarantor).filter_by(
-        organization_id=membership.organization_id, application_id=application.id
-    ).all()
+    guarantors = _guarantor_query(db, membership, application.id).all()
     collateral = db.query(SaccoLoanCollateral).filter_by(
         organization_id=membership.organization_id, application_id=application.id
     ).all()
