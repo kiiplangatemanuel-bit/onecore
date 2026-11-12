@@ -136,6 +136,32 @@ def test_loan_application_contract_requires_future_due_date_and_safe_financial_i
         _application_payload(1, 1, purpose="short")
 
 
+def test_loan_disbursement_contract_normalizes_and_rejects_invalid_evidence():
+    payload = SaccoLoanDisbursementCreateIn(
+        amount="1000.00", currency="kes", channel="bank_transfer",
+        external_reference="  BANK-REF-001  ", value_date=date.today(),
+        request_note="  Approved bank evidence reviewed  ",
+        idempotency_key="  loan-disbursement-key-001  ",
+    )
+    assert payload.currency == "KES"
+    assert payload.external_reference == "BANK-REF-001"
+    assert payload.request_note == "Approved bank evidence reviewed"
+    assert payload.idempotency_key == "loan-disbursement-key-001"
+
+    with pytest.raises(ValidationError):
+        SaccoLoanDisbursementCreateIn(
+            amount="1000.00", currency="KES", channel="unsupported",
+            external_reference="BANK-REF-002", value_date=date.today(),
+            request_note="Valid request note", idempotency_key="loan-disbursement-key-002",
+        )
+    with pytest.raises(ValidationError):
+        SaccoLoanDisbursementCreateIn(
+            amount="1000.00", currency="KES", channel="cash",
+            external_reference="CASH-REF-001", value_date=date.today() + timedelta(days=1),
+            request_note="Valid request note", idempotency_key="loan-disbursement-key-003",
+        )
+
+
 def test_loan_origination_requires_independent_assessment_guarantor_consent_and_collateral():
     from app.api.sacco_loans import (
         add_loan_collateral, add_loan_guarantor, assess_loan_application,
