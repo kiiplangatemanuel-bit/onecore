@@ -539,10 +539,12 @@ def test_rejected_loan_disbursement_can_be_resubmitted_without_duplicate_activat
         with pytest.raises(HTTPException) as reused_reference:
             request_loan_disbursement(
                 application.id,
-                payload.model_copy(update={
-                    "external_reference": "cash-voucher-001",
-                    "idempotency_key": "loan-retry-disbursement-reused",
-                }),
+                SaccoLoanDisbursementCreateIn(
+                    amount="10000.00", currency="KES", channel="cash",
+                    external_reference="cash-voucher-001", value_date=date.today(),
+                    request_note="Retry with the same external voucher reference",
+                    idempotency_key="loan-retry-disbursement-reused",
+                ),
                 requester, _membership(org.id, "sacco_manager"), db,
             )
         assert reused_reference.value.status_code == 409
