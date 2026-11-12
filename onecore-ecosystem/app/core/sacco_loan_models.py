@@ -195,6 +195,8 @@ class SaccoLoanDisbursement(Base):
             ondelete="RESTRICT", name="fk_sacco_loan_disbursement_application_tenant",
         ),
         CheckConstraint("amount > 0", name="ck_sacco_loan_disbursement_amount"),
+        CheckConstraint("length(currency) = 3", name="ck_sacco_loan_disbursement_currency"),
+        CheckConstraint("length(trim(external_reference)) >= 3 AND external_reference = upper(external_reference)", name="ck_sacco_loan_disbursement_reference"),
         CheckConstraint("channel IN ('bank_transfer', 'mpesa', 'cash', 'cheque')", name="ck_sacco_loan_disbursement_channel"),
         CheckConstraint("status IN ('pending_verification', 'verified', 'rejected')", name="ck_sacco_loan_disbursement_status"),
         Index(
