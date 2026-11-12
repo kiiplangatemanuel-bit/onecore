@@ -201,7 +201,7 @@ def upgrade():
         ),
         sa.UniqueConstraint("organization_id", "application_id", "installment_number", name="uq_sacco_loan_installment_number"),
         sa.CheckConstraint("installment_number BETWEEN 1 AND 120", name="ck_sacco_loan_installment_number"),
-        sa.CheckConstraint("principal_due >= 0 AND interest_due >= 0 AND total_due > 0 AND ROUND(total_due, 2) = ROUND(principal_due + interest_due, 2)", name="ck_sacco_loan_installment_amounts"),
+        sa.CheckConstraint("principal_due >= 0 AND interest_due >= 0 AND total_due >= 0 AND ROUND(total_due, 2) = ROUND(principal_due + interest_due, 2)", name="ck_sacco_loan_installment_amounts"),
         sa.CheckConstraint("status IN ('projected', 'due', 'paid', 'partially_paid', 'overdue', 'waived')", name="ck_sacco_loan_installment_status"),
     )
     op.create_index("ix_sacco_loan_installments_organization_id", "sacco_loan_installments", ["organization_id"])
