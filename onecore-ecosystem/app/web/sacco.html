@@ -165,6 +165,7 @@
 <div><button type="submit">Submit disbursement evidence for review</button></div>
 </form>
 <form id="loanDisbursementVerify">
+<input type="hidden" name="application_id">
 <label>Disbursement evidence ID<input name="disbursement_id" type="number" min="1" required></label>
 <label>Review decision<select name="decision"><option value="verify">Verify</option><option value="reject">Reject</option></select></label>
 <label>Independent review note<input name="note" minlength="5" maxlength="500" required></label>
@@ -328,6 +329,7 @@ async function refreshLoanSchedule(applicationId){
    const button=document.createElement('button');button.type='button';button.textContent='Review evidence';
    button.addEventListener('click',()=>{
     $('loanDisbursementVerify').elements.disbursement_id.value=item.id;
+    $('loanDisbursementVerify').elements.application_id.value=id;
     $('loanDisbursementVerify').scrollIntoView({behavior:'smooth',block:'center'});
    });
    action.append(button);
