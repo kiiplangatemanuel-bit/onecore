@@ -180,3 +180,49 @@ class SaccoLoanInstallment(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="projected", server_default="projected")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class SaccoLoanDisbursement(Base):
+    """Staff-reviewed evidence of a full loan disbursement; not a provider payment instruction."""
+    __tablename__ = "sacco_loan_disbursements"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_sacco_loan_disbursement_org_id"),
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_loan_disbursement_org_idempotency"),
+        ForeignKeyConstraint(
+            ["organization_id", "application_id"],
+            ["sacco_loan_applications.organization_id", "sacco_loan_applications.id"],
+            ondelete="RESTRICT", name="fk_sacco_loan_disbursement_application_tenant",
+        ),
+        CheckConstraint("amount > 0", name="ck_sacco_loan_disbursement_amount"),
+        CheckConstraint("channel IN ('bank_transfer', 'mpesa', 'cash', 'cheque')", name="ck_sacco_loan_disbursement_channel"),
+        CheckConstraint("status IN ('pending_verification', 'verified', 'rejected')", name="ck_sacco_loan_disbursement_status"),
+        Index(
+            "uq_sacco_loan_disbursement_pending", "organization_id", "application_id",
+            unique=True, postgresql_where=text("status = 'pending_verification'"),
+            sqlite_where=text("status = 'pending_verification'"),
+        ),
+        Index(
+            "uq_sacco_loan_disbursement_verified", "organization_id", "application_id",
+            unique=True, postgresql_where=text("status = 'verified'"),
+            sqlite_where=text("status = 'verified'"),
+        ),
+        Index("ix_sacco_loan_disbursement_org_created", "organization_id", "created_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id: Mapped[int] = mapped_column(nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)
+    external_reference: Mapped[str] = mapped_column(String(120), nullable=False)
+    value_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending_verification", server_default="pending_verification")
+    request_note: Mapped[str] = mapped_column(String(500), nullable=False)
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
