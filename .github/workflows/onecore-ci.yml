@@ -107,7 +107,10 @@ jobs:
                   connection.execute(text(
                       "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
                       "public.memberships, public.records, public.audit_events, public.sacco_members, "
-                      "public.sacco_financial_transactions, public.sacco_ledger_entries "
+                      "public.sacco_financial_transactions, public.sacco_ledger_entries, "
+                      "public.sacco_loan_products, public.sacco_loan_applications, "
+                      "public.sacco_loan_guarantors, public.sacco_loan_collateral, "
+                      "public.sacco_loan_installments "
                       "TO onecore_ci_runtime"
                   ))
                   connection.execute(text(
