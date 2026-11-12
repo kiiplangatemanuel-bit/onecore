@@ -536,6 +536,17 @@ def test_rejected_loan_disbursement_can_be_resubmitted_without_duplicate_activat
         db.refresh(application)
         assert application.status == "approved_pending_disbursement"
 
+        with pytest.raises(HTTPException) as reused_reference:
+            request_loan_disbursement(
+                application.id,
+                payload.model_copy(update={
+                    "external_reference": "cash-voucher-001",
+                    "idempotency_key": "loan-retry-disbursement-reused",
+                }),
+                requester, _membership(org.id, "sacco_manager"), db,
+            )
+        assert reused_reference.value.status_code == 409
+
         replacement = request_loan_disbursement(
             application.id,
             payload.model_copy(update={
