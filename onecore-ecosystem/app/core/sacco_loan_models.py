@@ -188,6 +188,7 @@ class SaccoLoanDisbursement(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "id", name="uq_sacco_loan_disbursement_org_id"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_sacco_loan_disbursement_org_idempotency"),
+        UniqueConstraint("organization_id", "channel", "external_reference", name="uq_sacco_loan_disbursement_org_channel_reference"),
         ForeignKeyConstraint(
             ["organization_id", "application_id"],
             ["sacco_loan_applications.organization_id", "sacco_loan_applications.id"],
