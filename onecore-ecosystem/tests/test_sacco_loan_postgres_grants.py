@@ -24,7 +24,7 @@ def test_sacco_loan_api_role_is_nobypassrls_and_has_only_workflow_column_updates
         tables = (
             "sacco_loan_products", "sacco_loan_applications",
             "sacco_loan_guarantors", "sacco_loan_collateral",
-            "sacco_loan_installments",
+            "sacco_loan_installments", "sacco_loan_disbursements",
         )
         for table in tables:
             assert connection.execute(text(
@@ -37,7 +37,7 @@ def test_sacco_loan_api_role_is_nobypassrls_and_has_only_workflow_column_updates
                 "SELECT has_table_privilege('onecore_api', :table, 'DELETE')"
             ), {"table": f"public.{table}"}).scalar_one() is False
 
-        for table in ("sacco_loan_products", "sacco_loan_installments"):
+        for table in ("sacco_loan_products", "sacco_loan_installments", "sacco_loan_disbursements"):
             assert connection.execute(text(
                 "SELECT has_table_privilege('onecore_api', :table, 'UPDATE')"
             ), {"table": f"public.{table}"}).scalar_one() is False
@@ -75,3 +75,30 @@ def test_sacco_loan_api_role_is_nobypassrls_and_has_only_workflow_column_updates
                 'onecore_api', 'public.sacco_loan_collateral', 'declared_value', 'UPDATE'
             )
         """)).scalar_one() is False
+
+
+def test_sacco_loan_disbursement_grants_are_column_scoped():
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT has_table_privilege('onecore_api', 'public.sacco_loan_disbursements', 'UPDATE')"
+        )).scalar_one() is False
+        assert connection.execute(text("""
+            SELECT has_column_privilege(
+                'onecore_api', 'public.sacco_loan_disbursements', 'status', 'UPDATE'
+            )
+        """)).scalar_one() is True
+        assert connection.execute(text("""
+            SELECT has_column_privilege(
+                'onecore_api', 'public.sacco_loan_disbursements', 'reviewed_by', 'UPDATE'
+            )
+        """)).scalar_one() is True
+        assert connection.execute(text("""
+            SELECT has_column_privilege(
+                'onecore_api', 'public.sacco_loan_disbursements', 'external_reference', 'UPDATE'
+            )
+        """)).scalar_one() is False
+        assert connection.execute(text("""
+            SELECT has_column_privilege(
+                'onecore_api', 'public.sacco_loan_installments', 'status', 'UPDATE'
+            )
+        """)).scalar_one() is True
