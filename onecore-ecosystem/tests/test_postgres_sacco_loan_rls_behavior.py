@@ -148,6 +148,15 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                     "UPDATE sacco_loan_applications SET status = 'active' WHERE id = :id"
                 ), {"id": a_ids[1]})
 
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_disbursements
+                    SET status = 'verified', reviewed_by = requested_by,
+                        reviewed_at = now(), review_note = 'Self review is not allowed'
+                    WHERE id = :id
+                """), {"id": a_ids[5]})
+
         models = [
             ("sacco_loan_products", a_ids[0], b_ids[0]),
             ("sacco_loan_applications", a_ids[1], b_ids[1]),
