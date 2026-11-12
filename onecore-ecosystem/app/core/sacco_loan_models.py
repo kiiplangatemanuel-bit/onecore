@@ -165,7 +165,7 @@ class SaccoLoanInstallment(Base):
             ondelete="CASCADE", name="fk_sacco_loan_installment_application_tenant",
         ),
         CheckConstraint("installment_number BETWEEN 1 AND 120", name="ck_sacco_loan_installment_number"),
-        CheckConstraint("principal_due >= 0 AND interest_due >= 0 AND total_due = principal_due + interest_due", name="ck_sacco_loan_installment_amounts"),
+        CheckConstraint("principal_due >= 0 AND interest_due >= 0 AND total_due > 0 AND ROUND(total_due, 2) = ROUND(principal_due + interest_due, 2)", name="ck_sacco_loan_installment_amounts"),
         CheckConstraint("status IN ('projected', 'due', 'paid', 'partially_paid', 'overdue', 'waived')", name="ck_sacco_loan_installment_status"),
         Index("ix_sacco_loan_installment_org_application_due", "organization_id", "application_id", "due_date"),
     )
