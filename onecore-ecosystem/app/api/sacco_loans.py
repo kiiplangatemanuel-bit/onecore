@@ -694,6 +694,15 @@ def request_loan_disbursement(
 ):
     _require_permission(membership, "request_disbursement")
     application = _application_for_membership(db, membership, application_id, for_update=True)
+    fingerprint = transaction_fingerprint(payload.model_dump(mode="json", exclude={"idempotency_key"}))
+    replay = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
+    ).first()
+    if replay:
+        if replay.application_id != application.id or replay.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for different disbursement evidence")
+        return _disbursement_out(replay)
+
     if application.status != "approved_pending_disbursement":
         raise HTTPException(409, "Only an approved loan awaiting disbursement can be disbursed")
     if user.id in {application.created_by, application.assessed_by, application.decided_by}:
@@ -705,15 +714,6 @@ def request_loan_disbursement(
         raise HTTPException(409, "Disbursement currency must match the approved loan product")
     if payload.value_date >= application.first_repayment_date:
         raise HTTPException(409, "Disbursement value date must precede the first contractual repayment date")
-
-    fingerprint = transaction_fingerprint(payload.model_dump(mode="json", exclude={"idempotency_key"}))
-    replay = db.query(SaccoLoanDisbursement).filter_by(
-        organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
-    ).first()
-    if replay:
-        if replay.request_fingerprint != fingerprint:
-            raise HTTPException(409, "Idempotency key was already used for different disbursement evidence")
-        return _disbursement_out(replay)
 
     pending = db.query(SaccoLoanDisbursement).filter_by(
         organization_id=membership.organization_id, application_id=application.id,
