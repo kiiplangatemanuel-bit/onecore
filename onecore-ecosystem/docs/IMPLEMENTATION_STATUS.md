@@ -6,8 +6,8 @@ validation, integration, testing, documentation, deployment, monitoring and UAT
 evidence has been reviewed. The categories are functional groupings, not 75 separate
 microservices.
 
-**Reconciled:** 11 November 2026  
-**Implementation code head reviewed:** `efbacd5d8b0aaef3a52cc9403e67421a5be9c714` (tracker-only reconciliation follows)
+**Reconciled:** 12 November 2026  
+**Implementation code head reviewed:** `37e04146cb56cb1b741a95ced3ea2870471d5658` (tracker-only reconciliation follows)
 
 ## Verified on current main
 
@@ -26,19 +26,20 @@ coverage:
 - Organization/branch models, branch-scoped access, membership invitations,
   tenant-aware host routing, custom-domain ownership verification, pre-activation
   HTTPS certificate checks, and targeted/audited maintenance notices.
-- PostgreSQL tenant RLS policies and forced-RLS catalog checks. The current CI
-  additionally assumes a non-owner `NOLOGIN NOSUPERUSER NOBYPASSRLS` role and
-  tests actual tenant read/write isolation and append-only audit behavior on
-  `records`, `memberships`, `audit_events`, `sacco_members`,
-  `sacco_financial_transactions` and `sacco_ledger_entries`, plus account-owner
-  outbox isolation and worker-only delivery-state updates on
-  `identity_email_deliveries`. SACCO financial rows also have tenant-consistent
-  composite foreign keys and a PostgreSQL append-only ledger trigger.
-- Alembic migration chain through `0067_sacco_member_ledger`, with CI upgrade,
+- PostgreSQL tenant RLS policies and forced-RLS catalog checks. CI uses a
+  non-owner NOLOGIN NOSUPERUSER NOBYPASSRLS behavior role and verifies actual
+  tenant read/write isolation on records, memberships, audit_events, sacco_members,
+  sacco_financial_transactions, sacco_ledger_entries and all five SACCO loan tables
+  (products, applications, guarantors, collateral and projected installments).
+  Separate PostgreSQL catalog tests verify the onecore_api role's column-level loan
+  workflow grants and absence of table-level UPDATE/DELETE on product/installment
+  tables. Identity-email owner/worker RLS is tested separately. This is disposable
+  CI PostgreSQL evidence, not production Supabase role provisioning.
+- Alembic migration chain through `0068_sacco_loan_origination`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
   Procurement, POS, School, Hospital, Pharmacy/Laboratory, HR/Payroll and a
-  partial SACCO member/KYC plus savings/share subledger. These are partial
+  partial SACCO member/KYC, savings/share subledger and loan-origination workflow. These are partial
   applications with real models/migrations, APIs, validation, authorization,
   audit and tests; their presence does not mean their full master requirements
   or production acceptance are complete.
@@ -93,6 +94,35 @@ coverage:
   builds passed. Vercel previews for the developers, admin and community portals
   were rate-limited; the main OneCore deployment status was successful.
 
+## SACCO loan origination and credit governance increment (12 November 2026)
+
+Merged in [PR #133](https://github.com/kiiplangatemanuel-bit/onecore/pull/133),
+squash commit [37e0414](https://github.com/kiiplangatemanuel-bit/onecore/commit/37e04146cb56cb1b741a95ced3ea2870471d5658):
+
+- Migration 0068 adds tenant-owned loan products, member applications, guarantors,
+  collateral and projected installments. Composite tenant foreign keys and forced
+  PostgreSQL RLS protect the five tables.
+- Product controls include organization currency, principal/term bounds, annual
+  reducing-balance rate, minimum guarantors, collateral requirement and maximum
+  debt-service ratio. Applications use organization-scoped idempotency and inherit
+  branch scope from the active member.
+- Credit assessment calculates an estimated monthly installment and debt-service
+  ratio. Guarantor consent and collateral verification require independent staff
+  attestations; approval is separate from both application creation and assessment.
+- Approval stops at approved_pending_disbursement and creates a projected
+  reducing-balance schedule. No provider disbursement, repayment, accrual or
+  settlement is initiated or claimed.
+- The CI-only onecore_api role is created before migrations so migration grants
+  are exercised. PostgreSQL tests verify tenant RLS and column-level grants;
+  docs/SACCO_LOAN_ORIGINATION.md records the workflow and explicit gaps.
+- PR CI run [43206480238](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43206480238)
+  and post-merge main run
+  [43206767455](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43206767455)
+  both passed **459 tests with 8 warnings**, migration upgrade/downgrade/re-upgrade,
+  dependency audit, Python compilation, main frontend build and all ten portal builds.
+  Vercel preview contexts were rate-limited by the account's build quota; no
+  deployment is claimed.
+
 ## Identity email outbox increment (11 November 2026)
 
 Merged to main in [PR #130](https://github.com/kiiplangatemanuel-bit/onecore/pull/130),
@@ -126,40 +156,48 @@ at-least-once, so a crash after provider acceptance can cause a duplicate. No li
 provider delivery or production deployment is claimed.
 
 
-## SACCO member, KYC and savings/share ledger increments (11 November 2026)
+## SACCO member, KYC, savings/share and loan-origination increments (11–12 November 2026)
 
-The SACCO/Microfinance/Chama category is now partially implemented on main; it is
-not a complete lending or cooperative platform.
+The SACCO/Microfinance/Chama category is partially implemented on main; it is
+not a complete lending, cooperative or microfinance platform.
 
 - PR #131 introduced tenant/branch-scoped member registration, encrypted national
   ID/date-of-birth/address payloads, keyed duplicate detection, audited protected
-  KYC reads and four-eyes verify/reject decisions. The member register does not
-  expose raw identity data in ordinary list/detail responses.
+  KYC reads and four-eyes verify/reject decisions. Ordinary member responses do
+  not expose raw identity data.
 - PR #132 introduced savings deposits and share contributions as separate
   subledgers, pending savings withdrawals, independent manager approval/rejection,
   balance rechecks under a member-row lock, organization-scoped idempotency and
-  derived balances. The ledger stores signed entries and does not permit direct
-  updates/deletes.
-- Migration 0066_sacco_membership_kyc creates the member/KYC register;
-  0067_sacco_member_ledger adds financial workflow and ledger tables, forced RLS,
-  tenant-consistent composite foreign keys, restricted onecore_api grants and an
-  immutable-ledger trigger.
+  derived balances. Ledger rows are append-only.
+- PR #133 added loan products, idempotent member applications, reducing-balance
+  affordability assessment, staff-recorded guarantor consent, collateral
+  verification, independent credit approval and projected installment schedules.
+  The workflow ends at approved_pending_disbursement; no actual disbursement or
+  repayment posting is implemented.
+- Migrations 0066_sacco_membership_kyc, 0067_sacco_member_ledger and
+  0068_sacco_loan_origination create the domain tables, tenant-consistent composite
+  foreign keys, forced RLS and restricted onecore_api grants. PostgreSQL CI also
+  tests loan-table tenant isolation and column-level privileges.
 - API and UI are available under /api/v1/sacco and /sacco. Documentation:
-  docs/SACCO_MEMBERSHIP_KYC.md and docs/SACCO_SAVINGS_LEDGER.md.
-- CI run 43018186856 on main passed 444 tests with 8 warnings, including PostgreSQL
-  RLS behavior, append-only ledger enforcement, migration upgrade/downgrade/
-  re-upgrade, dependency audit, compilation, main frontend build and all ten
-  portal builds.
+  docs/SACCO_MEMBERSHIP_KYC.md, docs/SACCO_SAVINGS_LEDGER.md and
+  docs/SACCO_LOAN_ORIGINATION.md.
+- Post-merge main run 43206767455 passed 459 tests with 8 warnings, migration
+  upgrade/downgrade/re-upgrade, dependency audit, Python compilation, main frontend
+  build and all ten portal builds.
 
-Remaining SACCO/Microfinance/Chama scope: savings product terms, limits and
-interest; share redemption/member exit/dividends; compensating reversals and
-accounting general-ledger/cashbook reconciliation; groups/chama contributions,
-meetings and voting; loan products, credit assessment, guarantors/collateral,
-approval matrices, disbursement, interest/penalty accrual, repayments, arrears and
-restructuring; member statements/portals; verified M-Pesa/bank integration;
-portfolio/risk reports; production role rehearsal, monitoring, backup/restore,
-security review and UAT. Internal deposit/share entries are not proof of settled
-cash, bank or M-Pesa payments.
+Remaining SACCO/Microfinance/Chama scope: product update/deactivation and fees;
+verified loan disbursement and settlement; schedule activation only after confirmed
+value date/amount; repayments and allocation waterfall; partial/early settlement;
+interest and penalty accrual; arrears ageing, collections, rescheduling,
+restructuring, write-offs and reversals; member statements and digital self-service;
+guarantor exposure aggregation and member-wide credit limits; collateral document
+storage and independent valuation; savings product terms, limits and interest;
+withdrawal reversals, share redemption, member exit and dividends; groups/chama
+contributions, meetings and voting; general-ledger/cashbook reconciliation;
+portfolio/risk reports; verified M-Pesa/bank integrations; production role rehearsal,
+monitoring, backup/restore, security review and UAT. Staff-recorded consent references
+are not digital signatures; collateral references are not uploaded documents.
+Internal deposit/share entries are not proof of settled cash, bank or M-Pesa payments.
 
 ## Current outstanding work and release blockers
 
@@ -172,7 +210,7 @@ cash, bank or M-Pesa payments.
    suite against the target Supabase project. CI uses disposable local PostgreSQL
    roles only.
 2. **Backups and disaster recovery:** scheduled backup run
-   [42746373375](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42746373375)
+   [43145198319](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43145198319)
    stopped at its configuration preflight because these repository secrets are
    missing: `ONECORE_BACKUP_DATABASE_URL`, `ONECORE_BACKUP_S3_BUCKET`,
    `ONECORE_BACKUP_AWS_ACCESS_KEY_ID`, `ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY`
@@ -180,7 +218,7 @@ cash, bank or M-Pesa payments.
    `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME`.
    No successful production backup or restore drill is evidenced.
 3. **Production monitoring:** health-monitor run
-   [42800251425](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/42800251425)
+   [43203703600](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43203703600)
    stopped at preflight because `ONECORE_HEALTHCHECK_URL` is not configured.
    Consequently no production `/health`, `/ready`, OpenAPI or provider-configuration
    probe has been verified.
@@ -197,9 +235,9 @@ cash, bank or M-Pesa payments.
 6. **Specialist scope:** Accounting, CRM, Procurement, POS, School, Hospital,
    Pharmacy/Laboratory, HR/Payroll and SACCO/Microfinance/Chama still need
    feature-by-feature completion, fuller user workflows and UAT. SACCO currently
-   covers member/KYC and a limited savings/share subledger; groups, lending,
-   dividends, statements, GL integration and verified payment workflows remain
-   open. Hotel, Restaurant, Property, Services, E-commerce, Website Builder,
+   covers member/KYC, a limited savings/share subledger and loan origination through
+   projected schedules; verified disbursement, repayments, accruals, arrears,
+   groups/chama, dividends, statements and GL integration remain open. Hotel, Restaurant, Property, Services, E-commerce, Website Builder,
    central CMS and other product categories likewise need their own reviewed
    vertical slices; a catalogue folder or manifest is not implementation evidence.
 7. **Frontend and quality:** complete responsive workspaces, English/Kiswahili
