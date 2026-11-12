@@ -155,6 +155,7 @@
 <h3>Loan disbursement evidence</h3>
 <p class="muted">Record the full approved principal and an external settlement reference. A separate SACCO treasurer must review the evidence before the loan schedule is activated. This workflow does not initiate or independently confirm a bank or M-Pesa payment.</p>
 <form id="loanDisbursement">
+<input type="hidden" name="idempotency_key">
 <label>Application ID<input name="application_id" type="number" min="1" required></label>
 <label>Disbursed amount<input name="amount" type="number" min="0.01" step="0.01" required></label>
 <label>Currency<input name="currency" value="KES" maxlength="3" required></label>
@@ -460,8 +461,9 @@ $('loanDisbursement').addEventListener('submit',async event=>{
   const result=await api('/sacco/loan-applications/'+id+'/disbursements',{method:'POST',body:JSON.stringify({
    amount:String(form.get('amount')),currency:form.get('currency'),channel:form.get('channel'),
    external_reference:form.get('external_reference'),value_date:form.get('value_date'),
-   request_note:form.get('request_note'),idempotency_key:crypto.randomUUID()
+   request_note:form.get('request_note'),idempotency_key:form.get('idempotency_key')||crypto.randomUUID()
   })});
+  $('loanDisbursement').elements.idempotency_key.value=crypto.randomUUID();
   status('Disbursement evidence '+result.id+' submitted for independent treasurer review.');
   await refreshLoanSchedule(id);await refreshLoans();
  }catch(error){status(error.message);}
@@ -474,12 +476,15 @@ $('loanDisbursementVerify').addEventListener('submit',async event=>{
   const result=await api('/sacco/loan-disbursements/'+evidenceId+'/verification',{method:'POST',body:JSON.stringify({
    decision:form.get('decision'),note:form.get('note')
   })});
-  status('Disbursement evidence '+result.status+'. Loan activation follows only after verification.');
+  status(result.status==='verified'
+   ?'Disbursement evidence verified; the loan is now active.'
+   :'Disbursement evidence rejected; the loan remains approved pending disbursement.');
   const applicationId=Number(form.get('application_id')||$('loanDisbursement').elements.application_id.value);
   if(applicationId>0)await refreshLoanSchedule(applicationId);
   await refreshLoans();
  }catch(error){status(error.message);}
 });
+$('loanDisbursement').elements.idempotency_key.value=crypto.randomUUID();
 $('refreshLoans').addEventListener('click',async()=>{
  if(!token)return status('Sign in first.');
  try{await refreshLoans();status('Loan products and applications refreshed.');}catch(error){status(error.message);}
