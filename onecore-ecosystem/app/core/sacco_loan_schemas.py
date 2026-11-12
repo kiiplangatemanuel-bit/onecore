@@ -152,7 +152,7 @@ class SaccoLoanDisbursementCreateIn(BaseModel):
     def normalize_disbursement_currency(cls, value):
         return str(value or "").strip().upper()
 
-    @field_validator("external_reference", "request_note", "idempotency_key")
+    @field_validator("external_reference", "request_note", "idempotency_key", mode="before")
     @classmethod
     def normalize_disbursement_text(cls, value):
         return " ".join(str(value or "").split())
