@@ -133,6 +133,31 @@ def upgrade():
             FOR EACH ROW EXECUTE FUNCTION public.onecore_guard_sacco_loan_disbursement()
         """)
         op.execute("""
+            CREATE OR REPLACE FUNCTION public.onecore_require_verified_sacco_disbursement()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $sacco_loan_activation$
+            BEGIN
+                IF NEW.status = 'active' AND
+                   (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) AND
+                   NOT EXISTS (
+                       SELECT 1 FROM public.sacco_loan_disbursements d
+                       WHERE d.organization_id = NEW.organization_id
+                         AND d.application_id = NEW.id
+                         AND d.status = 'verified'
+                   ) THEN
+                    RAISE EXCEPTION 'A SACCO loan cannot become active without verified disbursement evidence';
+                END IF;
+                RETURN NEW;
+            END
+            $sacco_loan_activation$
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_sacco_loan_activation_requires_disbursement
+            BEFORE INSERT OR UPDATE OF status ON public.sacco_loan_applications
+            FOR EACH ROW EXECUTE FUNCTION public.onecore_require_verified_sacco_disbursement()
+        """)
+        op.execute("""
             DO $sacco_loan_disbursement_grants$
             BEGIN
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
@@ -153,6 +178,8 @@ def downgrade():
     if bind.dialect.name == "postgresql":
         op.execute("DROP TRIGGER IF EXISTS trg_sacco_loan_disbursement_guard ON public.sacco_loan_disbursements")
         op.execute("DROP FUNCTION IF EXISTS public.onecore_guard_sacco_loan_disbursement()")
+        op.execute("DROP TRIGGER IF EXISTS trg_sacco_loan_activation_requires_disbursement ON public.sacco_loan_applications")
+        op.execute("DROP FUNCTION IF EXISTS public.onecore_require_verified_sacco_disbursement()")
         op.execute("DROP POLICY IF EXISTS sacco_loan_disbursement_tenant_scope ON public.sacco_loan_disbursements")
         op.execute("ALTER TABLE public.sacco_loan_disbursements NO FORCE ROW LEVEL SECURITY")
         op.execute("ALTER TABLE public.sacco_loan_disbursements DISABLE ROW LEVEL SECURITY")
