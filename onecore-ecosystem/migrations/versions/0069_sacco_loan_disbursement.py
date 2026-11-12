@@ -117,11 +117,41 @@ def upgrade():
                 IF TG_OP = 'DELETE' THEN
                     RAISE EXCEPTION 'SACCO loan disbursement evidence is retained for audit';
                 END IF;
+                IF TG_OP = 'INSERT' THEN
+                    IF NEW.status <> 'pending_verification'
+                       OR NEW.reviewed_by IS NOT NULL
+                       OR NEW.reviewed_at IS NOT NULL
+                       OR NEW.review_note <> '' THEN
+                        RAISE EXCEPTION 'Disbursement evidence must start in pending verification';
+                    END IF;
+                    RETURN NEW;
+                END IF;
                 IF OLD.status <> 'pending_verification' THEN
                     RAISE EXCEPTION 'Reviewed SACCO loan disbursement evidence is immutable';
                 END IF;
                 IF NEW.status NOT IN ('verified', 'rejected') THEN
                     RAISE EXCEPTION 'Pending disbursement evidence can only be verified or rejected';
+                END IF;
+                IF NEW.reviewed_by IS NULL OR NEW.reviewed_by = OLD.requested_by
+                   OR NEW.reviewed_at IS NULL OR length(trim(NEW.review_note)) < 5 THEN
+                    RAISE EXCEPTION 'Independent disbursement review evidence is required';
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM public.memberships m
+                    WHERE m.organization_id = NEW.organization_id
+                      AND m.user_id = NEW.reviewed_by
+                      AND m.is_active = true
+                      AND lower(m.role) IN ('org_admin', 'sacco_treasurer')
+                ) THEN
+                    RAISE EXCEPTION 'Disbursement reviewer must have an active treasurer or organization-admin membership';
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM public.sacco_loan_applications a
+                    WHERE a.organization_id = NEW.organization_id
+                      AND a.id = NEW.application_id
+                      AND NEW.reviewed_by IN (a.created_by, a.assessed_by, a.decided_by)
+                ) THEN
+                    RAISE EXCEPTION 'Disbursement reviewer must be independent of loan origination and credit approval';
                 END IF;
                 RETURN NEW;
             END
