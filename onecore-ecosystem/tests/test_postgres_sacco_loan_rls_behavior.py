@@ -122,7 +122,7 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
             disbursement_id = connection.execute(insert(SaccoLoanDisbursement).values(
                 organization_id=organization_id, application_id=application_id,
                 amount=Decimal("1000.00"), currency="KES", channel="bank_transfer",
-                external_reference=f"DISBURSE-{prefix}-{suffix[:8]}", value_date=date.today(),
+                external_reference=f"DISBURSE-{prefix}-{suffix[:8]}".upper(), value_date=date.today(),
                 status="pending_verification", request_note="RLS fixture disbursement evidence",
                 requested_by=user_id, reviewed_by=None, reviewed_at=None, review_note="",
                 idempotency_key=f"loan-disbursement-{prefix}-{suffix}",
@@ -202,7 +202,7 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                 connection.execute(insert(SaccoLoanDisbursement).values(
                     organization_id=org_b, application_id=b_ids[1],
                     amount=Decimal("1000.00"), currency="KES", channel="bank_transfer",
-                    external_reference=f"FORBIDDEN-{suffix}", value_date=date.today(),
+                    external_reference=f"FORBIDDEN-{suffix}".upper(), value_date=date.today(),
                     status="pending_verification", request_note="Cross-tenant disbursement",
                     requested_by=user_a, reviewed_by=None, reviewed_at=None, review_note="",
                     idempotency_key=f"forbidden-disbursement-{suffix}",
