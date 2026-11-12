@@ -64,7 +64,7 @@ class SaccoLoanApplication(Base):
         CheckConstraint("principal > 0 AND term_months BETWEEN 1 AND 120", name="ck_sacco_loan_application_terms"),
         CheckConstraint("monthly_net_income > 0 AND monthly_existing_debt >= 0", name="ck_sacco_loan_application_income"),
         CheckConstraint("assessment_status IN ('pending', 'eligible', 'ineligible')", name="ck_sacco_loan_application_assessment"),
-        CheckConstraint("status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', 'approved_pending_disbursement', 'rejected')", name="ck_sacco_loan_application_status"),
+        CheckConstraint("status IN ('pending_assessment', 'pending_guarantors', 'pending_approval', 'approved_pending_disbursement', 'active', 'rejected')", name="ck_sacco_loan_application_status"),
         Index("ix_sacco_loan_application_org_status", "organization_id", "status", "created_at"),
         Index("ix_sacco_loan_application_org_member", "organization_id", "member_id", "created_at"),
         Index("ix_sacco_loan_application_org_branch", "organization_id", "branch_id"),
