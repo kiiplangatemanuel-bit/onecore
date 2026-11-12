@@ -237,8 +237,8 @@ Internal deposit/share entries are not proof of settled cash, bank or M-Pesa pay
    and `ONECORE_BACKUP_AWS_REGION`. The restore drill also needs
    `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME`.
    No successful production backup or restore drill is evidenced.
-3. **Production monitoring:** health-monitor run
-   [43203703600](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43203703600)
+3. **Production monitoring:** latest health-monitor run
+   [43211928318](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43211928318)
    stopped at preflight because `ONECORE_HEALTHCHECK_URL` is not configured.
    Consequently no production `/health`, `/ready`, OpenAPI or provider-configuration
    probe has been verified.
