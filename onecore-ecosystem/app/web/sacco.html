@@ -85,6 +85,7 @@
 <form id="loanProduct">
 <label>Product code<input name="code" maxlength="32" required></label>
 <label>Product name<input name="name" maxlength="120" required></label>
+<label>Branch ID<input name="branch_id" maxlength="36" placeholder="Required for branch-restricted product managers"></label>
 <label>Currency<input name="currency" value="KES" maxlength="3" required></label>
 <label>Minimum principal<input name="minimum_principal" type="number" min="0.01" step="0.01" required></label>
 <label>Maximum principal<input name="maximum_principal" type="number" min="0.01" step="0.01" required></label>
@@ -327,7 +328,7 @@ $('loanProduct').addEventListener('submit',async event=>{
  const form=new FormData(event.currentTarget);
  try{
   await api('/sacco/loan-products',{method:'POST',body:JSON.stringify({
-   code:form.get('code'),name:form.get('name'),currency:form.get('currency'),
+   code:form.get('code'),name:form.get('name'),branch_id:form.get('branch_id')||null,currency:form.get('currency'),
    minimum_principal:String(form.get('minimum_principal')),maximum_principal:String(form.get('maximum_principal')),
    annual_interest_rate_bps:Number(form.get('annual_interest_rate_bps')),
    minimum_term_months:Number(form.get('minimum_term_months')),maximum_term_months:Number(form.get('maximum_term_months')),
