@@ -258,7 +258,7 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
         with pytest.raises(DBAPIError):
             with connection.begin_nested():
                 connection.execute(text(
-                    "UPDATE sacco_loan_applications SET status = 'active' WHERE id = :id"
+                    "UPDATE sacco_loan_applications SET status = 'settled' WHERE id = :id"
                 ), {"id": a_ids[1]})
 
         with pytest.raises(DBAPIError):
