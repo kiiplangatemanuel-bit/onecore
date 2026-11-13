@@ -94,3 +94,22 @@ class ManagedFileShare(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (Index("ix_managed_file_share_file", "file_id", "revoked_at"),)
+
+
+class ManagedFileVersion(Base):
+    __tablename__ = "managed_file_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("managed_files.id", ondelete="CASCADE"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    object_key: Mapped[str] = mapped_column(String(512), unique=True)
+    content_type: Mapped[str] = mapped_column(String(160), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    scan_status: Mapped[str] = mapped_column(String(24), default="clean")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        UniqueConstraint("file_id", "version_number", name="uq_managed_file_version_number"),
+        Index("ix_managed_file_version_org_file", "organization_id", "file_id"),
+    )
