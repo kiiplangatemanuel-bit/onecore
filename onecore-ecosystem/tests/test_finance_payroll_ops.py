@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.core.models import Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine
+from app.core.models import Organization, User, AccountingAccount, AccountingJournal, AccountingJournalLine, AccountingBankStatement, AccountingBankStatementLine
 from app.core.security import current_user
 from app.core.tenancy import active_membership
 from app.main import app
@@ -139,4 +139,60 @@ def test_fx_posting_and_revaluation_create_balanced_tenant_journals():
         app.dependency_overrides.pop(current_user,None)
         app.dependency_overrides.pop(active_membership,None)
         Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_bank_statement_matching_candidates_are_scoped_to_statement_bank_and_period():
+    engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session=sessionmaker(bind=engine,autoflush=False,autocommit=False,expire_on_commit=False)
+    db=Session()
+    org=Organization(name="Bank Match Test",slug="bank-match-test",currency="KES")
+    user=User(email="bank-match@example.test",full_name="Bank Matcher",password_hash="x")
+    db.add_all([org,user]);db.flush()
+    bank=AccountingAccount(organization_id=org.id,code="1000",name="Bank",account_type="asset",created_by=user.id)
+    db.add(bank);db.flush()
+    journal=AccountingJournal(organization_id=org.id,journal_number="JRN-BANK-001",
+        reference="BANK-REF-001",memo="Bank receipt",status="posted",
+        entry_date=datetime(2026,11,10,tzinfo=timezone.utc),created_by=user.id,
+        posted_by=user.id,posted_at=datetime(2026,11,10,tzinfo=timezone.utc))
+    db.add(journal);db.flush()
+    ledger_line=AccountingJournalLine(organization_id=org.id,journal_id=journal.id,
+        account_id=bank.id,description="Customer receipt",debit=Decimal("1250.00"),credit=Decimal("0.00"))
+    db.add(ledger_line);db.flush()
+    statement=AccountingBankStatement(organization_id=org.id,bank_account_id=bank.id,
+        statement_reference="STMT-001",start_date=datetime(2026,11,1,tzinfo=timezone.utc),
+        end_date=datetime(2026,11,30,tzinfo=timezone.utc),opening_balance=Decimal("0.00"),
+        closing_balance=Decimal("1250.00"),status="draft",created_by=user.id)
+    db.add(statement);db.flush()
+    db.add(AccountingBankStatementLine(organization_id=org.id,statement_id=statement.id,
+        line_number=1,transaction_date=datetime(2026,11,10,tzinfo=timezone.utc),
+        description="Customer receipt",reference="BANK-REF-001",amount=Decimal("1250.00")))
+    db.commit()
+    org_id=org.id;user_id=user.id;statement_id=statement.id
+    db.close()
+    actor={"user":user}
+    def override_db():
+        session=Session()
+        try: yield session
+        finally: session.close()
+    def override_user(): return actor["user"]
+    def override_membership():
+        return type("MembershipContext",(),{"organization_id":org_id,"role":"org_admin","branch_scope":"*"})()
+    app.dependency_overrides[get_db]=override_db
+    app.dependency_overrides[current_user]=override_user
+    app.dependency_overrides[active_membership]=override_membership
+    try:
+        with TestClient(app) as client:
+            response=client.get(f"/api/v1/accounting/bank-statements/{statement_id}/candidates")
+            assert response.status_code==200,response.text
+            candidates=response.json()
+            assert len(candidates)==1
+            assert candidates[0]["reference"]=="BANK-REF-001"
+            assert candidates[0]["amount"]=="1250.00"
+            assert candidates[0]["id"]==ledger_line.id
+    finally:
+        app.dependency_overrides.clear()
+        db=Session()
+        db.close()
         engine.dispose()
