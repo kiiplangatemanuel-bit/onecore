@@ -1054,6 +1054,29 @@ def import_supplier_statement(payload: SupplierStatementIn, membership=Depends(a
             "line_count": len(payload.lines), "status": row.status}
 
 
+
+@router.get("/supplier-statements")
+def list_supplier_statements(q: str = "", limit: int = 100,
+                             membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    if branch_scope_ids(membership) is not None:
+        raise HTTPException(403, "Supplier statement reconciliation requires organization-wide branch access")
+    query = db.query(ProcurementSupplierStatement, ProcurementSupplier.name).join(
+        ProcurementSupplier, ProcurementSupplier.id == ProcurementSupplierStatement.supplier_id
+    ).filter(ProcurementSupplierStatement.organization_id == membership.organization_id)
+    if q.strip():
+        query = query.filter(or_(
+            ProcurementSupplierStatement.statement_reference.ilike(f"%{q.strip()}%"),
+            ProcurementSupplier.name.ilike(f"%{q.strip()}%"),
+        ))
+    rows = query.order_by(ProcurementSupplierStatement.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+    return [{"id": row.id, "supplier_id": row.supplier_id, "supplier": supplier_name,
+             "statement_reference": row.statement_reference, "start_date": row.start_date.isoformat(),
+             "end_date": row.end_date.isoformat(), "opening_balance": str(row.opening_balance),
+             "closing_balance": str(row.closing_balance), "status": row.status,
+             "created_at": row.created_at.isoformat()} for row, supplier_name in rows]
+
+
 @router.get("/supplier-statements/{statement_id}")
 def get_supplier_statement(statement_id: int, membership=Depends(active_membership),
                            db: Session = Depends(get_db)):
