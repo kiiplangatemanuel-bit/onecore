@@ -1199,7 +1199,7 @@ def verify_loan_repayment(
             remaining_installments = db.query(SaccoLoanInstallment).filter(
                 SaccoLoanInstallment.organization_id == membership.organization_id,
                 SaccoLoanInstallment.application_id == application.id,
-                ~SaccoLoanInstallment.status.in_(["paid", "waived"]),
+                SaccoLoanInstallment.status != "paid",
             ).count()
             if remaining_installments == 0:
                 application.status = "settled"
