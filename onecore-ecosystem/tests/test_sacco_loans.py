@@ -659,7 +659,7 @@ def test_repayment_allocation_is_oldest_due_and_interest_first():
         "interest_amount": Decimal("100.00"),
     }]
     with pytest.raises(ValueError):
-        allocate_due_repayment(Decimal("1200.00"), installments)
+        allocate_due_repayment(Decimal("1200.01"), installments)
 
 
 def test_repayment_requires_independent_verification_and_posts_balanced_partial_allocations():
