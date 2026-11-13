@@ -53,6 +53,7 @@ def _tables():
         "accounting_fx_rates", "accounting_fx_postings",
         "accounting_fx_revaluations", "accounting_fx_settlements",
         "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+        "subscription_plans", "organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
