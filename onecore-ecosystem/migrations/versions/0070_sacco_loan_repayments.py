@@ -350,6 +350,12 @@ def upgrade():
                 ) THEN
                     RAISE EXCEPTION 'Repayment journal lines require a verified same-currency receipt';
                 END IF;
+                IF NEW.branch_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM public.branches b
+                    WHERE b.organization_id = NEW.organization_id AND b.id = NEW.branch_id
+                ) THEN
+                    RAISE EXCEPTION 'Repayment journal branch must belong to the same tenant';
+                END IF;
                 RETURN NEW;
             END
             $sacco_loan_repayment_journal$
@@ -440,7 +446,7 @@ def upgrade():
                     WHERE i.organization_id = NEW.organization_id AND i.application_id = NEW.id
                       AND i.status <> 'paid'
                 ) THEN
-                    RAISE EXCEPTION 'A SACCO loan can be settled only after every installment is paid or waived';
+                    RAISE EXCEPTION 'A SACCO loan can be settled only after every installment is fully paid';
                 END IF;
                 RETURN NEW;
             END
