@@ -674,6 +674,13 @@ def test_repayment_requires_independent_verification_and_posts_balanced_partial_
         requester_membership = _membership(org.id, "sacco_officer")
         reviewer_membership = _membership(org.id, "sacco_treasurer")
         payload = _repayment_payload("500.00", "loan-repayment-001", "MPESA-LOAN-001")
+        with pytest.raises(HTTPException) as branch_denied:
+            request_loan_repayment(
+                application.id, payload, requester,
+                _membership(org.id, "sacco_officer", "unauthorized-branch"), db,
+            )
+        assert branch_denied.value.status_code == 404
+
         with pytest.raises(HTTPException) as overpayment:
             request_loan_repayment(
                 application.id,
