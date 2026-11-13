@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import Base
 from app.core.models import AuditEvent, Membership, Organization, User
 from app.core.platform_commerce_models import (
-    ManagedFile, ManagedFileShare, OrganizationSubscription, SubscriptionPayment, SubscriptionPlan,
+    ManagedFile, ManagedFileShare, ManagedFileVersion, OrganizationSubscription, SubscriptionPayment, SubscriptionPlan,
 )
 
 
@@ -26,12 +26,14 @@ def test_platform_commerce_models_and_routes_are_registered():
     assert SubscriptionPayment.__tablename__ == "subscription_payments"
     assert ManagedFile.__tablename__ == "managed_files"
     assert ManagedFileShare.__tablename__ == "managed_file_shares"
+    assert ManagedFileVersion.__tablename__ == "managed_file_versions"
     paths = set(app.openapi()["paths"])
     for path in (
         "/api/v1/subscription-plans", "/api/v1/subscriptions", "/api/v1/subscriptions/current",
         "/api/v1/subscriptions/{subscription_id}/payments", "/api/v1/files",
         "/api/v1/files/upload", "/api/v1/files/folders", "/api/v1/files/{file_id}/download",
         "/api/v1/files/{file_id}/shares", "/api/v1/files/shared/{token}/download",
+        "/api/v1/files/{file_id}/versions", "/api/v1/files/{file_id}/versions/{version_id}/download",
         "/api/v1/admin/platform/subscription-payments/{payment_id}/review",
     ):
         assert path in paths
