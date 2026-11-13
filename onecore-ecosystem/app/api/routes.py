@@ -3419,6 +3419,39 @@ def get_accounting_bank_statement(statement_id:int,membership=Depends(active_mem
             "matched_journal_line_id":x.matched_journal_line_id} for x in lines]}
 
 
+@router.get("/accounting/bank-statements/{statement_id}/candidates")
+def accounting_bank_statement_match_candidates(statement_id:int,membership=Depends(active_membership),db:Session=Depends(get_db)):
+    require_permission(membership,"read")
+    statement=db.query(AccountingBankStatement).filter_by(
+        id=statement_id,organization_id=membership.organization_id).first()
+    if not statement or (statement.branch_id is None and branch_scope_ids(membership) is not None) or (statement.branch_id and not can_access_branch(membership,statement.branch_id)):
+        raise HTTPException(404,"Bank statement not found")
+    matched_ids={row[0] for row in db.query(AccountingBankStatementLine.matched_journal_line_id).filter(
+        AccountingBankStatementLine.organization_id==membership.organization_id,
+        AccountingBankStatementLine.matched_journal_line_id.isnot(None)).all()}
+    query=db.query(AccountingJournalLine,AccountingJournal).join(
+        AccountingJournal,AccountingJournal.id==AccountingJournalLine.journal_id).filter(
+        AccountingJournalLine.organization_id==membership.organization_id,
+        AccountingJournalLine.account_id==statement.bank_account_id,
+        AccountingJournal.organization_id==membership.organization_id,
+        AccountingJournal.status=="posted",
+        AccountingJournal.entry_date>=statement.start_date,
+        AccountingJournal.entry_date<=statement.end_date)
+    if statement.branch_id is not None:
+        query=query.filter(AccountingJournalLine.branch_id==statement.branch_id)
+    else:
+        allowed=branch_scope_ids(membership)
+        if allowed is not None:
+            if not allowed:return []
+            query=query.filter((AccountingJournalLine.branch_id==None)|(AccountingJournalLine.branch_id.in_(allowed)))
+    rows=query.order_by(AccountingJournal.entry_date.desc(),AccountingJournal.id.desc()).limit(1000).all()
+    return [{"id":line.id,"journal_id":journal.id,"journal_number":journal.journal_number,
+        "entry_date":journal.entry_date.date().isoformat(),"description":line.description,
+        "reference":journal.reference,"debit":str(line.debit),"credit":str(line.credit),
+        "amount":str(Decimal(line.debit)-Decimal(line.credit))}
+        for line,journal in rows if line.id not in matched_ids]
+
+
 @router.post("/accounting/bank-statements/{statement_id}/match")
 def match_accounting_bank_statement_line(statement_id:int,payload:AccountingBankMatchIn,
     membership=Depends(active_membership),user:User=Depends(current_user),db:Session=Depends(get_db)):
