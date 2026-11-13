@@ -35,6 +35,7 @@ def test_platform_commerce_models_and_routes_are_registered():
         "/api/v1/files/{file_id}/shares", "/api/v1/files/shared/{token}/download",
         "/api/v1/files/{file_id}/versions", "/api/v1/files/{file_id}/versions/{version_id}/download",
         "/api/v1/admin/platform/subscription-payments/{payment_id}/review",
+        "/api/v1/pos/sales", "/api/v1/procurement/supplier-statements",
     ):
         assert path in paths
 
