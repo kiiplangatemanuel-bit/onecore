@@ -245,6 +245,23 @@ def _file_out(row):
             "created_at": row.created_at.isoformat()}
 
 
+
+def _classification_allowed(role: str, classification: str) -> bool:
+    role = (role or "").lower()
+    if classification == "restricted":
+        return role == "org_admin"
+    if classification == "confidential":
+        return role in {"org_admin", "branch_admin", "manager", "accountant", "hr_admin",
+                        "hr_manager", "payroll_manager", "payroll_approver", "payroll_payment",
+                        "payroll_accounting", "school_admin"}
+    return classification == "internal"
+
+
+def _require_file_access(membership, row):
+    if not _classification_allowed(membership.role, row.classification):
+        raise HTTPException(404, "File not found")
+
+
 def _parent_folder(db, organization_id, parent_id):
     if parent_id is None:
         return
@@ -260,6 +277,12 @@ def list_files(parent_id: int | None = Query(default=None, gt=0), q: str = Query
     require_permission(membership, "read")
     query = db.query(ManagedFile).filter_by(organization_id=membership.organization_id,
                                             parent_id=parent_id, deleted_at=None)
+    if membership.role == "org_admin":
+        pass
+    elif _classification_allowed(membership.role, "confidential"):
+        query = query.filter(ManagedFile.classification.in_(["internal", "confidential"]))
+    else:
+        query = query.filter(ManagedFile.classification == "internal")
     if q.strip():
         query = query.filter(ManagedFile.name.ilike(f"%{q.strip()}%"))
     return [_file_out(x) for x in query.order_by(ManagedFile.is_folder.desc(), ManagedFile.name).limit(500).all()]
@@ -286,6 +309,8 @@ async def upload_file(file: UploadFile = File(...), parent_id: int | None = Quer
                       membership=Depends(active_membership), user: User = Depends(current_user),
                       db: Session = Depends(get_db)):
     require_permission(membership, "create")
+    if not _classification_allowed(membership.role, classification):
+        raise HTTPException(403, "Your organization role cannot upload files at this classification")
     _parent_folder(db, membership.organization_id, parent_id)
     name = (file.filename or "upload").replace("\\", "/").split("/")[-1].strip()
     if not name or len(name) > 255 or any(ord(c) < 32 for c in name):
@@ -330,6 +355,7 @@ def move_or_rename_file(file_id: int, payload: FileMoveIn, membership=Depends(ac
                                           deleted_at=None).first()
     if not row:
         raise HTTPException(404, "File not found")
+    _require_file_access(membership, row)
     _parent_folder(db, membership.organization_id, payload.parent_id)
     if row.is_folder and payload.parent_id == row.id:
         raise HTTPException(409, "A folder cannot be moved into itself")
@@ -348,6 +374,7 @@ def delete_file(file_id: int, membership=Depends(active_membership), user: User 
                                           deleted_at=None).first()
     if not row:
         raise HTTPException(404, "File not found")
+    _require_file_access(membership, row)
     if row.is_folder and db.query(ManagedFile).filter_by(organization_id=membership.organization_id,
             parent_id=row.id, deleted_at=None).first():
         raise HTTPException(409, "Move or delete folder contents before deleting this folder")
@@ -373,6 +400,7 @@ def list_file_versions(file_id: int, membership=Depends(active_membership), db: 
     row = db.query(ManagedFile).filter_by(id=file_id, organization_id=membership.organization_id, deleted_at=None).first()
     if not row or row.is_folder:
         raise HTTPException(404, "File not found")
+    _require_file_access(membership, row)
     versions = db.query(ManagedFileVersion).filter_by(
         file_id=file_id, organization_id=membership.organization_id
     ).order_by(ManagedFileVersion.version_number.desc()).all()
@@ -390,6 +418,7 @@ async def upload_file_version(file_id: int, file: UploadFile = File(...),
                                           deleted_at=None, is_folder=False).with_for_update().first()
     if not row:
         raise HTTPException(404, "File not found")
+    _require_file_access(membership, row)
     name = (file.filename or row.name).split("/")[-1].strip()
     if not name or len(name) > 255:
         raise HTTPException(422, "Invalid file name")
@@ -436,6 +465,10 @@ async def upload_file_version(file_id: int, file: UploadFile = File(...),
 def download_file_version(file_id: int, version_id: int, membership=Depends(active_membership),
                           db: Session = Depends(get_db)):
     require_permission(membership, "read")
+    file_row = db.query(ManagedFile).filter_by(id=file_id, organization_id=membership.organization_id, deleted_at=None).first()
+    if not file_row:
+        raise HTTPException(404, "File not found")
+    _require_file_access(membership, file_row)
     version = db.query(ManagedFileVersion).filter_by(
         id=version_id, file_id=file_id, organization_id=membership.organization_id, scan_status="clean"
     ).first()
@@ -455,6 +488,7 @@ def download_file(file_id: int, membership=Depends(active_membership), db: Sessi
                                           deleted_at=None, is_folder=False, scan_status="clean").first()
     if not row:
         raise HTTPException(404, "File not found or not cleared for download")
+    _require_file_access(membership, row)
     try:
         url = _s3().generate_presigned_url("get_object", Params={"Bucket": settings.s3_bucket, "Key": row.object_key,
             "ResponseContentDisposition": f'attachment; filename="{row.name.replace(chr(34), "")}"'}, ExpiresIn=300)
@@ -471,6 +505,7 @@ def create_file_share(file_id: int, payload: ShareIn, membership=Depends(active_
                                           deleted_at=None, is_folder=False, scan_status="clean").first()
     if not row:
         raise HTTPException(404, "File not found or not cleared for sharing")
+    _require_file_access(membership, row)
     token = secrets.token_urlsafe(32)
     share = ManagedFileShare(organization_id=membership.organization_id, file_id=row.id, created_by=user.id,
                              token_hash=hashlib.sha256(token.encode()).hexdigest(),
