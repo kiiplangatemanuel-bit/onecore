@@ -15,6 +15,7 @@ from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
     SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
     SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanRepayment, SaccoLoanRepaymentAllocation, SaccoLoanRepaymentJournalLine,
 )
 
 CI_RUNTIME_ROLE = os.getenv("ONECORE_CI_RLS_ROLE", "").strip()
@@ -79,6 +80,26 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
         ).returning(SaccoMember.id)).scalar_one()
 
         def seed_tenant(organization_id, member_id, user_id, prefix):
+            requester_id = connection.execute(insert(User).values(
+                email=f"loan-requester-{prefix.lower()}-{suffix}@example.test",
+                full_name=f"Loan Requester {prefix}", phone="",
+                password_hash="not-a-real-login-hash", is_active=True,
+                platform_role="customer", auth_version=0, created_at=now,
+            ).returning(User.id)).scalar_one()
+            treasurer_id = connection.execute(insert(User).values(
+                email=f"loan-treasurer-{prefix.lower()}-{suffix}@example.test",
+                full_name=f"Loan Treasurer {prefix}", phone="",
+                password_hash="not-a-real-login-hash", is_active=True,
+                platform_role="customer", auth_version=0, created_at=now,
+            ).returning(User.id)).scalar_one()
+            connection.execute(insert(Membership).values(
+                user_id=requester_id, organization_id=organization_id,
+                role="sacco_officer", branch_scope="*", is_active=True,
+            ))
+            connection.execute(insert(Membership).values(
+                user_id=treasurer_id, organization_id=organization_id,
+                role="sacco_treasurer", branch_scope="*", is_active=True,
+            ))
             product_id = connection.execute(insert(SaccoLoanProduct).values(
                 organization_id=organization_id, branch_id=None, code=f"{prefix}-{suffix[:8]}",
                 name="Test loan", currency="KES", minimum_principal=Decimal("100.00"),
@@ -91,12 +112,12 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                 organization_id=organization_id, product_id=product_id, member_id=member_id,
                 branch_id=None, principal=Decimal("1000.00"), term_months=12,
                 purpose="Test tenant loan application", monthly_net_income=Decimal("50000.00"),
-                monthly_existing_debt=Decimal("0.00"), first_repayment_date=due,
+                monthly_existing_debt=Decimal("0.00"), first_repayment_date=date.today(),
                 assessment_status="eligible", debt_service_ratio_bps=200,
                 estimated_monthly_installment=Decimal("90.00"), assessment_note="Test assessment",
                 assessed_by=user_id, assessed_at=now, status="pending_approval",
-                decided_by=None, decided_at=None, decision_note="", created_by=user_id,
-                idempotency_key=f"loan-app-{prefix}-{suffix}",
+                decided_by=user_id, decided_at=now, decision_note="Approved in RLS fixture",
+                created_by=user_id, idempotency_key=f"loan-app-{prefix}-{suffix}",
                 request_fingerprint="e" * 64, created_at=now, updated_at=now,
             ).returning(SaccoLoanApplication.id)).scalar_one()
             guarantor_id = connection.execute(insert(SaccoLoanGuarantor).values(
@@ -115,20 +136,112 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
             ).returning(SaccoLoanCollateral.id)).scalar_one()
             installment_id = connection.execute(insert(SaccoLoanInstallment).values(
                 organization_id=organization_id, application_id=application_id,
-                installment_number=1, due_date=due, principal_due=Decimal("80.00"),
+                installment_number=1, due_date=date.today(), principal_due=Decimal("80.00"),
                 interest_due=Decimal("10.00"), total_due=Decimal("90.00"),
-                currency="KES", status="projected", created_at=now,
+                currency="KES", status="due", created_at=now,
+            ).returning(SaccoLoanInstallment.id)).scalar_one()
+            second_installment_id = connection.execute(insert(SaccoLoanInstallment).values(
+                organization_id=organization_id, application_id=application_id,
+                installment_number=2, due_date=date.today() + timedelta(days=30),
+                principal_due=Decimal("100.00"), interest_due=Decimal("0.00"),
+                total_due=Decimal("100.00"), currency="KES", status="projected",
+                created_at=now,
             ).returning(SaccoLoanInstallment.id)).scalar_one()
             disbursement_id = connection.execute(insert(SaccoLoanDisbursement).values(
                 organization_id=organization_id, application_id=application_id,
                 amount=Decimal("1000.00"), currency="KES", channel="bank_transfer",
-                external_reference=f"DISBURSE-{prefix}-{suffix[:8]}".upper(), value_date=date.today(),
+                external_reference=f"DISBURSE-{prefix}-{suffix[:8]}".upper(),
+                value_date=date.today() - timedelta(days=1),
                 status="pending_verification", request_note="RLS fixture disbursement evidence",
-                requested_by=user_id, reviewed_by=None, reviewed_at=None, review_note="",
+                requested_by=requester_id, reviewed_by=None, reviewed_at=None, review_note="",
                 idempotency_key=f"loan-disbursement-{prefix}-{suffix}",
                 request_fingerprint="9" * 64, created_at=now, updated_at=now,
             ).returning(SaccoLoanDisbursement.id)).scalar_one()
-            return product_id, application_id, guarantor_id, collateral_id, installment_id, disbursement_id
+            connection.execute(text("""
+                UPDATE sacco_loan_disbursements
+                SET status = 'verified', reviewed_by = :reviewer,
+                    reviewed_at = :reviewed_at, review_note = 'Independent statement review'
+                WHERE organization_id = :organization_id AND id = :id
+            """), {
+                "reviewer": treasurer_id, "reviewed_at": now,
+                "organization_id": organization_id, "id": disbursement_id,
+            })
+            connection.execute(text("""
+                UPDATE sacco_loan_applications SET status = 'active'
+                WHERE organization_id = :organization_id AND id = :id
+            """), {"organization_id": organization_id, "id": application_id})
+            repayment_id = connection.execute(insert(SaccoLoanRepayment).values(
+                organization_id=organization_id, application_id=application_id,
+                amount=Decimal("90.00"), currency="KES", channel="bank_transfer",
+                external_reference=f"REPAY-{prefix}-{suffix[:8]}".upper(),
+                value_date=date.today(), status="pending_verification",
+                request_note="RLS fixture repayment receipt evidence",
+                requested_by=requester_id, reviewed_by=None, reviewed_at=None, review_note="",
+                idempotency_key=f"loan-repayment-{prefix}-{suffix}",
+                request_fingerprint="7" * 64, created_at=now, updated_at=now,
+            ).returning(SaccoLoanRepayment.id)).scalar_one()
+            connection.execute(text("""
+                UPDATE sacco_loan_repayments
+                SET status = 'verified', reviewed_by = :reviewer,
+                    reviewed_at = :reviewed_at, review_note = 'Independent repayment review'
+                WHERE organization_id = :organization_id AND id = :id
+            """), {
+                "reviewer": treasurer_id, "reviewed_at": now,
+                "organization_id": organization_id, "id": repayment_id,
+            })
+            allocation_id = connection.execute(insert(SaccoLoanRepaymentAllocation).values(
+                organization_id=organization_id, repayment_id=repayment_id,
+                application_id=application_id, installment_id=installment_id,
+                principal_amount=Decimal("80.00"), interest_amount=Decimal("10.00"),
+                currency="KES", created_at=now,
+            ).returning(SaccoLoanRepaymentAllocation.id)).scalar_one()
+            journal_line_id = connection.execute(insert(SaccoLoanRepaymentJournalLine).values(
+                organization_id=organization_id, repayment_id=repayment_id,
+                line_number=1, account_code="cash_clearing",
+                debit=Decimal("90.00"), credit=Decimal("0.00"),
+                currency="KES", branch_id=None, created_at=now,
+            ).returning(SaccoLoanRepaymentJournalLine.id)).scalar_one()
+            connection.execute(insert(SaccoLoanRepaymentJournalLine).values(
+                organization_id=organization_id, repayment_id=repayment_id,
+                line_number=2, account_code="loan_principal_receivable",
+                debit=Decimal("0.00"), credit=Decimal("80.00"),
+                currency="KES", branch_id=None, created_at=now,
+            ))
+            connection.execute(insert(SaccoLoanRepaymentJournalLine).values(
+                organization_id=organization_id, repayment_id=repayment_id,
+                line_number=3, account_code="loan_interest_income",
+                debit=Decimal("0.00"), credit=Decimal("10.00"),
+                currency="KES", branch_id=None, created_at=now,
+            ))
+            connection.execute(text("""
+                UPDATE sacco_loan_installments
+                SET principal_paid = 80, interest_paid = 10, status = 'paid'
+                WHERE organization_id = :organization_id AND id = :id
+            """), {"organization_id": organization_id, "id": installment_id})
+            probe_repayment_id = connection.execute(insert(SaccoLoanRepayment).values(
+                organization_id=organization_id, application_id=application_id,
+                amount=Decimal("1.00"), currency="KES", channel="cash",
+                external_reference=f"PROBE-{prefix}-{suffix[:8]}".upper(),
+                value_date=date.today(), status="pending_verification",
+                request_note="RLS probe receipt awaiting allocation",
+                requested_by=requester_id, reviewed_by=None, reviewed_at=None, review_note="",
+                idempotency_key=f"loan-probe-{prefix}-{suffix}",
+                request_fingerprint="6" * 64, created_at=now, updated_at=now,
+            ).returning(SaccoLoanRepayment.id)).scalar_one()
+            connection.execute(text("""
+                UPDATE sacco_loan_repayments
+                SET status = 'verified', reviewed_by = :reviewer,
+                    reviewed_at = :reviewed_at, review_note = 'Independent RLS probe review'
+                WHERE organization_id = :organization_id AND id = :id
+            """), {
+                "reviewer": treasurer_id, "reviewed_at": now,
+                "organization_id": organization_id, "id": probe_repayment_id,
+            })
+            return (
+                product_id, application_id, guarantor_id, collateral_id, installment_id,
+                disbursement_id, repayment_id, allocation_id, journal_line_id,
+                probe_repayment_id, second_installment_id,
+            )
 
         a_ids = seed_tenant(org_a, member_a, user_a, "A")
         b_ids = seed_tenant(org_b, member_b, user_b, "B")
@@ -164,6 +277,9 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
             ("sacco_loan_collateral", a_ids[3], b_ids[3]),
             ("sacco_loan_installments", a_ids[4], b_ids[4]),
             ("sacco_loan_disbursements", a_ids[5], b_ids[5]),
+            ("sacco_loan_repayments", a_ids[6], b_ids[6]),
+            ("sacco_loan_repayment_allocations", a_ids[7], b_ids[7]),
+            ("sacco_loan_repayment_journal_lines", a_ids[8], b_ids[8]),
         ]
         for table, visible_id, hidden_id in models:
             visible = set(connection.execute(
@@ -207,6 +323,34 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                     requested_by=user_a, reviewed_by=None, reviewed_at=None, review_note="",
                     idempotency_key=f"forbidden-disbursement-{suffix}",
                     request_fingerprint="8" * 64, created_at=now, updated_at=now,
+                ))
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(insert(SaccoLoanRepayment).values(
+                    organization_id=org_b, application_id=b_ids[1],
+                    amount=Decimal("1.00"), currency="KES", channel="cash",
+                    external_reference=f"FORBIDDEN-REPAY-{suffix}".upper(),
+                    value_date=date.today(), status="pending_verification",
+                    request_note="Cross-tenant repayment receipt",
+                    requested_by=user_a, reviewed_by=None, reviewed_at=None, review_note="",
+                    idempotency_key=f"forbidden-repayment-{suffix}",
+                    request_fingerprint="5" * 64, created_at=now, updated_at=now,
+                ))
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(insert(SaccoLoanRepaymentAllocation).values(
+                    organization_id=org_b, repayment_id=b_ids[9],
+                    application_id=b_ids[1], installment_id=b_ids[10],
+                    principal_amount=Decimal("1.00"), interest_amount=Decimal("0.00"),
+                    currency="KES", created_at=now,
+                ))
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(insert(SaccoLoanRepaymentJournalLine).values(
+                    organization_id=org_b, repayment_id=b_ids[9],
+                    line_number=1, account_code="cash_clearing",
+                    debit=Decimal("1.00"), credit=Decimal("0.00"),
+                    currency="KES", branch_id=None, created_at=now,
                 ))
         connection.execute(text("RESET ROLE"))
         transaction.rollback()
