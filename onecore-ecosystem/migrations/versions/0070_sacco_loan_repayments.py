@@ -255,6 +255,15 @@ def upgrade():
                     ) THEN
                         RAISE EXCEPTION 'Repayments require an active loan with verified disbursement evidence';
                     END IF;
+                    IF NEW.requested_by IN (loan.created_by, loan.assessed_by, loan.decided_by)
+                       OR NOT EXISTS (
+                            SELECT 1 FROM public.memberships m
+                            WHERE m.organization_id = NEW.organization_id
+                              AND m.user_id = NEW.requested_by AND m.is_active = true
+                              AND lower(m.role) IN ('org_admin', 'sacco_manager', 'sacco_officer')
+                       ) THEN
+                        RAISE EXCEPTION 'Repayment evidence must be prepared by an active independent SACCO officer or manager';
+                    END IF;
                     RETURN NEW;
                 END IF;
                 IF OLD.status <> 'pending_verification'
