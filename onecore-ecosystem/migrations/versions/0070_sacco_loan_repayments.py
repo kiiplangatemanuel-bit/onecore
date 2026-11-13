@@ -485,6 +485,9 @@ def upgrade():
                 target_repayment integer;
                 allocated numeric(18,2);
                 expected numeric(18,2);
+                journal_count integer;
+                debit_total numeric(18,2);
+                credit_total numeric(18,2);
             BEGIN
                 target_org := NEW.organization_id;
                 target_repayment := NEW.id;
@@ -495,6 +498,13 @@ def upgrade():
                     expected := NEW.amount;
                     IF allocated <> expected THEN
                         RAISE EXCEPTION 'Every verified repayment must be fully allocated to due installments';
+                    END IF;
+                    SELECT count(*), COALESCE(sum(debit), 0), COALESCE(sum(credit), 0)
+                    INTO journal_count, debit_total, credit_total
+                    FROM public.sacco_loan_repayment_journal_lines
+                    WHERE organization_id = target_org AND repayment_id = target_repayment;
+                    IF journal_count < 2 OR debit_total <> expected OR credit_total <> expected THEN
+                        RAISE EXCEPTION 'Every verified repayment must have a balanced subledger journal';
                     END IF;
                 END IF;
                 RETURN NULL;
