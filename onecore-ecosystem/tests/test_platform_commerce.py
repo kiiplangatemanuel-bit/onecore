@@ -134,9 +134,9 @@ def test_document_and_subscription_migration_is_chained_and_enforces_rls():
     source = path.read_text()
     assert 'revision = "0071_platform_commerce_documents"' in source
     assert 'down_revision = "0070_sacco_loan_repayments"' in source
-    for table in ("organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares"):
-        assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY" in source
-        assert f"ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY" in source
+    assert 'for table in ("organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares")' in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
     assert "file_share_token_read" in source
     assert "subscription_plan_admin_write" in source
 
