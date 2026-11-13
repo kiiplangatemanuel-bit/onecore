@@ -610,7 +610,11 @@ def review_subscription_payment(payment_id: int, payload: PaymentReviewIn,
             subscription.starts_at = now
             subscription.ends_at = _add_months(now, 12 if subscription.billing_interval == "yearly" else 1)
         elif subscription.status == "active":
-            base = subscription.ends_at if subscription.ends_at and subscription.ends_at > now else now
+            base = subscription.ends_at or now
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=timezone.utc)
+            if base <= now:
+                base = now
             subscription.ends_at = _add_months(base, 12 if subscription.billing_interval == "yearly" else 1)
         else:
             raise HTTPException(409, "Subscription cannot be activated or renewed in its current state")
