@@ -32,6 +32,14 @@ def upgrade():
             "ck_sacco_loan_installment_interest_paid",
             "interest_paid >= 0 AND interest_paid <= interest_due",
         )
+        batch.create_check_constraint(
+            "ck_sacco_loan_installment_paid_status",
+            "(status = 'paid' AND principal_paid + interest_paid = total_due) OR "
+            "(status = 'partially_paid' AND principal_paid + interest_paid > 0 "
+            "AND principal_paid + interest_paid < total_due) OR "
+            "(status IN ('projected', 'due', 'overdue', 'waived') "
+            "AND principal_paid + interest_paid = 0)",
+        )
 
     op.create_table(
         "sacco_loan_repayments",
@@ -547,6 +555,7 @@ def downgrade():
     op.drop_table("sacco_loan_repayments")
 
     with op.batch_alter_table("sacco_loan_installments") as batch:
+        batch.drop_constraint("ck_sacco_loan_installment_paid_status", type_="check")
         batch.drop_constraint("ck_sacco_loan_installment_interest_paid", type_="check")
         batch.drop_constraint("ck_sacco_loan_installment_principal_paid", type_="check")
         batch.drop_constraint("uq_sacco_loan_installment_org_app_id", type_="unique")
