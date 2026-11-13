@@ -196,7 +196,7 @@ def _scan(data: bytes):
         with socket.create_connection((settings.clamav_host, settings.clamav_port),
                                       timeout=settings.clamav_timeout_seconds) as sock:
             sock.settimeout(settings.clamav_timeout_seconds)
-            sock.sendall(b"zINSTREAM\\0")
+            sock.sendall(b"zINSTREAM" + bytes([0]))
             for offset in range(0, len(data), 64 * 1024):
                 chunk = data[offset:offset + 64 * 1024]
                 sock.sendall(struct.pack("!I", len(chunk)) + chunk)
