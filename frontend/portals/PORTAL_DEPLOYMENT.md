@@ -13,7 +13,7 @@ OneCore has one main website/application and exactly four independently deployab
 
 ## Modules inside the main OneCore website
 
-Support (`/support`), Trust (`/trust`), Community (`/community`), Status (`/status`) and Events (`/events`) are same-origin routes on the main website. Admin/Superadmin is part of the authenticated main application and remains protected by backend platform-role checks. Do not create separate Vercel projects, domains or SSO redirect origins for these integrated modules. Legacy folders under `frontend/portals/{support,status,community,trust,events,admin}` are compatibility shells only and are not supported independent deployments.
+Support (`/support`), Trust (`/trust`), Community (`/community`), Status (`/status`) and Events (`/events`) are same-origin routes on the main website. Admin/Superadmin is part of the authenticated main application at `/platform`; it loads the privileged admin overview API and remains protected by backend platform-role checks. Do not create separate Vercel projects, domains or SSO redirect origins for these integrated modules. Legacy folders under `frontend/portals/{support,status,community,trust,events,admin}` are compatibility shells only and are not supported independent deployments.
 
 For each Vercel project, select the matching Root Directory, use `npm install` as the install command and `npm run build` as the build command. The output directory is `dist`. Configure production and preview variables independently.
 
