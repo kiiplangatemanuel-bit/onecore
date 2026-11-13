@@ -58,6 +58,7 @@ def upgrade():
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("organization_id", "idempotency_key", name="uq_subscription_payment_org_idempotency"),
+        sa.UniqueConstraint("organization_id", "method", "external_reference", name="uq_subscription_payment_external_reference"),
     )
     op.create_index("ix_subscription_payments_organization_id", "subscription_payments", ["organization_id"])
     op.create_index("ix_subscription_payments_subscription_id", "subscription_payments", ["subscription_id"])
