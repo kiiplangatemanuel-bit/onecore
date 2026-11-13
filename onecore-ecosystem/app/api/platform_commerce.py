@@ -210,7 +210,7 @@ def _s3():
     return boto3.client("s3", endpoint_url=settings.s3_endpoint_url or None,
                         aws_access_key_id=settings.s3_access_key_id,
                         aws_secret_access_key=settings.s3_secret_access_key,
-                        region_name=settings.s3_region or "auto",
+                        region_name=settings.s3_region or "us-east-1",
                         config=Config(signature_version="s3v4"))
 
 
@@ -429,7 +429,7 @@ async def upload_file_version(file_id: int, file: UploadFile = File(...),
     if not row:
         raise HTTPException(404, "File not found")
     _require_file_access(membership, row)
-    name = (file.filename or row.name).split("/")[-1].strip()
+    name = (file.filename or row.name).replace(chr(92), "/").split("/")[-1].strip()
     if not name or len(name) > 255:
         raise HTTPException(422, "Invalid file name")
     data = await file.read(MAX_FILE_BYTES + 1)
