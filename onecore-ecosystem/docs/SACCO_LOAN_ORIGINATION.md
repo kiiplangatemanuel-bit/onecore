@@ -56,3 +56,19 @@ This increment adds a limited loan-origination workflow under master-specificati
 ## Verification
 
 Migration 0068_sacco_loan_origination creates the five origination tables; migration 0069_sacco_loan_disbursement adds disbursement evidence, active-loan status and forced tenant RLS. CI provisions a disposable PostgreSQL NOBYPASSRLS role and exercises cross-tenant visibility and writes. The API/UI tests cover product validation, idempotency, branch/tenant scope, independent assessment/consent/collateral/approval, disbursement segregation, rejection/retry and schedule activation. These tests do not establish production database-role readiness or provider settlement.
+
+
+## Repayment receipts, allocation and loan subledger (migration 0070)
+
+The repayment increment adds staff-recorded receipt evidence for active loans:
+
+- POST /api/v1/sacco/loan-applications/{id}/repayments records an external bank/M-Pesa/cash/cheque reference as pending_verification. Organization-scoped idempotency and organization/channel/reference uniqueness prevent duplicate receipt evidence. Only one receipt per loan may await review at a time.
+- POST /api/v1/sacco/loan-repayments/{id}/verification requires an independent sacco_treasurer or org_admin. The reviewer cannot be the receipt preparer, loan creator, assessor or credit approver. Rejection creates no allocation or journal posting.
+- Verified receipts are allocated oldest-due installment first, interest before principal, with partial installments supported. The amount must be fully allocated to contractual installments due on or before the receipt value date. Amounts exceeding due balances are rejected; advance receipts and early settlement are not enabled.
+- Installment paid totals are derived from immutable allocations. PostgreSQL triggers prevent direct paid-total changes that do not match verified allocations. A loan changes to settled only when every installment is paid or explicitly waived.
+- Each verified receipt creates an immutable balanced loan subledger journal: debit cash_clearing, credit loan_principal_receivable and/or loan_interest_income. PostgreSQL deferred constraints require total debits and credits to equal the verified receipt amount. The API role has review-column-only update privileges on receipt evidence and insert-only privileges on allocations/journal lines.
+- GET /api/v1/sacco/loan-applications/{id}/balance returns scheduled principal/interest outstanding, due and overdue amounts, and the next due date. Scheduled outstanding includes future contractual interest and is not an early-settlement payoff quote. The schedule and receipt history endpoints expose paid amounts, allocations and journal lines.
+
+The /sacco workspace supports receipt submission, independent review, history, allocation visibility and scheduled balance display. The workflow records staff-reviewed evidence; it does not initiate collections, validate a live provider callback or independently confirm bank/M-Pesa settlement. cash_clearing, loan_principal_receivable and loan_interest_income are SACCO subledger codes; configurable chart-of-accounts mapping and automatic posting into the general ledger remain outstanding.
+
+Remaining repayment scope includes provider callback/statement reconciliation, advance/early settlement with accrued-interest calculation and approved waivers, penalty/arrears accrual, allocation reversals and refunds, receipt document storage, member-facing statements, and GL/cashbook reconciliation. Production Supabase role rehearsal, monitoring, backup/restore and financial UAT remain release gates.
