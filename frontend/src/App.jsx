@@ -11,7 +11,7 @@ import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 import AuthRecovery from "./AuthRecovery.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
 
-const integratedMainModules = Object.freeze({"/support":"support","/trust":"trust","/community":"community","/status":"status","/events":"events"});
+const integratedMainModules = Object.freeze({"/support":"support","/trust":"trust","/community":"community","/status":"status","/events":"events","/platform":"admin"});
 
 const supabaseUrl=(import.meta.env.VITE_SUPABASE_URL||"").trim();
 const supabaseAnonKey=(import.meta.env.VITE_SUPABASE_ANON_KEY||"").trim();
