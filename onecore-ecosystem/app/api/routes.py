@@ -21,7 +21,7 @@ from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
 from app.services.user_sessions import create_user_session
 from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption, calculate_loyalty_return_adjustments
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 
 router = APIRouter(prefix="/api/v1")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
