@@ -1,9 +1,8 @@
 const ENV = import.meta.env || {};
 const KEYS = {
-  publicSite: "VITE_PUBLIC_SITE_URL", app: "VITE_APP_URL", admin: "VITE_ADMIN_URL",
-  developers: "VITE_DEVELOPER_URL", docs: "VITE_DOCS_URL", support: "VITE_SUPPORT_URL",
-  status: "VITE_STATUS_URL", community: "VITE_COMMUNITY_URL", trust: "VITE_TRUST_URL",
-  events: "VITE_EVENTS_URL", careers: "VITE_CAREERS_URL", partners: "VITE_PARTNERS_URL",
+  publicSite: "VITE_PUBLIC_SITE_URL", app: "VITE_APP_URL",
+  developers: "VITE_DEVELOPER_URL", docs: "VITE_DOCS_URL",
+  careers: "VITE_CAREERS_URL", partners: "VITE_PARTNERS_URL",
   api: "VITE_API_BASE_URL",
 };
 function normalize(value, key) {

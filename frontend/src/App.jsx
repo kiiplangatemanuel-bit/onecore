@@ -4,10 +4,14 @@ import { API_BASE, api, clearToken, completeMfaLogin, getToken, login, loginWith
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
 import PortalWorkspace from "./PortalWorkspace.jsx";
+import PortalApp from "./PortalApp.jsx";
+
 import AIWorkspace from "./AIWorkspace.jsx";
 import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 import AuthRecovery from "./AuthRecovery.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
+
+const integratedMainModules = Object.freeze({"/support":"support","/trust":"trust","/community":"community","/status":"status","/events":"events","/platform":"admin"});
 
 const supabaseUrl=(import.meta.env.VITE_SUPABASE_URL||"").trim();
 const supabaseAnonKey=(import.meta.env.VITE_SUPABASE_ANON_KEY||"").trim();
@@ -30,7 +34,7 @@ function App(){
  async function finishPortalSignIn(identity){
   const params=new URLSearchParams(window.location.search);
   const redirectUri=params.get("return_to");
-  if(!redirectUri){setUser(identity);return;}
+  if(!redirectUri){const returnPath=sessionStorage.getItem("onecore.return_path");sessionStorage.removeItem("onecore.return_path");if(returnPath&&returnPath.startsWith("/")){history.replaceState({}, "", returnPath);setPath(returnPath);}setUser(identity);return;}
   const state=params.get("state"),codeChallenge=params.get("code_challenge");
   if(!state||!codeChallenge)throw new Error("The portal sign-in request is incomplete. Return to the portal and try again.");
   const handoff=await api("/api/v1/auth/portal-code",{method:"POST",body:JSON.stringify({redirect_uri:redirectUri,state,code_challenge:codeChallenge})});
@@ -49,8 +53,8 @@ function App(){
  function navigate(next){history.pushState({}, "", next);setPath(next);setNotice("");}
  function signOut(){clearToken();setUser(null);setOrgs([]);navigate("/");}
  if(checking)return <div className="loading-screen"><div className="brand-mark">O</div><p>Securing your workspace…</p></div>;
- if(!user)return path==="/login"?<Login onLogin={finishPortalSignIn}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:path==="/forgot-password"?<AuthRecovery mode="request"/>:path==="/reset-password"?<AuthRecovery mode="confirm"/>:<PublicSite/>;
- const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const portalRoutes=new Set(["/team","/domains","/cms","/media","/seo","/integrations","/analytics","/operations","/security","/subscriptions","/school-portal","/hospital-portal","/finance-portal","/hr-portal","/property-portal","/hotel-portal","/restaurant-portal","/services-portal"]); const moduleCount=modules.length||allModules.length;
+ if(!user)return path==="/login"?<Login onLogin={finishPortalSignIn}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:path==="/forgot-password"?<AuthRecovery mode="request"/>:path==="/reset-password"?<AuthRecovery mode="confirm"/>:(integratedMainModules[path]?<PortalApp portal={integratedMainModules[path]} embedded organizationId={activeOrgId} onOrganizationChange={id=>{setActiveOrganization(id);setActiveOrgId(String(id));}}/>:<PublicSite/>);
+ const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const portalRoutes=new Set(["/team","/domains","/cms","/media","/seo","/integrations","/analytics","/operations","/security","/subscriptions","/school-portal","/hospital-portal","/finance-portal","/hr-portal","/property-portal","/hotel-portal","/restaurant-portal","/services-portal",...Object.keys(integratedMainModules)]); const moduleCount=modules.length||allModules.length;
  return <div className="app-shell">
   <aside className={collapsed?"sidebar collapsed":"sidebar"}><div className="sidebar-brand"><div className="brand-mark small">O</div>{!collapsed&&<div><strong>onecore</strong><small>WORKSPACE</small></div>}<button className="collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation">{collapsed?"»":"«"}</button></div>
    {!collapsed&&<div className="org-switch"><span className="org-avatar">{(selectedOrg?.name||"O").slice(0,1).toUpperCase()}</span><div><strong>{selectedOrg?.name||"My workspace"}</strong><small>{selectedOrg?.role||"Select organization"}</small></div><span className="chevron">⌄</span></div>}
@@ -64,7 +68,9 @@ function App(){
     {path==="/account/security"?<AccountSecurity/>:null}
     {path==="/organizations"?<Organizations orgs={orgs} refresh={()=>api("/api/v1/organizations").then(setOrgs).catch(e=>setNotice(e.message))} onNotice={setNotice} onSelectOrg={id=>{setActiveOrganization(id);setActiveOrgId(String(id));}}/>:null}
     {path==="/procurement"?<ProcurementWorkspace key={activeOrgId}/>:legacy&&meta?<><div className="page-heading"><div><p className="eyebrow">{active?.[4]||"BUSINESS WORKSPACE"}</p><h1>{meta[0]}</h1><p className="muted">{meta[1]}</p></div><a className="primary link-button" href={API_BASE+path} target="_blank" rel="noreferrer">Open full module ↗</a></div><div className="notice info">The original OneCore module interface is hosted by the backend. Open it in a new tab to use its full workflow UI. This workspace checks the related API connection.</div><div className="stat-grid compact"><Stat label="API connection" value={health==="online"?"Available":"Unavailable"} hint="Backend health endpoint" icon="⌁"/><Stat label="Module interface" value="Available" hint="Hosted by FastAPI backend" icon="▤"/><Stat label="Workspace" value={orgs[0]?.name||"Not selected"} hint="Active organization context" icon="⌂"/></div><section className="panel"><div className="panel-head"><div><h3>Module capabilities</h3><p className="muted">Open the established module UI to access its workflows.</p></div><span className="status online"><i/>Connected shell</span></div><div className="capability-list">{(active?.[3]||"OneCore module").split(",").map((x,i)=><div key={i}><span className="check">✓</span>{x.trim()}</div>)}<div><span className="check">✓</span>Tenant-scoped access is enforced by the backend API</div><div><span className="check">✓</span>API documentation available for authorized users</div></div><button className="secondary" onClick={()=>window.open(API_BASE+"/docs","_blank","noopener,noreferrer")}>Explore API endpoints ↗</button></section></>:null}
-    {path==="/ai"?<AIWorkspace key={activeOrgId}/>:null}\n    {portalRoutes.has(path)?<PortalWorkspace key={activeOrgId} path={path}/>:null}
+    {path==="/ai"?<AIWorkspace key={activeOrgId}/>:null}
+    {integratedMainModules[path]?<PortalApp portal={integratedMainModules[path]} embedded/>:null}
+    {portalRoutes.has(path)&&!integratedMainModules[path]?<PortalWorkspace key={activeOrgId} path={path}/>:null}
     {!legacy&&!portalRoutes.has(path)&&path!=="/ai"&&path!=="/"&&path!=="/overview"&&path!=="/organizations"&&path!=="/account/security"?<ModuleLanding path={path} active={active} onNotice={setNotice}/>:null}
     {notice&&<div className="alert error">{notice}</div>}
     <footer className="footer">© {new Date().getFullYear()} OneCore Technologies Ltd <span><a href="https://onecore.co.ke">Powered by OneCore Technologies Ltd</a> · One platform. Every organization. Anywhere.</span></footer>
