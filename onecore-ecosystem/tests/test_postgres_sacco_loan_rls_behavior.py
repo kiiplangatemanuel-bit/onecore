@@ -270,6 +270,36 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                     WHERE id = :id
                 """), {"id": a_ids[5]})
 
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_repayments SET status = 'rejected'
+                    WHERE id = :id
+                """), {"id": a_ids[6]})
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_repayment_allocations SET principal_amount = 79
+                    WHERE id = :id
+                """), {"id": a_ids[7]})
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    DELETE FROM sacco_loan_repayment_allocations WHERE id = :id
+                """), {"id": a_ids[7]})
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_repayment_journal_lines SET debit = 89
+                    WHERE id = :id
+                """), {"id": a_ids[8]})
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_installments SET principal_paid = 0
+                    WHERE id = :id
+                """), {"id": a_ids[4]})
+
         models = [
             ("sacco_loan_products", a_ids[0], b_ids[0]),
             ("sacco_loan_applications", a_ids[1], b_ids[1]),
