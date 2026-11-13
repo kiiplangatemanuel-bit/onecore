@@ -181,3 +181,48 @@ class SaccoLoanDisbursementVerificationIn(BaseModel):
         if len(value) < 5:
             raise ValueError("Disbursement review note must contain at least five characters")
         return value
+
+
+class SaccoLoanRepaymentCreateIn(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    channel: Literal["bank_transfer", "mpesa", "cash", "cheque"]
+    external_reference: str = Field(min_length=3, max_length=120)
+    value_date: date
+    request_note: str = Field(min_length=5, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_repayment_currency(cls, value):
+        return str(value or "").strip().upper()
+
+    @field_validator("external_reference", mode="before")
+    @classmethod
+    def normalize_repayment_reference(cls, value):
+        return " ".join(str(value or "").split()).upper()
+
+    @field_validator("request_note", "idempotency_key", mode="before")
+    @classmethod
+    def normalize_repayment_text(cls, value):
+        return " ".join(str(value or "").split())
+
+    @field_validator("value_date")
+    @classmethod
+    def reject_future_repayment_value_date(cls, value):
+        if value > date.today():
+            raise ValueError("Repayment value date cannot be in the future")
+        return value
+
+
+class SaccoLoanRepaymentVerificationIn(BaseModel):
+    decision: Literal["verify", "reject"]
+    note: str = Field(min_length=5, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_repayment_review_note(cls, value):
+        value = " ".join(str(value or "").split())
+        if len(value) < 5:
+            raise ValueError("Repayment review note must contain at least five characters")
+        return value
