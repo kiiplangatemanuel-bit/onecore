@@ -411,6 +411,9 @@ def upgrade():
                         RAISE EXCEPTION 'Installment paid totals must equal immutable verified repayment allocations';
                     END IF;
                 END IF;
+                IF NEW.status = 'waived' AND OLD.status <> 'waived' THEN
+                    RAISE EXCEPTION 'Installment waivers require a separate approved waiver workflow';
+                END IF;
                 IF NEW.status = 'paid' AND NEW.principal_paid + NEW.interest_paid <> NEW.total_due THEN
                     RAISE EXCEPTION 'Only fully allocated installments can be marked paid';
                 END IF;
@@ -435,7 +438,7 @@ def upgrade():
                 IF NEW.status = 'settled' AND EXISTS (
                     SELECT 1 FROM public.sacco_loan_installments i
                     WHERE i.organization_id = NEW.organization_id AND i.application_id = NEW.id
-                      AND i.status NOT IN ('paid', 'waived')
+                      AND i.status <> 'paid'
                 ) THEN
                     RAISE EXCEPTION 'A SACCO loan can be settled only after every installment is paid or waived';
                 END IF;
