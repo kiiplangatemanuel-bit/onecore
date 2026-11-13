@@ -42,7 +42,9 @@ def _tables():
         "school_classes", "school_learners", "accounting_invoices", "sacco_members",
         "sacco_financial_transactions", "sacco_ledger_entries", "sacco_loan_products",
         "sacco_loan_applications", "sacco_loan_guarantors", "sacco_loan_collateral",
-        "sacco_loan_installments", "status_alert_deliveries",
+        "sacco_loan_installments", "sacco_loan_repayments",
+        "sacco_loan_repayment_allocations", "sacco_loan_repayment_journal_lines",
+        "status_alert_deliveries",
         "hr_employees", "hr_leave_requests", "hr_attendance_records",
         "payroll_rule_sets", "payroll_runs", "payroll_payslips",
         "payroll_accounting_mappings", "payroll_accounting_links",
@@ -105,7 +107,8 @@ def test_production_database_boundary_rejects_missing_critical_rls_table():
     "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
     "sacco_financial_transactions", "sacco_ledger_entries", "sacco_loan_products",
     "sacco_loan_applications", "sacco_loan_guarantors", "sacco_loan_collateral",
-    "sacco_loan_installments",
+    "sacco_loan_installments", "sacco_loan_repayments",
+    "sacco_loan_repayment_allocations", "sacco_loan_repayment_journal_lines",
 ])
 def test_production_readiness_rejects_each_missing_critical_tenant_rls_table(table_name):
     from app.main import _verify_rls_database_boundary
