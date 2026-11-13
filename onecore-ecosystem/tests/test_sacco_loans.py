@@ -630,12 +630,11 @@ def test_repayment_schema_normalizes_evidence_and_rejects_future_value_dates():
     assert payload.currency == "KES"
     assert payload.external_reference == "MPESA-RCPT-001"
     with pytest.raises(ValidationError):
-        _repayment_payload(
-            "100.00", "repayment-schema-002", "MPESA-RCPT-002"
-        ).model_copy(update={"value_date": date.today() + timedelta(days=1)}).model_validate(
-            _repayment_payload(
-                "100.00", "repayment-schema-002", "MPESA-RCPT-002"
-            ).model_dump() | {"value_date": date.today() + timedelta(days=1)}
+        SaccoLoanRepaymentCreateIn(
+            amount="100.00", currency="KES", channel="mpesa",
+            external_reference="MPESA-RCPT-002", value_date=date.today() + timedelta(days=1),
+            request_note="Future value date must be rejected by the repayment contract",
+            idempotency_key="repayment-schema-002",
         )
 
 
