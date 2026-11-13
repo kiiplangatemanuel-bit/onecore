@@ -830,3 +830,393 @@ def verify_loan_disbursement(
     db.commit()
     db.refresh(row)
     return _disbursement_out(row)
+
+
+def _repayment_query(db: Session, membership: Membership):
+    query = db.query(SaccoLoanRepayment).join(
+        SaccoLoanApplication,
+        (SaccoLoanApplication.organization_id == SaccoLoanRepayment.organization_id)
+        & (SaccoLoanApplication.id == SaccoLoanRepayment.application_id),
+    ).filter(SaccoLoanRepayment.organization_id == membership.organization_id)
+    allowed = branch_scope_ids(membership)
+    if allowed is not None:
+        if not allowed:
+            query = query.filter(SaccoLoanApplication.id == -1)
+        else:
+            query = query.filter(SaccoLoanApplication.branch_id.in_(allowed))
+    return query
+
+
+def _repayment_for_membership(
+    db: Session, membership: Membership, repayment_id: int, *, for_update: bool = False,
+) -> SaccoLoanRepayment:
+    query = _repayment_query(db, membership).filter(SaccoLoanRepayment.id == repayment_id)
+    if for_update:
+        query = query.with_for_update()
+    row = query.first()
+    if not row:
+        raise HTTPException(404, "SACCO loan repayment not found")
+    return row
+
+
+def _loan_balance_values(
+    db: Session, membership: Membership, application: SaccoLoanApplication,
+    as_of: date | None = None,
+) -> dict:
+    as_of = as_of or date.today()
+    rows = db.query(SaccoLoanInstallment).filter_by(
+        organization_id=membership.organization_id, application_id=application.id,
+    ).order_by(SaccoLoanInstallment.due_date, SaccoLoanInstallment.installment_number).all()
+    principal_outstanding = sum(
+        (row.principal_due - row.principal_paid for row in rows if row.status != "waived"),
+        Decimal("0.00"),
+    )
+    interest_outstanding = sum(
+        (row.interest_due - row.interest_paid for row in rows if row.status != "waived"),
+        Decimal("0.00"),
+    )
+    due_rows = [row for row in rows if row.due_date <= as_of and row.status not in {"paid", "waived"}]
+    overdue_rows = [row for row in due_rows if row.due_date < as_of]
+    due_amount = sum(
+        (row.total_due - row.principal_paid - row.interest_paid for row in due_rows),
+        Decimal("0.00"),
+    )
+    overdue_amount = sum(
+        (row.total_due - row.principal_paid - row.interest_paid for row in overdue_rows),
+        Decimal("0.00"),
+    )
+    next_due = next(
+        (row.due_date for row in rows
+         if row.due_date > as_of and row.status not in {"paid", "waived"}
+         and row.total_due - row.principal_paid - row.interest_paid > 0),
+        None,
+    )
+    currency = rows[0].currency if rows else _product_for_application(db, membership, application).currency
+    return {
+        "application_id": application.id,
+        "status": application.status,
+        "currency": currency,
+        "as_of_date": as_of.isoformat(),
+        "principal_outstanding": format(principal_outstanding, ".2f"),
+        "interest_outstanding": format(interest_outstanding, ".2f"),
+        "scheduled_total_outstanding": format(principal_outstanding + interest_outstanding, ".2f"),
+        "amount_due": format(due_amount, ".2f"),
+        "overdue_amount": format(overdue_amount, ".2f"),
+        "next_due_date": next_due.isoformat() if next_due else None,
+    }
+
+
+def _repayment_out(row: SaccoLoanRepayment) -> dict:
+    return {
+        "id": row.id, "application_id": row.application_id,
+        "amount": format(row.amount, ".2f"), "currency": row.currency,
+        "channel": row.channel, "external_reference": row.external_reference,
+        "value_date": row.value_date.isoformat(), "status": row.status,
+        "request_note": row.request_note, "requested_by": row.requested_by,
+        "reviewed_by": row.reviewed_by, "reviewed_at": row.reviewed_at,
+        "review_note": row.review_note, "created_at": row.created_at,
+    }
+
+
+def _repayment_allocation_out(row: SaccoLoanRepaymentAllocation) -> dict:
+    return {
+        "installment_id": row.installment_id,
+        "principal_amount": format(row.principal_amount, ".2f"),
+        "interest_amount": format(row.interest_amount, ".2f"),
+        "currency": row.currency,
+    }
+
+
+def _repayment_journal_out(row: SaccoLoanRepaymentJournalLine) -> dict:
+    return {
+        "line_number": row.line_number, "account_code": row.account_code,
+        "debit": format(row.debit, ".2f"), "credit": format(row.credit, ".2f"),
+        "currency": row.currency, "branch_id": row.branch_id,
+    }
+
+
+@router.get("/loan-applications/{application_id}/balance")
+def get_loan_balance(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    return _loan_balance_values(db, membership, application)
+
+
+@router.post("/loan-applications/{application_id}/repayments", status_code=201)
+def request_loan_repayment(
+    application_id: int,
+    payload: SaccoLoanRepaymentCreateIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "request_repayment")
+    application = _application_for_membership(db, membership, application_id, for_update=True)
+    fingerprint = transaction_fingerprint(
+        payload.model_dump(mode="json", exclude={"idempotency_key"})
+    )
+    replay = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id,
+        idempotency_key=payload.idempotency_key,
+    ).first()
+    if replay:
+        if replay.application_id != application.id or replay.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for different repayment evidence")
+        return _repayment_out(replay)
+
+    if application.status != "active":
+        raise HTTPException(409, "Only active loans can receive repayment evidence")
+    if user.id in {application.created_by, application.assessed_by, application.decided_by}:
+        raise HTTPException(403, "The loan creator, assessor or credit approver cannot prepare its repayment evidence")
+    product = _product_for_application(db, membership, application)
+    if payload.currency != product.currency:
+        raise HTTPException(409, "Repayment currency must match the approved loan product")
+    disbursement = db.query(SaccoLoanDisbursement).filter_by(
+        organization_id=membership.organization_id,
+        application_id=application.id,
+        status="verified",
+    ).first()
+    if not disbursement:
+        raise HTTPException(409, "Verified disbursement evidence is required before repayment")
+    if payload.value_date < disbursement.value_date:
+        raise HTTPException(422, "Repayment value date cannot precede the verified disbursement date")
+
+    due_rows = db.query(SaccoLoanInstallment).filter(
+        SaccoLoanInstallment.organization_id == membership.organization_id,
+        SaccoLoanInstallment.application_id == application.id,
+        SaccoLoanInstallment.due_date <= payload.value_date,
+        SaccoLoanInstallment.status.in_(["due", "overdue", "partially_paid"]),
+    ).order_by(
+        SaccoLoanInstallment.due_date.asc(),
+        SaccoLoanInstallment.installment_number.asc(),
+    ).with_for_update().all()
+    due_outstanding = sum(
+        (row.total_due - row.principal_paid - row.interest_paid for row in due_rows),
+        Decimal("0.00"),
+    )
+    if due_outstanding <= 0:
+        raise HTTPException(409, "No contractual installment balance is due on this value date")
+    if payload.amount > due_outstanding:
+        raise HTTPException(422, "Repayment exceeds the outstanding installments due on its value date; advance and early-settlement payments are not enabled")
+
+    pending = db.query(SaccoLoanRepayment).filter_by(
+        organization_id=membership.organization_id,
+        application_id=application.id,
+        status="pending_verification",
+    ).first()
+    if pending:
+        raise HTTPException(409, "A repayment receipt is already awaiting independent verification")
+
+    row = SaccoLoanRepayment(
+        organization_id=membership.organization_id,
+        application_id=application.id,
+        amount=payload.amount, currency=payload.currency,
+        channel=payload.channel, external_reference=payload.external_reference,
+        value_date=payload.value_date, status="pending_verification",
+        request_note=payload.request_note, requested_by=user.id,
+        idempotency_key=payload.idempotency_key, request_fingerprint=fingerprint,
+    )
+    db.add(row)
+    try:
+        db.flush()
+        _audit(
+            db, user, membership, "sacco.loan_repayment.requested",
+            "sacco_loan_repayment", row.id,
+            f"application_id={application.id};amount={row.amount};currency={row.currency};channel={row.channel}",
+        )
+        db.commit()
+        db.refresh(row)
+        return _repayment_out(row)
+    except IntegrityError:
+        db.rollback()
+        replay = db.query(SaccoLoanRepayment).filter_by(
+            organization_id=membership.organization_id,
+            idempotency_key=payload.idempotency_key,
+        ).first()
+        if replay and replay.application_id == application.id and replay.request_fingerprint == fingerprint:
+            return _repayment_out(replay)
+        raise HTTPException(409, "A repayment receipt is already pending or the idempotency/reference conflicts")
+
+
+@router.get("/loan-applications/{application_id}/repayments")
+def list_loan_repayments(
+    application_id: int,
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    _require_permission(membership, "read")
+    application = _application_for_membership(db, membership, application_id)
+    rows = _repayment_query(db, membership).filter(
+        SaccoLoanRepayment.application_id == application.id
+    ).order_by(SaccoLoanRepayment.created_at.desc(), SaccoLoanRepayment.id.desc()).all()
+    items = []
+    for row in rows:
+        allocations = db.query(SaccoLoanRepaymentAllocation).filter_by(
+            organization_id=membership.organization_id, repayment_id=row.id,
+        ).order_by(SaccoLoanRepaymentAllocation.id).all()
+        journal = db.query(SaccoLoanRepaymentJournalLine).filter_by(
+            organization_id=membership.organization_id, repayment_id=row.id,
+        ).order_by(SaccoLoanRepaymentJournalLine.line_number).all()
+        items.append({
+            **_repayment_out(row),
+            "allocations": [_repayment_allocation_out(item) for item in allocations],
+            "journal_lines": [_repayment_journal_out(item) for item in journal],
+        })
+    return {"application_id": application.id, "items": items}
+
+
+@router.post("/loan-repayments/{repayment_id}/verification")
+def verify_loan_repayment(
+    repayment_id: int,
+    payload: SaccoLoanRepaymentVerificationIn,
+    user: User = Depends(current_user),
+    membership: Membership = Depends(active_membership),
+    db: Session = Depends(get_db),
+):
+    action_permission = "verify_repayment"
+    _require_permission(membership, action_permission)
+    row = _repayment_for_membership(db, membership, repayment_id, for_update=True)
+    application = _application_for_membership(
+        db, membership, row.application_id, for_update=True,
+    )
+    if row.status != "pending_verification":
+        raise HTTPException(409, "Only pending repayment evidence can be reviewed")
+    if user.id in {
+        row.requested_by, application.created_by, application.assessed_by, application.decided_by,
+    }:
+        raise HTTPException(403, "Repayment reviewer must be independent of receipt preparation and loan approval")
+
+    now = datetime.now(timezone.utc)
+    row.reviewed_by = user.id
+    row.reviewed_at = now
+    row.review_note = payload.note
+
+    if payload.decision == "reject":
+        row.status = "rejected"
+        action = "sacco.loan_repayment.rejected"
+    else:
+        if application.status != "active":
+            raise HTTPException(409, "Only an active loan can receive a verified repayment")
+        disbursement = db.query(SaccoLoanDisbursement).filter_by(
+            organization_id=membership.organization_id,
+            application_id=application.id, status="verified",
+        ).first()
+        if not disbursement or row.value_date < disbursement.value_date:
+            raise HTTPException(409, "Verified disbursement evidence and a valid repayment value date are required")
+        installments = db.query(SaccoLoanInstallment).filter(
+            SaccoLoanInstallment.organization_id == membership.organization_id,
+            SaccoLoanInstallment.application_id == application.id,
+            SaccoLoanInstallment.due_date <= row.value_date,
+            SaccoLoanInstallment.status.in_(["due", "overdue", "partially_paid"]),
+        ).order_by(
+            SaccoLoanInstallment.due_date.asc(),
+            SaccoLoanInstallment.installment_number.asc(),
+        ).with_for_update().all()
+        try:
+            allocations = allocate_due_repayment(row.amount, installments)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        if not allocations or sum(
+            (item["principal_amount"] + item["interest_amount"] for item in allocations),
+            Decimal("0.00"),
+        ) != row.amount:
+            raise HTTPException(409, "The verified receipt cannot be fully allocated to contractual installments")
+
+        row.status = "verified"
+        row.updated_at = now
+        try:
+            db.flush()
+            allocation_rows = []
+            allocation_by_installment = {}
+            principal_total = Decimal("0.00")
+            interest_total = Decimal("0.00")
+            for item in allocations:
+                allocation = SaccoLoanRepaymentAllocation(
+                    organization_id=membership.organization_id,
+                    repayment_id=row.id, application_id=application.id,
+                    installment_id=item["installment_id"],
+                    principal_amount=item["principal_amount"],
+                    interest_amount=item["interest_amount"],
+                    currency=row.currency,
+                )
+                allocation_rows.append(allocation)
+                allocation_by_installment[item["installment_id"]] = item
+                principal_total += item["principal_amount"]
+                interest_total += item["interest_amount"]
+            db.add_all(allocation_rows)
+            db.flush()
+
+            for installment in installments:
+                item = allocation_by_installment.get(installment.id)
+                if not item:
+                    continue
+                installment.principal_paid += item["principal_amount"]
+                installment.interest_paid += item["interest_amount"]
+                paid_total = installment.principal_paid + installment.interest_paid
+                if paid_total == installment.total_due:
+                    installment.status = "paid"
+                elif paid_total > 0:
+                    installment.status = "partially_paid"
+                elif installment.due_date < date.today():
+                    installment.status = "overdue"
+                else:
+                    installment.status = "due"
+            db.flush()
+
+            journal_lines = [
+                SaccoLoanRepaymentJournalLine(
+                    organization_id=membership.organization_id,
+                    repayment_id=row.id, line_number=1,
+                    account_code="cash_clearing", debit=row.amount,
+                    credit=Decimal("0.00"), currency=row.currency,
+                    branch_id=application.branch_id,
+                )
+            ]
+            line_number = 2
+            if principal_total > 0:
+                journal_lines.append(SaccoLoanRepaymentJournalLine(
+                    organization_id=membership.organization_id,
+                    repayment_id=row.id, line_number=line_number,
+                    account_code="loan_principal_receivable",
+                    debit=Decimal("0.00"), credit=principal_total,
+                    currency=row.currency, branch_id=application.branch_id,
+                ))
+                line_number += 1
+            if interest_total > 0:
+                journal_lines.append(SaccoLoanRepaymentJournalLine(
+                    organization_id=membership.organization_id,
+                    repayment_id=row.id, line_number=line_number,
+                    account_code="loan_interest_income",
+                    debit=Decimal("0.00"), credit=interest_total,
+                    currency=row.currency, branch_id=application.branch_id,
+                ))
+            db.add_all(journal_lines)
+            db.flush()
+            remaining_installments = db.query(SaccoLoanInstallment).filter(
+                SaccoLoanInstallment.organization_id == membership.organization_id,
+                SaccoLoanInstallment.application_id == application.id,
+                ~SaccoLoanInstallment.status.in_(["paid", "waived"]),
+            ).count()
+            if remaining_installments == 0:
+                application.status = "settled"
+            action = "sacco.loan_repayment.verified"
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Repayment allocation or journal posting conflicted with a concurrent update")
+
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(
+        db, user, membership, action, "sacco_loan_repayment", row.id,
+        f"application_id={application.id};decision={payload.decision};amount={row.amount};status={row.status}",
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Repayment evidence could not be committed; refresh the loan balance and retry")
+    db.refresh(row)
+    return _repayment_out(row)
