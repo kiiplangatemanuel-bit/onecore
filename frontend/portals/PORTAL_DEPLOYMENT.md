@@ -21,7 +21,7 @@ For each Vercel project, select the matching Root Directory, use `npm install` a
 
 Set `VITE_API_BASE_URL` to the deployed HTTPS API origin. Set the relevant URL variables (`VITE_PUBLIC_SITE_URL`, `VITE_APP_URL`, `VITE_DEVELOPER_URL`, `VITE_DOCS_URL`, `VITE_CAREERS_URL`, `VITE_PARTNERS_URL`) to actual HTTPS origins. Support, Trust, Community, Status and Events use same-origin paths on the main website and have no separate URL variables. These values are public browser configuration, not secrets. An unset or invalid portal destination is rendered as an unavailable configuration link; the frontend does not invent a production destination.
 
-Set backend `CORS_ORIGINS` and `PORTAL_REDIRECT_ORIGINS` to the exact HTTPS origins of every deployed frontend, including the central `app` origin and the four independent portals. The SSO allowlist is checked by the API and must not contain wildcards. Do not use wildcard CORS with bearer-token authentication. Do not put Supabase service-role keys, database credentials, signing secrets or provider credentials in any `VITE_*` variable.
+Set backend `CORS_ORIGINS` to the exact HTTPS origins of the main website/application and the four independent portals. Set `PORTAL_REDIRECT_ORIGINS` to the four independent portal origins only; integrated main-site modules do not use cross-origin PKCE redirects. The SSO allowlist is checked by the API and must not contain wildcards. Do not use wildcard CORS with bearer-token authentication. Do not put Supabase service-role keys, database credentials, signing secrets or provider credentials in any `VITE_*` variable.
 
 ## Public and authenticated access model
 
