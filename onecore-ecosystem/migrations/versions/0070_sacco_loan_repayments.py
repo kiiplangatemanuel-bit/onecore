@@ -282,11 +282,12 @@ def upgrade():
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_repayment_allocation()
             RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_allocation$
-            DECLARE receipt public.sacco_loan_repayments%ROWTYPE;
-            DECLARE installment public.sacco_loan_installments%ROWTYPE;
-            DECLARE receipt_allocated numeric(18,2);
-            DECLARE installment_principal numeric(18,2);
-            DECLARE installment_interest numeric(18,2);
+            DECLARE
+                receipt public.sacco_loan_repayments%ROWTYPE;
+                installment public.sacco_loan_installments%ROWTYPE;
+                receipt_allocated numeric(18,2);
+                installment_principal numeric(18,2);
+                installment_interest numeric(18,2);
             BEGIN
                 IF TG_OP <> 'INSERT' THEN
                     RAISE EXCEPTION 'SACCO repayment allocations are immutable';
@@ -351,12 +352,13 @@ def upgrade():
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_assert_sacco_loan_repayment_journal_balanced()
             RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_journal_balance$
-            DECLARE target_org integer;
-            DECLARE target_repayment integer;
-            DECLARE line_count integer;
-            DECLARE debit_total numeric(18,2);
-            DECLARE credit_total numeric(18,2);
-            DECLARE receipt_amount numeric(18,2);
+            DECLARE
+                target_org integer;
+                target_repayment integer;
+                line_count integer;
+                debit_total numeric(18,2);
+                credit_total numeric(18,2);
+                receipt_amount numeric(18,2);
             BEGIN
                 target_org := NEW.organization_id;
                 target_repayment := NEW.repayment_id;
@@ -383,8 +385,9 @@ def upgrade():
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_installment_paid()
             RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_installment_paid$
-            DECLARE allocated_principal numeric(18,2);
-            DECLARE allocated_interest numeric(18,2);
+            DECLARE
+                allocated_principal numeric(18,2);
+                allocated_interest numeric(18,2);
             BEGIN
                 IF NEW.principal_paid <> OLD.principal_paid OR NEW.interest_paid <> OLD.interest_paid THEN
                     SELECT COALESCE(sum(a.principal_amount), 0), COALESCE(sum(a.interest_amount), 0)
@@ -438,10 +441,11 @@ def upgrade():
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_assert_sacco_loan_repayment_allocated()
             RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_allocated$
-            DECLARE target_org integer;
-            DECLARE target_repayment integer;
-            DECLARE allocated numeric(18,2);
-            DECLARE expected numeric(18,2);
+            DECLARE
+                target_org integer;
+                target_repayment integer;
+                allocated numeric(18,2);
+                expected numeric(18,2);
             BEGIN
                 target_org := NEW.organization_id;
                 target_repayment := NEW.id;
@@ -460,7 +464,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE CONSTRAINT TRIGGER trg_sacco_loan_repayment_allocated
-            AFTER UPDATE OF status ON public.sacco_loan_repayments
+            AFTER UPDATE ON public.sacco_loan_repayments
             DEFERRABLE INITIALLY DEFERRED
             FOR EACH ROW EXECUTE FUNCTION public.onecore_assert_sacco_loan_repayment_allocated()
         """)
@@ -518,6 +522,7 @@ def downgrade():
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onecore_api') THEN
                     REVOKE UPDATE (status, principal_paid, interest_paid)
                         ON TABLE public.sacco_loan_installments FROM onecore_api;
+                    GRANT UPDATE (status) ON TABLE public.sacco_loan_installments TO onecore_api;
                 END IF;
             END
             $sacco_loan_repayment_revoke$
