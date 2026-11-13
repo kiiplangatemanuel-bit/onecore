@@ -1,6 +1,6 @@
 # OneCore frontend
 
-React + Vite workspace UI. The frontend is intentionally separate from the FastAPI backend and is deployable as a Vercel project.
+React + Vite main OneCore website and authenticated workspace. The frontend is deployed as the main website and uses the shared FastAPI backend.
 
 ## Local development
 
@@ -37,6 +37,10 @@ Production data is stored in Supabase-managed PostgreSQL through the backend `SU
 - Redeploy after changing environment variables.
 
 Configure the backend `CORS_ORIGINS` to the exact Vercel production origin (and any intended preview origins), and `TRUSTED_HOSTS` to the backend hostname. Never put backend secrets in Vercel frontend variables: Vite variables are public in the generated JavaScript.
+
+## Website and portal topology
+
+The main website hosts Support (`/support`), Trust (`/trust`), Community (`/community`), Status (`/status`), Events (`/events`) and Admin/Superadmin (`/admin`) as integrated modules using the shared portal workflow UI. They are not independent frontend deployments. The only independent portal deployments are Developers (`frontend/portals/developers`), Documentation (`frontend/portals/docs`), Careers (`frontend/portals/careers`) and Partners (`frontend/portals/partners`). See `frontend/portals/PORTAL_DEPLOYMENT.md` for deployment and retirement steps.
 
 ## UI integration status
 

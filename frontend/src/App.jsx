@@ -3,11 +3,22 @@ import { createClient } from "@supabase/supabase-js";
 import { API_BASE, api, clearToken, completeMfaLogin, getToken, login, loginWithSupabase, setActiveOrganization } from "./api";
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
+import PortalApp from "./PortalApp.jsx";
+
 import PortalWorkspace from "./PortalWorkspace.jsx";
 import AIWorkspace from "./AIWorkspace.jsx";
 import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 import AuthRecovery from "./AuthRecovery.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
+
+const integratedPortalRoutes = Object.freeze({
+  "/support": "support",
+  "/trust": "trust",
+  "/community": "community",
+  "/status": "status",
+  "/events": "events",
+  "/admin": "admin",
+});
 
 const supabaseUrl=(import.meta.env.VITE_SUPABASE_URL||"").trim();
 const supabaseAnonKey=(import.meta.env.VITE_SUPABASE_ANON_KEY||"").trim();
@@ -25,6 +36,7 @@ function Login({onLogin}) {
 function App(){
  const [user,setUser]=useState(null); const [checking,setChecking]=useState(Boolean(getToken())); const [path,setPath]=useState(window.location.pathname); const [collapsed,setCollapsed]=useState(false); const [query,setQuery]=useState(""); const [health,setHealth]=useState("checking"); const [orgs,setOrgs]=useState([]); const [activeOrgId,setActiveOrgId]=useState(sessionStorage.getItem("onecore.organization_id")||""); const [modules,setModules]=useState([]); const [notice,setNotice]=useState(""); 
  useEffect(()=>{const pop=()=>setPath(window.location.pathname);window.addEventListener("popstate",pop);return()=>window.removeEventListener("popstate",pop);},[]);
+ useEffect(()=>{const refreshIdentity=()=>{if(!getToken()){setUser(null);return;}api("/api/v1/auth/me").then(setUser).catch(()=>{clearToken();setUser(null);});};window.addEventListener("onecore:auth-changed",refreshIdentity);return()=>window.removeEventListener("onecore:auth-changed",refreshIdentity);},[]);
  useEffect(()=>{if(!getToken()){setChecking(false);return;}api("/api/v1/auth/me").then(setUser).catch(()=>{clearToken();setUser(null);}).finally(()=>setChecking(false));},[]);
  const ssoRedirectStarted=useRef(false);
  async function finishPortalSignIn(identity){
@@ -49,7 +61,8 @@ function App(){
  function navigate(next){history.pushState({}, "", next);setPath(next);setNotice("");}
  function signOut(){clearToken();setUser(null);setOrgs([]);navigate("/");}
  if(checking)return <div className="loading-screen"><div className="brand-mark">O</div><p>Securing your workspace…</p></div>;
- if(!user)return path==="/login"?<Login onLogin={finishPortalSignIn}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:path==="/forgot-password"?<AuthRecovery mode="request"/>:path==="/reset-password"?<AuthRecovery mode="confirm"/>:<PublicSite/>;
+ if(!user)return path==="/login"?<Login onLogin={finishPortalSignIn}/>:path==="/register"?<RegisterOrganization/>:path==="/verify-email"?<VerifyEmail/>:path==="/forgot-password"?<AuthRecovery mode="request"/>:path==="/reset-password"?<AuthRecovery mode="confirm"/>:integratedPortalRoutes[path]?<PortalApp portal={integratedPortalRoutes[path]}/>:<PublicSite/>;
+ if(integratedPortalRoutes[path])return <PortalApp portal={integratedPortalRoutes[path]}/>;
  const legacy=legacyRoutes.has(path); const meta=descriptions[path]; const portalRoutes=new Set(["/team","/domains","/cms","/media","/seo","/integrations","/analytics","/operations","/security","/subscriptions","/school-portal","/hospital-portal","/finance-portal","/hr-portal","/property-portal","/hotel-portal","/restaurant-portal","/services-portal"]); const moduleCount=modules.length||allModules.length;
  return <div className="app-shell">
   <aside className={collapsed?"sidebar collapsed":"sidebar"}><div className="sidebar-brand"><div className="brand-mark small">O</div>{!collapsed&&<div><strong>onecore</strong><small>WORKSPACE</small></div>}<button className="collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation">{collapsed?"»":"«"}</button></div>

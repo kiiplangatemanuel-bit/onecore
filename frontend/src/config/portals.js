@@ -1,12 +1,19 @@
 const ENV = import.meta.env || {};
 const KEYS = {
-  publicSite: "VITE_PUBLIC_SITE_URL", app: "VITE_APP_URL", admin: "VITE_ADMIN_URL",
-  developers: "VITE_DEVELOPER_URL", docs: "VITE_DOCS_URL", support: "VITE_SUPPORT_URL",
-  status: "VITE_STATUS_URL", community: "VITE_COMMUNITY_URL", trust: "VITE_TRUST_URL",
-  events: "VITE_EVENTS_URL", careers: "VITE_CAREERS_URL", partners: "VITE_PARTNERS_URL",
+  publicSite: "VITE_PUBLIC_SITE_URL", app: "VITE_APP_URL",
+  developers: "VITE_DEVELOPER_URL", docs: "VITE_DOCS_URL",
+  careers: "VITE_CAREERS_URL", partners: "VITE_PARTNERS_URL",
   api: "VITE_API_BASE_URL",
 };
-function normalize(value, key) {
+const INTEGRATED_ROUTES = Object.freeze({
+  support: "/support",
+  trust: "/trust",
+  community: "/community",
+  status: "/status",
+  events: "/events",
+  admin: "/admin",
+});
+function normalize(value) {
   if (typeof value !== "string" || !value.trim()) return "";
   try {
     const url = new URL(value.trim());
@@ -18,13 +25,17 @@ function normalize(value, key) {
   }
 }
 export const portals = Object.freeze(Object.fromEntries(
-  Object.entries(KEYS).map(([key, envName]) => [key, normalize(ENV[envName], key)])
+  Object.entries(KEYS).map(([key, envName]) => [key, normalize(ENV[envName])])
 ));
 export function portalUrl(key, path = "") {
-  const base = portals[key];
+  const integratedPath = INTEGRATED_ROUTES[key];
+  const base = integratedPath
+    ? (portals.publicSite || (typeof window !== "undefined" ? window.location.origin : ""))
+    : key === "app" ? (portals.app || portals.publicSite) : portals[key];
   if (!base) return "";
   try {
-    const target = new URL(path.replace(/^\//, ""), base.endsWith("/") ? base : base + "/");
+    const destination = integratedPath ? integratedPath : path.replace(/^\//, "");
+    const target = new URL(destination, base.endsWith("/") ? base : base + "/");
     if (target.origin !== new URL(base).origin) return "";
     return target.href;
   } catch { return ""; }
