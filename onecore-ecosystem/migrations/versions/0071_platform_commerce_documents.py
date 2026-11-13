@@ -137,6 +137,15 @@ def upgrade():
             )
         """)
         op.execute("""
+            CREATE POLICY file_share_token_update ON public.managed_file_shares
+            FOR UPDATE
+            USING (
+                token_hash = NULLIF(current_setting('app.file_share_hash', true), '')
+                AND revoked_at IS NULL AND expires_at > now() AND downloads < max_downloads
+            )
+            WITH CHECK (token_hash = NULLIF(current_setting('app.file_share_hash', true), ''))
+        """)
+        op.execute("""
             CREATE POLICY shared_file_token_read ON public.managed_files
             FOR SELECT USING (
                 EXISTS (
@@ -180,6 +189,9 @@ def upgrade():
 def downgrade():
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.execute("DROP POLICY IF EXISTS file_share_token_update ON public.managed_file_shares")
+        op.execute("DROP POLICY IF EXISTS file_share_token_read ON public.managed_file_shares")
+        op.execute("DROP POLICY IF EXISTS shared_file_token_read ON public.managed_files")
         for table in ("organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares"):
             op.execute(f"DROP POLICY IF EXISTS tenant_scope_access ON public.{table}")
             op.execute(f"ALTER TABLE public.{table} NO FORCE ROW LEVEL SECURITY")
