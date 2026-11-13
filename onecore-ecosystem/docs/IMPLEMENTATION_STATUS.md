@@ -6,8 +6,8 @@ validation, integration, testing, documentation, deployment, monitoring and UAT
 evidence has been reviewed. The categories are functional groupings, not 75 separate
 microservices.
 
-**Reconciled:** 12 November 2026  
-**Implementation code head reviewed:** `37e04146cb56cb1b741a95ced3ea2870471d5658` (tracker-only reconciliation follows)
+**Reconciled:** 13 November 2026  
+**Implementation code head reviewed:** `15d2db0a2a704805259fbf70f473b7dff5ecdc77` (tracker-only reconciliation follows)
 
 ## Verified on current main
 
@@ -36,7 +36,7 @@ coverage:
   product, installment and disbursement tables. Identity-email owner/worker RLS is
   tested separately. This is disposable
   CI PostgreSQL evidence, not production Supabase role provisioning.
-- Alembic migration chain through `0069_sacco_loan_disbursement`, with CI upgrade,
+- Alembic migration chain through `0070_sacco_loan_repayments`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
   Procurement, POS, School, Hospital, Pharmacy/Laboratory, HR/Payroll and a
@@ -205,9 +205,9 @@ not a complete lending, cooperative or microfinance platform.
   [539527e](https://github.com/kiiplangatemanuel-bit/onecore/commit/539527e02a91d5d3a7081dfc9cce873d42daf768).
 
 Remaining SACCO/Microfinance/Chama scope: product update/deactivation and fees;
-live bank/M-Pesa disbursement initiation, callback/statement reconciliation and
-provider-confirmed settlement (the new workflow is staff attestation only);
-repayment receipts and allocation waterfall; partial/early settlement;
+live bank/M-Pesa disbursement and repayment initiation, callback/statement
+reconciliation and provider-confirmed settlement (both disbursement and repayment
+workflows are staff-attested evidence only); advance payment and early settlement;
 interest and penalty accrual; arrears ageing, collections, rescheduling,
 restructuring, write-offs and reversals; member statements and digital self-service;
 guarantor exposure aggregation and member-wide credit limits; collateral document
@@ -218,6 +218,44 @@ portfolio/risk reports; verified M-Pesa/bank integrations; production role rehea
 monitoring, backup/restore, security review and UAT. Staff-recorded consent references
 are not digital signatures; collateral references are not uploaded documents.
 Internal deposit/share entries are not proof of settled cash, bank or M-Pesa payments.
+
+## SACCO repayment receipt, allocation and subledger increment (13 November 2026)
+
+Merged in [PR #135](https://github.com/kiiplangatemanuel-bit/onecore/pull/135),
+squash commit [15d2db0](https://github.com/kiiplangatemanuel-bit/onecore/commit/15d2db0a2a704805259fbf70f473b7dff5ecdc77):
+
+- Migration `0070_sacco_loan_repayments` adds tenant-owned repayment evidence,
+  immutable installment allocations and immutable loan subledger journal lines.
+  The three new tables use composite tenant foreign keys, forced PostgreSQL RLS,
+  append-only triggers and restricted `onecore_api` grants.
+- Receipt evidence is organization-idempotent and unique by organization/channel/
+  external reference; only one receipt per loan can await review. Managers/officers
+  prepare evidence and a separate treasurer or organization administrator reviews
+  it. The requester, loan creator, assessor and credit approver cannot self-review.
+- Verified receipts support partial payment, oldest-due-first allocation and
+  interest-before-principal ordering. Only installments contractually due by the
+  receipt value date are eligible; amounts that cannot be fully allocated are
+  rejected. Installment paid totals are derived from immutable verified allocations.
+- The loan subledger posts balanced cash-clearing, principal-receivable and
+  interest-income lines. A loan can be marked settled only when every installment
+  is fully paid; unapproved waivers cannot bypass that control.
+- Tenant/branch-scoped APIs expose receipt submission, independent review, history,
+  allocations and scheduled balance. The `/sacco` workspace supports these flows.
+  The balance is scheduled outstanding, not an early-settlement payoff quote.
+- PR CI [43410857881](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43410857881)
+  passed migration upgrade/downgrade/re-upgrade, PostgreSQL RLS and grant checks,
+  dependency audit, Python compilation, frontend build and all ten portal builds.
+  Pytest reported **471 passed, 8 warnings**.
+- Vercel status checks on the PR reported the account's `build-rate-limit` quota
+  failure for four preview/deployment contexts. These are not successful deploys;
+  the GitHub Actions build jobs passed. Post-merge main CI was queued at tracker
+  update time and must be checked separately.
+
+This records staff-reviewed external receipt references only. It does not initiate
+or independently verify M-Pesa/bank collections or callbacks. Advance payments,
+early settlement, accruals, penalties, arrears, collections, reversals/refunds,
+provider reconciliation and mapping to the full accounting general ledger remain
+outstanding.
 
 ## Current outstanding work and release blockers
 
