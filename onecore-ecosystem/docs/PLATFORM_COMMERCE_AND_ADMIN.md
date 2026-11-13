@@ -41,7 +41,7 @@ API:
 - `POST /api/v1/files/{id}/shares`, `GET /api/v1/files/shares`, `POST /api/v1/files/shares/{id}/revoke`
 - `GET /api/v1/files/shared/{token}/download`
 
-Object content is held in a private S3-compatible bucket; database rows contain metadata and object keys only. Upload fails closed unless object storage and ClamAV scanning are configured. Download links are short-lived (five minutes). File classification limits listing, moving, sharing and download access. Public share tokens are stored only as hashes, expire, have a download cap and can be revoked.
+Object content is held in a private S3-compatible bucket; database rows contain metadata and object keys only. Upload fails closed unless object storage and ClamAV scanning are configured. Download links are short-lived (five minutes). File classification limits listing, moving, sharing and download access. Until branch-level file ownership is modeled, confidential and restricted documents are visible only to organization administrators; other roles can access internal documents only. Public share tokens are stored only as hashes, expire, have a download cap and can be revoked.
 
 Required backend environment:
 - `INTEGRATION_OBJECT_STORAGE_ENABLED=true`
