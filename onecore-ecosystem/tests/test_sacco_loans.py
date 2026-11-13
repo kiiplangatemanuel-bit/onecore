@@ -674,6 +674,13 @@ def test_repayment_requires_independent_verification_and_posts_balanced_partial_
         requester_membership = _membership(org.id, "sacco_officer")
         reviewer_membership = _membership(org.id, "sacco_treasurer")
         payload = _repayment_payload("500.00", "loan-repayment-001", "MPESA-LOAN-001")
+        with pytest.raises(HTTPException) as overpayment:
+            request_loan_repayment(
+                application.id,
+                _repayment_payload("11200.01", "loan-repayment-overpay", "MPESA-OVERPAY-001"),
+                requester, requester_membership, db,
+            )
+        assert overpayment.value.status_code == 422
 
         with pytest.raises(HTTPException) as no_permission:
             request_loan_repayment(
