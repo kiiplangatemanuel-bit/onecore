@@ -61,6 +61,15 @@ class TransitionIn(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     reason: str = Field(min_length=3, max_length=1000)
 
+def _initial_status(kind: str) -> str:
+    """Return the first valid lifecycle state for a governed platform resource."""
+    return {
+        "trusted_device": "pending",
+        "restore_drill": "planned",
+        "subscription": "trial",
+    }.get(kind, "draft")
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -125,7 +134,7 @@ def create_resource(domain: str, kind: str, payload: ResourceIn,
         module_key=MODULE, record_type=kind).all()
     if any((x.data or {}).get("key") == payload.key for x in exists):
         raise HTTPException(409, "Resource key already exists in this organization")
-    initial = "pending" if kind == "trusted_device" else ("planned" if kind == "restore_drill" else "draft")
+    initial = _initial_status(kind)
     data = {"key": payload.key, "name": payload.name, "config": payload.config,
             "metadata": payload.metadata, "status": initial, "created_at": _now(),
             "updated_at": _now(), "version": 1}

@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from app.api.platform_programme import DOMAINS, TRANSITIONS, _validate_config
+from app.api.platform_programme import DOMAINS, TRANSITIONS, _initial_status, _validate_config
 
 
 def test_programme_registry_covers_all_requested_workstreams():
@@ -58,3 +58,18 @@ def test_lifecycle_transitions_are_explicit_and_no_direct_production_bypass():
     assert "production" not in TRANSITIONS["provider_account"]["draft"]
     assert "certified" in TRANSITIONS["provider_account"]["sandbox"]
     assert "published" not in TRANSITIONS["cms_content"]["draft"]
+
+
+
+def test_subscription_resources_start_in_trial_and_can_transition():
+    assert _initial_status("subscription") == "trial"
+    assert "active" in TRANSITIONS["subscription"]["trial"]
+    assert "grace" in TRANSITIONS["subscription"]["trial"]
+    assert "suspended" in TRANSITIONS["subscription"]["trial"]
+
+
+def test_platform_resource_initial_states_remain_explicit():
+    assert _initial_status("subscription_plan") == "draft"
+    assert _initial_status("trusted_device") == "pending"
+    assert _initial_status("restore_drill") == "planned"
+    assert _initial_status("integration") == "draft"
