@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.authorization import branch_scope_ids, can_access_branch
@@ -1204,9 +1204,9 @@ def verify_loan_repayment(
             if remaining_installments == 0:
                 application.status = "settled"
             action = "sacco.loan_repayment.verified"
-        except IntegrityError:
+        except DBAPIError:
             db.rollback()
-            raise HTTPException(409, "Repayment allocation or journal posting conflicted with a concurrent update")
+            raise HTTPException(409, "Repayment allocation or journal posting conflicted with a database constraint or concurrent update")
 
     row.updated_at = datetime.now(timezone.utc)
     _audit(
@@ -1215,7 +1215,7 @@ def verify_loan_repayment(
     )
     try:
         db.commit()
-    except IntegrityError:
+    except DBAPIError:
         db.rollback()
         raise HTTPException(409, "Repayment evidence could not be committed; refresh the loan balance and retry")
     db.refresh(row)
