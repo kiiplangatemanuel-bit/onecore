@@ -108,6 +108,8 @@ def start_subscription(payload: SubscriptionStartIn, membership=Depends(active_m
                        user: User = Depends(current_user), db: Session = Depends(get_db)):
     if membership.role != "org_admin":
         raise HTTPException(403, "Organization administrator role required")
+    if payload.auto_renew:
+        raise HTTPException(422, "Automatic renewal is not enabled until a recurring payment mandate is configured")
     plan = db.query(SubscriptionPlan).filter_by(id=payload.plan_id, is_active=True).first()
     if not plan:
         raise HTTPException(404, "Subscription plan not found")
@@ -124,6 +126,24 @@ def start_subscription(payload: SubscriptionStartIn, membership=Depends(active_m
            f"plan={plan.code};status=pending_payment")
     db.commit(); db.refresh(row)
     return _subscription_out(row, plan)
+
+
+
+@router.post("/subscriptions/{subscription_id}/cancel")
+def cancel_subscription(subscription_id: int, membership=Depends(active_membership),
+                        user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if membership.role != "org_admin":
+        raise HTTPException(403, "Organization administrator role required")
+    row = db.query(OrganizationSubscription).filter_by(
+        id=subscription_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not row or row.status not in {"pending_payment", "active", "past_due"}:
+        raise HTTPException(404, "Cancelable subscription not found")
+    row.status = "canceled"
+    row.auto_renew = False
+    _audit(db, user.id, membership.organization_id, "subscription.canceled", "subscription", row.id)
+    db.commit()
+    return _subscription_out(row, db.get(SubscriptionPlan, row.plan_id))
 
 
 @router.get("/subscriptions/payments")
@@ -143,8 +163,8 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
     if membership.role != "org_admin":
         raise HTTPException(403, "Organization administrator role required")
     subscription = db.query(OrganizationSubscription).filter_by(
-        id=subscription_id, organization_id=membership.organization_id, status="pending_payment"
-    ).first()
+        id=subscription_id, organization_id=membership.organization_id
+    ).filter(OrganizationSubscription.status.in_(["pending_payment", "active"])).first()
     if not subscription:
         raise HTTPException(404, "Pending subscription not found")
     plan = db.get(SubscriptionPlan, subscription.plan_id)
@@ -153,6 +173,9 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
         "reference": payload.external_reference.strip().upper(), "amount": str(plan.amount),
         "currency": plan.currency,
     }, sort_keys=True).encode()).hexdigest()
+    pending = db.query(SubscriptionPayment).filter_by(subscription_id=subscription.id, status="pending_verification").first()
+    if pending:
+        raise HTTPException(409, "A payment for this subscription is already awaiting verification")
     existing = db.query(SubscriptionPayment).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
@@ -535,10 +558,16 @@ def review_subscription_payment(payment_id: int, payload: PaymentReviewIn,
     payment.review_note = payload.note.strip()
     if payload.decision == "verified":
         plan = db.get(SubscriptionPlan, subscription.plan_id)
-        starts = _utc()
+        now = _utc()
+        if subscription.status == "pending_payment":
+            subscription.starts_at = now
+            subscription.ends_at = _add_months(now, 12 if plan.interval == "yearly" else 1)
+        elif subscription.status == "active":
+            base = subscription.ends_at if subscription.ends_at and subscription.ends_at > now else now
+            subscription.ends_at = _add_months(base, 12 if plan.interval == "yearly" else 1)
+        else:
+            raise HTTPException(409, "Subscription cannot be activated or renewed in its current state")
         subscription.status = "active"
-        subscription.starts_at = starts
-        subscription.ends_at = _add_months(starts, 12 if plan.interval == "yearly" else 1)
     else:
         subscription.status = "payment_rejected"
     _audit(db, user.id, payment.organization_id, "subscription.payment_reviewed",
