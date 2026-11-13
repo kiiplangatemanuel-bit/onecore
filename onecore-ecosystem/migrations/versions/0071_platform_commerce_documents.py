@@ -72,6 +72,7 @@ def upgrade():
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("object_key", sa.String(512), nullable=False, unique=True),
         sa.Column("content_type", sa.String(160), nullable=False, server_default="application/octet-stream"),
+        sa.Column("is_folder", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("sha256", sa.String(64), nullable=False),
         sa.Column("classification", sa.String(24), nullable=False, server_default="internal"),
@@ -147,6 +148,8 @@ def upgrade():
                 )
             )
         """)
+        op.execute("ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE public.subscription_plans FORCE ROW LEVEL SECURITY")
         op.execute("""
             CREATE POLICY subscription_plan_read ON public.subscription_plans
             FOR SELECT USING (is_active = true OR public.onecore_is_platform_admin())
