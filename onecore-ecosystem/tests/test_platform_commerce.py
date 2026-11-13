@@ -66,6 +66,8 @@ def test_subscription_payment_is_idempotent_and_activates_only_after_admin_verif
         assert replay["idempotent_replay"] is True
         row = db.query(OrganizationSubscription).filter_by(id=subscription["id"]).one()
         assert row.status == "pending_payment"
+        assert row.amount == Decimal("2500.00")
+        assert row.currency == "KES"
         reviewed = review_subscription_payment(created["id"], PaymentReviewIn(decision="verified", note="Matched"),
                                                 platform_admin, db)
         assert reviewed["payment_status"] == "verified"
