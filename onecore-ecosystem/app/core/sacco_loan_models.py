@@ -170,6 +170,7 @@ class SaccoLoanInstallment(Base):
         CheckConstraint("status IN ('projected', 'due', 'paid', 'partially_paid', 'overdue', 'waived')", name="ck_sacco_loan_installment_status"),
         CheckConstraint("principal_paid >= 0 AND principal_paid <= principal_due", name="ck_sacco_loan_installment_principal_paid"),
         CheckConstraint("interest_paid >= 0 AND interest_paid <= interest_due", name="ck_sacco_loan_installment_interest_paid"),
+        CheckConstraint("(status = 'paid' AND principal_paid + interest_paid = total_due) OR (status = 'partially_paid' AND principal_paid + interest_paid > 0 AND principal_paid + interest_paid < total_due) OR (status IN ('projected', 'due', 'overdue', 'waived') AND principal_paid + interest_paid = 0)", name="ck_sacco_loan_installment_paid_status"),
         Index("ix_sacco_loan_installment_org_application_due", "organization_id", "application_id", "due_date"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
