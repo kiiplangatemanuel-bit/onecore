@@ -262,19 +262,23 @@ def _require_file_access(membership, row):
         raise HTTPException(404, "File not found")
 
 
-def _parent_folder(db, organization_id, parent_id):
+def _parent_folder(db, organization_id, parent_id, membership=None):
     if parent_id is None:
-        return
+        return None
     row = db.query(ManagedFile).filter_by(id=parent_id, organization_id=organization_id,
                                           is_folder=True, deleted_at=None).first()
     if not row:
         raise HTTPException(404, "Parent folder not found")
+    if membership is not None:
+        _require_file_access(membership, row)
+    return row
 
 
 @router.get("/files")
 def list_files(parent_id: int | None = Query(default=None, gt=0), q: str = Query(default="", max_length=120),
                membership=Depends(active_membership), db: Session = Depends(get_db)):
     require_permission(membership, "read")
+    _parent_folder(db, membership.organization_id, parent_id, membership)
     query = db.query(ManagedFile).filter_by(organization_id=membership.organization_id,
                                             parent_id=parent_id, deleted_at=None)
     if membership.role == "org_admin":
@@ -292,11 +296,11 @@ def list_files(parent_id: int | None = Query(default=None, gt=0), q: str = Query
 def create_folder(payload: FolderIn, membership=Depends(active_membership),
                   user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_permission(membership, "create")
-    _parent_folder(db, membership.organization_id, payload.parent_id)
+    parent = _parent_folder(db, membership.organization_id, payload.parent_id, membership)
     row = ManagedFile(organization_id=membership.organization_id, parent_id=payload.parent_id,
                       uploaded_by=user.id, name=payload.name.strip(), object_key=f"folders/{membership.organization_id}/{uuid.uuid4().hex}",
                       content_type="inode/directory", size_bytes=0, sha256=hashlib.sha256(b"").hexdigest(),
-                      classification="internal", scan_status="clean", is_folder=True)
+                      classification=parent.classification if parent else "internal", scan_status="clean", is_folder=True)
     db.add(row); db.flush()
     _audit(db, user.id, membership.organization_id, "file.folder_created", "managed_file", row.id, row.name)
     db.commit(); db.refresh(row)
@@ -311,7 +315,11 @@ async def upload_file(file: UploadFile = File(...), parent_id: int | None = Quer
     require_permission(membership, "create")
     if not _classification_allowed(membership.role, classification):
         raise HTTPException(403, "Your organization role cannot upload files at this classification")
-    _parent_folder(db, membership.organization_id, parent_id)
+    parent = _parent_folder(db, membership.organization_id, parent_id, membership)
+    if parent and not _classification_allowed(membership.role, parent.classification):
+        raise HTTPException(404, "Parent folder not found")
+    if parent and {"internal": 0, "confidential": 1, "restricted": 2}[classification] < {"internal": 0, "confidential": 1, "restricted": 2}[parent.classification]:
+        raise HTTPException(422, "A child file cannot have a lower classification than its parent folder")
     name = (file.filename or "upload").replace("\\", "/").split("/")[-1].strip()
     if not name or len(name) > 255 or any(ord(c) < 32 for c in name):
         raise HTTPException(422, "Invalid file name")
@@ -356,7 +364,9 @@ def move_or_rename_file(file_id: int, payload: FileMoveIn, membership=Depends(ac
     if not row:
         raise HTTPException(404, "File not found")
     _require_file_access(membership, row)
-    _parent_folder(db, membership.organization_id, payload.parent_id)
+    parent = _parent_folder(db, membership.organization_id, payload.parent_id, membership)
+    if parent and {"internal": 0, "confidential": 1, "restricted": 2}[row.classification] < {"internal": 0, "confidential": 1, "restricted": 2}[parent.classification]:
+        raise HTTPException(422, "A file cannot be moved into a folder with a higher classification")
     if row.is_folder and payload.parent_id == row.id:
         raise HTTPException(409, "A folder cannot be moved into itself")
     row.name = payload.name.strip()
