@@ -117,10 +117,6 @@ def upgrade():
                     )
                     OR {table}.organization_id = NULLIF(current_setting('app.organization_id', true), '')::integer
                     OR public.onecore_is_platform_admin()
-                    OR (
-                        '{table}' = 'managed_file_shares'
-                        AND token_hash = NULLIF(current_setting('app.file_share_hash', true), '')
-                    )
                 )
                 WITH CHECK (
                     EXISTS (
@@ -133,6 +129,24 @@ def upgrade():
                     OR public.onecore_is_platform_admin()
                 )
             """)
+        op.execute("""
+            CREATE POLICY file_share_token_read ON public.managed_file_shares
+            FOR SELECT USING (
+                token_hash = NULLIF(current_setting('app.file_share_hash', true), '')
+            )
+        """)
+        op.execute("""
+            CREATE POLICY shared_file_token_read ON public.managed_files
+            FOR SELECT USING (
+                EXISTS (
+                    SELECT 1 FROM public.managed_file_shares s
+                    WHERE s.file_id = managed_files.id
+                      AND s.token_hash = NULLIF(current_setting('app.file_share_hash', true), '')
+                      AND s.revoked_at IS NULL AND s.expires_at > now()
+                      AND s.downloads < s.max_downloads
+                )
+            )
+        """)
         op.execute("""
             CREATE POLICY subscription_plan_read ON public.subscription_plans
             FOR SELECT USING (is_active = true OR public.onecore_is_platform_admin())
