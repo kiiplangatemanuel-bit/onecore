@@ -263,7 +263,8 @@ def _verify_rls_database_boundary(connection):
         "school_classes", "school_learners", "accounting_invoices", "sacco_members",
         "sacco_financial_transactions", "sacco_ledger_entries", "sacco_loan_products",
         "sacco_loan_applications", "sacco_loan_guarantors", "sacco_loan_collateral",
-        "sacco_loan_installments",
+        "sacco_loan_installments", "sacco_loan_repayments",
+        "sacco_loan_repayment_allocations", "sacco_loan_repayment_journal_lines",
         "status_alert_deliveries",
         # HR and payroll are tenant-owned financial records and must never be
         # served by a production API role unless FORCE ROW LEVEL SECURITY is active.
