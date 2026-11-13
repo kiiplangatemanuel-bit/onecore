@@ -125,9 +125,9 @@ Never infer a higher status from file presence, route presence, a passing build,
 
 ## 9. Current repository audit baseline (13 November 2026)
 
-The repository contains the React/Vite central frontend, a shared portal shell in `frontend/src/PortalApp.jsx`, shared API client in `frontend/src/api.js`, and ten existing independently buildable Vite portal entry points under `frontend/portals`.
+The repository contains the React/Vite central frontend, a shared portal shell in `frontend/src/PortalApp.jsx`, shared API client in `frontend/src/api.js`, and portal entry points under `frontend/portals`.
 
-The ten portal `src/main.jsx` files are thin entry points that mount the shared `PortalApp`; they are not ten separately implemented applications. This repository baseline predates the revised product boundary in this standard. The target architecture is four independent portals (Developers, Documentation, Partners and Careers), with Support, Trust, Community, Status, Events and Admin/Superadmin integrated into the main OneCore website. The existing ten-entry-point build structure must be reconciled to that target: the five named integrated modules and Admin/Superadmin must not remain standalone deployments. The shared shell and deployment guide are a foundation, not proof that every workflow is complete.
+The target architecture is one main OneCore website plus four independent portals (Developers, Documentation, Partners and Careers). Support, Trust, Community, Status, Events and Admin/Superadmin are routed through the main website at `/support`, `/trust`, `/community`, `/status`, `/events` and `/admin`. The main application mounts the shared portal workflow UI at these routes and synchronizes authentication state with the main app. The former six independent entry points now act as compatibility redirects to the corresponding main-site route; they are excluded from the independent portal CI matrix. The CI portal build matrix now covers only Developers, Documentation, Careers and Partners. Existing Vercel projects and DNS records for retired modules still require owner-operated retirement or redirects after production route smoke tests. These code changes establish the target deployment topology but do not prove every workflow is complete or that hosting configuration has been changed.
 
 The central frontend README explicitly identifies some module entries as workspace shells until dedicated screens and API contracts are implemented. The backend implementation tracker also classifies several specialist business applications as partial and documents production configuration, provider, monitoring, backup/restore and UAT gates. These limitations must remain visible in delivery reporting.
 
@@ -137,7 +137,7 @@ Known operational release blockers in the tracker include missing production hea
 
 ## 10. Immediate execution order
 
-1. Reconcile the existing ten Vite portal entry points with the target topology: retain independent deployments only for Developers, Documentation, Partners and Careers; move Support, Trust, Community, Status, Events and Admin/Superadmin into the main website.
+1. Complete production smoke tests for the integrated main-site routes and the four independent portals; retire legacy Vercel projects and DNS only after traffic is verified.
 2. Build a route/screen/action-to-API inventory for the main application, its integrated modules and the four independent portals.
 3. Mark every UI element as public, authenticated, role-restricted, read-only, or mutating.
 4. Map each action to its API endpoint, database table/model, tenant rule, permission and audit behavior.
