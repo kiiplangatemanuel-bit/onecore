@@ -29,19 +29,20 @@ coverage:
 - PostgreSQL tenant RLS policies and forced-RLS catalog checks. CI uses a
   non-owner NOLOGIN NOSUPERUSER NOBYPASSRLS behavior role and verifies actual
   tenant read/write isolation on records, memberships, audit_events, sacco_members,
-  sacco_financial_transactions, sacco_ledger_entries and all six SACCO loan tables
-  (products, applications, guarantors, collateral, projected installments and
-  disbursement evidence). PostgreSQL catalog tests verify the onecore_api role's
-  column-level loan/disbursement grants and absence of table-level UPDATE/DELETE on
-  product, installment and disbursement tables. Identity-email owner/worker RLS is
+  sacco_financial_transactions, sacco_ledger_entries and all nine SACCO loan tables (products, applications, guarantors, collateral,
+  projected installments, disbursement evidence, repayment evidence, immutable
+  allocations and subledger journal lines). PostgreSQL catalog tests verify the
+  onecore_api role's column-level loan/disbursement/repayment grants and absence
+  of table-level UPDATE/DELETE on append-only product, installment, disbursement,
+  allocation and journal tables. Identity-email owner/worker RLS is
   tested separately. This is disposable
   CI PostgreSQL evidence, not production Supabase role provisioning.
 - Alembic migration chain through `0070_sacco_loan_repayments`, with CI upgrade,
   downgrade-to-base and re-upgrade checks against PostgreSQL 16.
 - Specialist domain slices exist on main for Inventory, Accounting, CRM,
   Procurement, POS, School, Hospital, Pharmacy/Laboratory, HR/Payroll and a
-  partial SACCO member/KYC, savings/share subledger, loan origination and staff-reviewed
-  disbursement-evidence workflow. These are partial
+  partial SACCO member/KYC, savings/share subledger, loan origination, staff-reviewed
+  disbursement evidence and repayment receipt/allocation/subledger workflows. These are partial
   applications with real models/migrations, APIs, validation, authorization,
   audit and tests; their presence does not mean their full master requirements
   or production acceptance are complete.
@@ -292,11 +293,12 @@ outstanding.
    approval. No provider certification or live transaction processing is claimed.
 6. **Specialist scope:** Accounting, CRM, Procurement, POS, School, Hospital,
    Pharmacy/Laboratory, HR/Payroll and SACCO/Microfinance/Chama still need
-   feature-by-feature completion, fuller user workflows and UAT. SACCO currently
-   covers member/KYC, a limited savings/share subledger, loan origination and
-   staff-reviewed full-principal disbursement evidence/schedule activation. Live
-   provider settlement, repayments, accruals, arrears, groups/chama, dividends,
-   statements and GL integration remain open. Hotel, Restaurant, Property, Services,
+   feature-by-feature completion, fuller user workflows and UAT. SACCO currently covers member/KYC, a limited savings/share subledger, loan origination,
+   staff-reviewed full-principal disbursement evidence/schedule activation, and
+   staff-reviewed repayment receipts with partial due-installment allocation and
+   balanced loan subledger posting. Live provider settlement, accruals, penalties,
+   arrears, collections, restructuring, reversals, groups/chama, dividends, member
+   statements and general-ledger integration remain open. Hotel, Restaurant, Property, Services,
    E-commerce, Website Builder,
    central CMS and other product categories likewise need their own reviewed
    vertical slices; a catalogue folder or manifest is not implementation evidence.
