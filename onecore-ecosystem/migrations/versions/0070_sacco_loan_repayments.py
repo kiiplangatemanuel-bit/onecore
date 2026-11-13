@@ -226,7 +226,7 @@ def upgrade():
 
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_repayment()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_repayment$
             DECLARE loan public.sacco_loan_applications%ROWTYPE;
             BEGIN
                 IF TG_OP = 'DELETE' THEN
@@ -281,7 +281,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_repayment_allocation()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_allocation$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_repayment_allocation$
             DECLARE
                 receipt public.sacco_loan_repayments%ROWTYPE;
                 installment public.sacco_loan_installments%ROWTYPE;
@@ -327,7 +327,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_repayment_journal()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_journal$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_repayment_journal$
             BEGIN
                 IF TG_OP <> 'INSERT' THEN
                     RAISE EXCEPTION 'SACCO repayment journal lines are immutable';
@@ -351,7 +351,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_assert_sacco_loan_repayment_journal_balanced()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_journal_balance$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_repayment_journal_balance$
             DECLARE
                 target_org integer;
                 target_repayment integer;
@@ -384,7 +384,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_guard_sacco_loan_installment_paid()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_installment_paid$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_installment_paid$
             DECLARE
                 allocated_principal numeric(18,2);
                 allocated_interest numeric(18,2);
@@ -420,7 +420,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_require_settled_sacco_loan()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_settled$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_settled$
             BEGIN
                 IF NEW.status = 'settled' AND EXISTS (
                     SELECT 1 FROM public.sacco_loan_installments i
@@ -440,7 +440,7 @@ def upgrade():
         """)
         op.execute("""
             CREATE OR REPLACE FUNCTION public.onecore_assert_sacco_loan_repayment_allocated()
-            RETURNS trigger LANGUAGE plpgsql AS $sacco_loan_repayment_allocated$
+            RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $sacco_loan_repayment_allocated$
             DECLARE
                 target_org integer;
                 target_repayment integer;
