@@ -14,25 +14,27 @@ from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
     SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
     SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanRepayment, SaccoLoanRepaymentAllocation, SaccoLoanRepaymentJournalLine,
 )
 from app.core.sacco_loan_schemas import (
     SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
     SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementCreateIn,
     SaccoLoanDisbursementVerificationIn, SaccoLoanGuarantorConsentIn,
     SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
+    SaccoLoanRepaymentCreateIn, SaccoLoanRepaymentVerificationIn,
 )
 from app.core.security import current_user
 from app.core.tenancy import active_membership
-from app.services.sacco_loans import monthly_installment, projected_schedule
+from app.services.sacco_loans import allocate_due_repayment, monthly_installment, projected_schedule
 from app.services.sacco_membership import transaction_fingerprint
 
 router = APIRouter(prefix="/api/v1/sacco", tags=["sacco-loans"])
 
 LOAN_PERMISSIONS = {
-    "org_admin": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement", "verify_disbursement"},
-    "sacco_manager": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement"},
-    "sacco_officer": {"read", "create_application", "add_guarantor", "add_collateral"},
-    "sacco_treasurer": {"read", "verify_disbursement"},
+    "org_admin": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement", "verify_disbursement", "request_repayment", "verify_repayment"},
+    "sacco_manager": {"read", "manage_products", "create_application", "add_guarantor", "record_consent", "add_collateral", "verify_collateral", "assess", "decide", "request_disbursement", "request_repayment"},
+    "sacco_officer": {"read", "create_application", "add_guarantor", "add_collateral", "request_repayment"},
+    "sacco_treasurer": {"read", "verify_disbursement", "verify_repayment"},
     "sacco_credit_officer": {"read", "create_application", "add_guarantor", "add_collateral", "assess"},
     "sacco_credit_approver": {"read", "decide"},
     "sacco_guarantor_verifier": {"read", "record_consent", "verify_collateral"},
@@ -221,6 +223,11 @@ def _installment_out(row: SaccoLoanInstallment) -> dict:
         "due_date": row.due_date.isoformat(), "principal_due": format(row.principal_due, ".2f"),
         "interest_due": format(row.interest_due, ".2f"), "total_due": format(row.total_due, ".2f"),
         "currency": row.currency, "status": row.status,
+        "principal_paid": format(row.principal_paid, ".2f"),
+        "interest_paid": format(row.interest_paid, ".2f"),
+        "principal_outstanding": format(row.principal_due - row.principal_paid, ".2f"),
+        "interest_outstanding": format(row.interest_due - row.interest_paid, ".2f"),
+        "total_outstanding": format(row.total_due - row.principal_paid - row.interest_paid, ".2f"),
     }
 
 
@@ -644,9 +651,11 @@ def get_loan_schedule(
     ).order_by(SaccoLoanInstallment.installment_number.asc()).all()
     return {"application_id": application.id, "status": application.status,
             "schedule_type": (
-                "activated_after_staff_verified_disbursement"
+                "settled" if application.status == "settled"
+                else "activated_after_staff_verified_disbursement"
                 if application.status == "active" else "projected_until_verified_disbursement"
             ),
+            "balance": _loan_balance_values(db, membership, application),
             "items": [_installment_out(row) for row in rows]}
 
 
