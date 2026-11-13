@@ -21,7 +21,7 @@ from app.services.accounting import validate_journal_lines
 from app.services.crm import validate_stage_transition
 from app.services.user_sessions import create_user_session
 from app.services.pos import money, calculate_pos_line, validate_payment_total, canonical_request_hash, canonical_return_hash, validate_return_refund_total, apply_loyalty_redemption, calculate_loyalty_return_adjustments
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 
 router = APIRouter(prefix="/api/v1")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "modules" / "catalog.json"
@@ -1924,6 +1924,45 @@ def sync_pos_sale(payload: POSSaleSyncIn, membership=Depends(active_membership),
                          for p in sale_payments],
             "accounting_status": accounting_link.status, "accounting_journal_id": accounting_link.journal_id}
 
+
+
+
+@router.get("/pos/sales")
+def list_pos_sales(start_date: date | None = None, end_date: date | None = None,
+                   branch_id: str | None = None, q: str = "", limit: int = 100,
+                   membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    query = db.query(POSSale).filter_by(organization_id=membership.organization_id)
+    allowed_branches = branch_scope_ids(membership)
+    if allowed_branches is not None:
+        query = query.filter(POSSale.branch_id.in_(allowed_branches))
+    if branch_id:
+        if not can_access_branch(membership, branch_id):
+            raise HTTPException(404, "POS sales not found")
+        query = query.filter_by(branch_id=branch_id)
+    if start_date:
+        query = query.filter(POSSale.created_at >= datetime.combine(start_date, time.min, tzinfo=timezone.utc))
+    if end_date:
+        query = query.filter(POSSale.created_at < datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc))
+    if q.strip():
+        query = query.filter(POSSale.client_transaction_id.ilike(f"%{q.strip()}%"))
+    rows = query.order_by(POSSale.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+    result = []
+    for sale in rows:
+        payments = db.query(POSPayment).filter_by(
+            organization_id=membership.organization_id, sale_id=sale.id
+        ).all()
+        result.append({
+            "id": sale.id, "branch_id": sale.branch_id, "shift_id": sale.shift_id,
+            "cashier_user_id": sale.cashier_user_id, "client_transaction_id": sale.client_transaction_id,
+            "subtotal_amount": str(sale.subtotal_amount), "discount_amount": str(sale.discount_amount),
+            "tax_amount": str(sale.tax_amount), "total_amount": str(sale.total_amount),
+            "currency": sale.currency, "status": sale.status,
+            "payments": [{"id": p.id, "method": p.method, "amount": str(p.amount),
+                          "status": p.status, "provider_reference": p.provider_reference} for p in payments],
+            "created_at": sale.created_at.isoformat(),
+        })
+    return result
 
 
 @router.get("/pos/sales/{sale_id}")

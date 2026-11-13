@@ -288,3 +288,64 @@ def revoke_invitation(invitation_id:int,membership=Depends(active_membership),us
 @router.get("/branding/footer")
 def mandatory_footer():
     return {"text":"Powered by OneCore Technologies Ltd","mandatory":True}
+
+
+class OrganizationMemberUpdateIn(BaseModel):
+    role: str = Field(min_length=2, max_length=50)
+    branch_scope: str = Field(default="*", max_length=500)
+    is_active: bool = True
+
+
+@router.get("/members")
+def list_organization_members(membership=Depends(active_membership), db: Session = Depends(get_db)):
+    if membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator can list all members")
+    rows = db.query(Membership, User).join(User, User.id == Membership.user_id).filter(
+        Membership.organization_id == membership.organization_id
+    ).order_by(User.full_name, User.email).all()
+    return [{"id": m.id, "user_id": u.id, "email": u.email, "full_name": u.full_name,
+             "role": m.role, "branch_scope": m.branch_scope, "is_active": m.is_active,
+             "user_is_active": u.is_active} for m, u in rows]
+
+
+@router.patch("/members/{membership_id}")
+def update_organization_member(membership_id: int, payload: OrganizationMemberUpdateIn,
+                               membership=Depends(active_membership), user: User=Depends(current_user),
+                               db: Session=Depends(get_db)):
+    if membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator can change member access")
+    if payload.role not in ROLE_PERMISSIONS and payload.role != "developer":
+        raise HTTPException(422, "Unsupported organization role")
+    target = db.query(Membership).filter_by(
+        id=membership_id, organization_id=membership.organization_id
+    ).with_for_update().first()
+    if not target:
+        raise HTTPException(404, "Organization member not found")
+    if target.user_id == user.id and (not payload.is_active or payload.role != "org_admin"):
+        raise HTTPException(409, "You cannot remove your own organization administrator access")
+    if target.role == "org_admin" and (not payload.is_active or payload.role != "org_admin"):
+        other_admin = db.query(Membership).filter(
+            Membership.organization_id == membership.organization_id,
+            Membership.role == "org_admin", Membership.is_active.is_(True),
+            Membership.id != target.id,
+        ).first()
+        if not other_admin:
+            raise HTTPException(409, "The organization must retain at least one active administrator")
+    scope = payload.branch_scope.strip()
+    if scope != "*":
+        branch_ids = [x.strip() for x in scope.split(",") if x.strip()]
+        if not branch_ids:
+            raise HTTPException(422, "Select at least one branch or use * for all branches")
+        valid = {x.id for x in db.query(Branch).filter(
+            Branch.organization_id == membership.organization_id, Branch.id.in_(branch_ids)
+        ).all()}
+        if valid != set(branch_ids):
+            raise HTTPException(422, "Branch scope contains a branch outside this organization")
+    target.role = payload.role
+    target.branch_scope = scope
+    target.is_active = payload.is_active
+    _audit(db, user.id, membership.organization_id, "organization.member_access_updated",
+           "membership", target.id, f"role={target.role};active={target.is_active};branch_scope={scope}")
+    db.commit()
+    return {"id": target.id, "user_id": target.user_id, "role": target.role,
+            "branch_scope": target.branch_scope, "is_active": target.is_active}

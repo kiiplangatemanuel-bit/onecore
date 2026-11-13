@@ -53,6 +53,7 @@ def _tables():
         "accounting_fx_rates", "accounting_fx_postings",
         "accounting_fx_revaluations", "accounting_fx_settlements",
         "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+        "subscription_plans", "organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares", "managed_file_versions", "managed_file_versions",
     )
     return [
         {"relname": name, "rls_enabled": True, "rls_forced": True, "has_policy": True}
@@ -105,6 +106,7 @@ def test_production_database_boundary_rejects_missing_critical_rls_table():
     "accounting_fx_rates", "accounting_fx_postings",
     "accounting_fx_revaluations", "accounting_fx_settlements",
     "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+    "subscription_plans", "organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares",
     "sacco_financial_transactions", "sacco_ledger_entries", "sacco_loan_products",
     "sacco_loan_applications", "sacco_loan_guarantors", "sacco_loan_collateral",
     "sacco_loan_installments", "sacco_loan_repayments",

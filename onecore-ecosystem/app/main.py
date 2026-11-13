@@ -40,12 +40,15 @@ from app.api.user_sessions import router as user_sessions_router
 from app.api.supabase_auth import router as supabase_auth_router
 from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
+from app.api.platform_commerce import router as platform_commerce_router
+from app.api.platform_admin import router as platform_admin_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa settlement models
 from app.core import finance_ops_models  # noqa: F401 - register FX and statutory payroll tables
 from app.core import sacco_models  # noqa: F401 - register SACCO membership tables
 from app.core import sacco_loan_models  # noqa: F401 - register SACCO loan tables
+from app.core import platform_commerce_models  # noqa: F401 - register subscription and document tables
 from app.api.finance_payroll_ops import router as finance_payroll_ops_router
 from app.api.sacco import router as sacco_router
 from app.api.sacco_loans import router as sacco_loans_router
@@ -112,6 +115,8 @@ app.include_router(user_sessions_router)
 app.include_router(supabase_auth_router)
 app.include_router(developer_api_keys_router)
 app.include_router(developer_webhooks_router)
+app.include_router(platform_commerce_router)
+app.include_router(platform_admin_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
@@ -275,6 +280,7 @@ def _verify_rls_database_boundary(connection):
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings", "accounting_fx_revaluations", "accounting_fx_settlements",
         "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+        "subscription_plans", "organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares", "managed_file_versions",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""
