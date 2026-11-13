@@ -307,7 +307,9 @@ def upgrade():
                   AND application_id = NEW.application_id AND id = NEW.installment_id;
                 IF NOT FOUND OR receipt.id IS NULL OR receipt.status <> 'verified'
                    OR receipt.application_id <> NEW.application_id
-                   OR receipt.currency <> NEW.currency OR installment.currency <> NEW.currency THEN
+                   OR receipt.currency <> NEW.currency OR installment.currency <> NEW.currency
+                   OR installment.due_date > receipt.value_date
+                   OR installment.status NOT IN ('due', 'overdue', 'partially_paid') THEN
                     RAISE EXCEPTION 'Repayment allocation must reference a verified same-loan receipt and installment';
                 END IF;
                 SELECT COALESCE(sum(principal_amount + interest_amount), 0)
