@@ -1,7 +1,7 @@
 # OneCore frontend–backend parity standard
 
 **Status:** Required engineering and release standard  
-**Applies to:** The central OneCore application and every independently deployable portal  
+**Applies to:** The central OneCore application and its four independently deployable portals  
 **Repository:** `kiiplangatemanuel-bit/onecore`
 
 ## 1. Non-negotiable principle
@@ -72,24 +72,33 @@ For each module, retain evidence for at least:
 
 Use disposable test tenants and safe test data. Do not initiate live payments, statutory submissions, emails, or other external side effects as part of a test unless the provider's sandbox and authorization are explicitly configured.
 
-## 6. Portal-specific requirements
+## 6. Product and portal boundaries
 
-The independently deployable portals share the OneCore identity, API, and database architecture, but each portal must be audited as a real product:
+OneCore has one main website/application and exactly four independently deployable portals. All products share the approved OneCore identity, API and database architecture.
 
-| Portal | Required functional scope |
+### Four independent portals
+
+| Independent portal | Required functional scope |
 |---|---|
-| Admin / Superadmin | Tenant governance, privileged operations, audit, support and platform health; every privileged action server-authorized |
-| Support | Public enquiries/ticket submission, guest ticket access where supported, authenticated ticket history, replies and attachments |
-| Status | Public health/incident/maintenance information and authenticated alert preferences; health reachability must not be misrepresented as full monitoring |
-| Developers | Documentation, application registration, scoped credentials, webhook configuration, usage and sandbox workflows |
-| Documentation | Public published guides plus authenticated organization-specific content where applicable |
-| Community | Public content and authenticated posts, comments, groups, profiles and moderation workflows |
-| Trust | Public policies/disclosures plus confidential report submission and restricted case handling |
-| Events | Public event discovery plus authenticated registration, booking, attendance and payment status where enabled |
-| Careers | Public vacancies plus private applicant profiles, applications and recruitment administration |
-| Partners | Public partner information/opportunities plus authenticated partner profiles, referrals, leads, agreements and resources |
+| Developers | Developer accounts, application registration, scoped credentials, webhook configuration, API usage and sandbox workflows |
+| Documentation | Public published guides, API references, tutorials and authenticated organization-specific content where applicable |
+| Partners | Public partner information and opportunities; authenticated partner profiles, referrals, leads, agreements and resources |
+| Careers | Public vacancies; private applicant profiles, applications and recruitment administration |
 
-A shared shell or successful Vite build does not prove that each portal's user journeys are complete. Shared components may be reused, but each portal needs its own route/API/data/permission/e2e coverage.
+### Modules integrated into the main OneCore website
+
+These are first-class modules within the main OneCore website/application. They are not independent portals, do not require separate portal deployments or standalone portal subdomains, and use the main website's navigation, identity and shared application shell:
+
+| Integrated module | Required functional scope |
+|---|---|
+| Support | Public enquiries and ticket submission, guest ticket access where supported, authenticated ticket history, replies and attachments |
+| Trust | Public policies and disclosures, confidential report submission and restricted case handling |
+| Community | Public content; authenticated posts, comments, groups and profiles; moderation workflows |
+| Status | Public health, incident and maintenance information; authenticated alert preferences. Health reachability must not be misrepresented as full monitoring |
+| Events | Public event discovery; authenticated registration, booking, attendance and payment status where enabled |
+| Admin / Superadmin | Integrated privileged administration area within the main OneCore application, with tenant governance, audit, support and platform operations; every privileged action must be server-authorized |
+
+A shared shell or successful Vite build does not prove that any module or portal's user journeys are complete. Each of the four independent portals and each integrated main-website module needs its own route/API/data/permission/end-to-end coverage. The five integrated modules must not be represented as separately deployable portals.
 
 ## 7. Integration and deployment rules
 
@@ -116,9 +125,9 @@ Never infer a higher status from file presence, route presence, a passing build,
 
 ## 9. Current repository audit baseline (13 November 2026)
 
-The repository contains the React/Vite central frontend, a shared portal shell in `frontend/src/PortalApp.jsx`, shared API client in `frontend/src/api.js`, and ten independently buildable Vite portal entry points under `frontend/portals`.
+The repository contains the React/Vite central frontend, a shared portal shell in `frontend/src/PortalApp.jsx`, shared API client in `frontend/src/api.js`, and ten existing independently buildable Vite portal entry points under `frontend/portals`.
 
-The ten portal `src/main.jsx` files are thin entry points that mount the shared `PortalApp`; they are not ten separately implemented applications. The shared shell already includes public content and authenticated portal workflow areas, and the portal deployment guide documents API-backed record types and endpoints. This is a useful foundation, not proof that every listed workflow is complete.
+The ten portal `src/main.jsx` files are thin entry points that mount the shared `PortalApp`; they are not ten separately implemented applications. This repository baseline predates the revised product boundary in this standard. The target architecture is four independent portals (Developers, Documentation, Partners and Careers), with Support, Trust, Community, Status, Events and Admin/Superadmin integrated into the main OneCore website. The existing ten-entry-point build structure must be reconciled to that target: the five named integrated modules and Admin/Superadmin must not remain standalone deployments. The shared shell and deployment guide are a foundation, not proof that every workflow is complete.
 
 The central frontend README explicitly identifies some module entries as workspace shells until dedicated screens and API contracts are implemented. The backend implementation tracker also classifies several specialist business applications as partial and documents production configuration, provider, monitoring, backup/restore and UAT gates. These limitations must remain visible in delivery reporting.
 
@@ -128,13 +137,14 @@ Known operational release blockers in the tracker include missing production hea
 
 ## 10. Immediate execution order
 
-1. Build a route/screen/action-to-API inventory for the central application and all ten portals.
-2. Mark every UI element as public, authenticated, role-restricted, read-only, or mutating.
-3. Map each action to its API endpoint, database table/model, tenant rule, permission and audit behavior.
-4. Identify screens using placeholder data, workspace shells, unimplemented actions, swallowed errors or missing API contracts.
-5. Prioritize shared identity, organization context, permissions and API client gaps first.
-6. Complete one end-to-end vertical slice at a time, with frontend and backend work delivered together.
-7. Add portal-specific browser tests and database/security assertions to CI.
-8. Rehearse against staging Supabase and verify deployment/operations gates before production acceptance.
+1. Reconcile the existing ten Vite portal entry points with the target topology: retain independent deployments only for Developers, Documentation, Partners and Careers; move Support, Trust, Community, Status, Events and Admin/Superadmin into the main website.
+2. Build a route/screen/action-to-API inventory for the main application, its integrated modules and the four independent portals.
+3. Mark every UI element as public, authenticated, role-restricted, read-only, or mutating.
+4. Map each action to its API endpoint, database table/model, tenant rule, permission and audit behavior.
+5. Identify screens using placeholder data, workspace shells, unimplemented actions, swallowed errors or missing API contracts.
+6. Prioritize shared identity, organization context, permissions and API client gaps first.
+7. Complete one end-to-end vertical slice at a time, with frontend and backend work delivered together.
+8. Add portal- and module-specific browser tests and database/security assertions to CI.
+9. Rehearse against staging Supabase and verify deployment/operations gates before production acceptance.
 
 **Definition of done:** A real user can complete the documented workflow through the deployed frontend; the backend validates and authorizes it; the correct tenant-scoped database state is persisted; unauthorized and cross-tenant attempts are rejected; and the result is independently verified by automated or recorded acceptance evidence.
