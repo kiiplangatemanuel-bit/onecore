@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.models import AuditEvent, Organization, User
 from app.core.platform_commerce_models import (
-    ManagedFile, ManagedFileShare, OrganizationSubscription, SubscriptionPayment, SubscriptionPlan,
+    ManagedFile, ManagedFileShare, ManagedFileVersion, OrganizationSubscription, SubscriptionPayment, SubscriptionPlan,
 )
 from app.core.security import current_user, require_platform_admin
 from app.core.tenancy import active_membership
@@ -282,9 +282,18 @@ async def upload_file(file: UploadFile = File(...), parent_id: int | None = Quer
                       name=name, object_key=key, content_type=content_type, size_bytes=len(data), sha256=digest,
                       classification=classification, scan_status="clean", is_folder=False)
     db.add(row); db.flush()
+    db.add(ManagedFileVersion(organization_id=membership.organization_id, file_id=row.id, version_number=1,
+        uploaded_by=user.id, object_key=key, content_type=content_type, size_bytes=len(data), sha256=digest, scan_status="clean"))
     _audit(db, user.id, membership.organization_id, "file.uploaded", "managed_file", row.id,
-           f"size={len(data)};sha256={digest};classification={classification}")
-    db.commit(); db.refresh(row)
+           f"size={len(data)};sha256={digest};classification={classification};version=1")
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        try: client.delete_object(Bucket=settings.s3_bucket, Key=key)
+        except Exception: pass
+        raise
+    db.refresh(row)
     return _file_out(row)
 
 
@@ -319,14 +328,100 @@ def delete_file(file_id: int, membership=Depends(active_membership), user: User 
         raise HTTPException(409, "Move or delete folder contents before deleting this folder")
     if not row.is_folder:
         try:
-            _s3().delete_object(Bucket=settings.s3_bucket, Key=row.object_key)
+            client = _s3()
+            versions = db.query(ManagedFileVersion).filter_by(file_id=row.id, organization_id=membership.organization_id).all()
+            keys = {row.object_key, *(x.object_key for x in versions)}
+            for key in keys:
+                if key: client.delete_object(Bucket=settings.s3_bucket, Key=key)
         except Exception:
-            raise HTTPException(502, "Private object storage could not delete this file")
+            raise HTTPException(502, "Private object storage could not delete this file and its versions")
     row.deleted_at = _utc()
     db.query(ManagedFileShare).filter_by(file_id=row.id, revoked_at=None).update({"revoked_at": _utc()})
     _audit(db, user.id, membership.organization_id, "file.deleted", "managed_file", row.id, row.name)
     db.commit()
 
+
+
+@router.get("/files/{file_id}/versions")
+def list_file_versions(file_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    row = db.query(ManagedFile).filter_by(id=file_id, organization_id=membership.organization_id, deleted_at=None).first()
+    if not row or row.is_folder:
+        raise HTTPException(404, "File not found")
+    versions = db.query(ManagedFileVersion).filter_by(
+        file_id=file_id, organization_id=membership.organization_id
+    ).order_by(ManagedFileVersion.version_number.desc()).all()
+    return [{"id": x.id, "version_number": x.version_number, "content_type": x.content_type,
+             "size_bytes": x.size_bytes, "sha256": x.sha256, "scan_status": x.scan_status,
+             "created_at": x.created_at.isoformat()} for x in versions]
+
+
+@router.post("/files/{file_id}/versions", status_code=201)
+async def upload_file_version(file_id: int, file: UploadFile = File(...),
+                              membership=Depends(active_membership), user: User = Depends(current_user),
+                              db: Session = Depends(get_db)):
+    require_permission(membership, "manage")
+    row = db.query(ManagedFile).filter_by(id=file_id, organization_id=membership.organization_id,
+                                          deleted_at=None, is_folder=False).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "File not found")
+    name = (file.filename or row.name).split("/")[-1].strip()
+    if not name or len(name) > 255:
+        raise HTTPException(422, "Invalid file name")
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if not data or len(data) > MAX_FILE_BYTES:
+        raise HTTPException(413, "File must be between 1 byte and 20 MB")
+    _scan(data)
+    client = _s3()
+    key = f"organizations/{membership.organization_id}/files/{uuid.uuid4().hex}"
+    digest = hashlib.sha256(data).hexdigest()
+    content_type = (file.content_type or "application/octet-stream")[:160]
+    try:
+        client.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=content_type,
+                          Metadata={"sha256": digest, "organization_id": str(membership.organization_id)})
+    except Exception:
+        raise HTTPException(502, "Private object storage rejected the new version")
+    latest = db.query(ManagedFileVersion).filter_by(file_id=row.id, organization_id=membership.organization_id).order_by(
+        ManagedFileVersion.version_number.desc()).first()
+    version_number = (latest.version_number if latest else 0) + 1
+    version = ManagedFileVersion(organization_id=membership.organization_id, file_id=row.id,
+        version_number=version_number, uploaded_by=user.id, object_key=key, content_type=content_type,
+        size_bytes=len(data), sha256=digest, scan_status="clean")
+    db.add(version)
+    row.name = name
+    row.object_key = key
+    row.content_type = content_type
+    row.size_bytes = len(data)
+    row.sha256 = digest
+    row.scan_status = "clean"
+    _audit(db, user.id, membership.organization_id, "file.version_uploaded", "managed_file", row.id,
+           f"version={version_number};size={len(data)};sha256={digest}")
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        try: client.delete_object(Bucket=settings.s3_bucket, Key=key)
+        except Exception: pass
+        raise
+    return {"file_id": row.id, "version_id": version.id, "version_number": version_number,
+            "name": row.name, "size_bytes": len(data), "sha256": digest, "scan_status": "clean"}
+
+
+@router.get("/files/{file_id}/versions/{version_id}/download")
+def download_file_version(file_id: int, version_id: int, membership=Depends(active_membership),
+                          db: Session = Depends(get_db)):
+    require_permission(membership, "read")
+    version = db.query(ManagedFileVersion).filter_by(
+        id=version_id, file_id=file_id, organization_id=membership.organization_id, scan_status="clean"
+    ).first()
+    if not version:
+        raise HTTPException(404, "File version not found or not cleared for download")
+    try:
+        url = _s3().generate_presigned_url("get_object", Params={"Bucket": settings.s3_bucket,
+            "Key": version.object_key}, ExpiresIn=300)
+    except Exception:
+        raise HTTPException(502, "Private object storage could not issue a version download link")
+    return {"url": url, "expires_in": 300, "version_number": version.version_number}
 
 @router.get("/files/{file_id}/download")
 def download_file(file_id: int, membership=Depends(active_membership), db: Session = Depends(get_db)):
