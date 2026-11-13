@@ -43,6 +43,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
     try{
       const loginUrl=embedded?"/login":portalUrl("app","login");
       if(!loginUrl)throw new Error("The shared OneCore sign-in application URL is not configured for this deployment.");
+      if(embedded){sessionStorage.setItem("onecore.return_path",window.location.pathname);window.location.assign(loginUrl);return;}
       const bytes=new Uint8Array(48);window.crypto.getRandomValues(bytes);
       const verifier=Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
       const stateBytes=new Uint8Array(24);window.crypto.getRandomValues(stateBytes);
@@ -52,7 +53,7 @@ export default function PortalApp({ portal = import.meta.env.VITE_PORTAL_KEY || 
       sessionStorage.setItem("onecore.sso.verifier",verifier);
       sessionStorage.setItem("onecore.sso.state",state);
       const callback=window.location.origin+window.location.pathname;
-      if(embedded){sessionStorage.setItem("onecore.return_path",window.location.pathname);window.location.assign(loginUrl);return;}window.location.assign(loginUrl+"?return_to="+encodeURIComponent(callback)+"&state="+encodeURIComponent(state)+"&code_challenge="+encodeURIComponent(challenge));
+      window.location.assign(loginUrl+"?return_to="+encodeURIComponent(callback)+"&state="+encodeURIComponent(state)+"&code_challenge="+encodeURIComponent(challenge));
     }catch(e){setError(e.message);}
   }
   useEffect(()=>{
