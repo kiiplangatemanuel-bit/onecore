@@ -59,3 +59,27 @@ def projected_schedule(
     if balance != Decimal("0.00") or sum((row["principal_due"] for row in rows), Decimal("0.00")) != principal:
         raise ArithmeticError("Projected schedule does not amortize the requested principal")
     return rows
+
+
+def allocate_due_repayment(amount: Decimal, installments) -> list[dict]:
+    """Allocate a partial receipt oldest-due first, applying interest before principal."""
+    remaining = _money(amount)
+    allocations = []
+    for installment in installments:
+        if remaining <= 0:
+            break
+        interest_outstanding = _money(installment.interest_due - installment.interest_paid)
+        principal_outstanding = _money(installment.principal_due - installment.principal_paid)
+        interest_amount = min(remaining, interest_outstanding)
+        remaining = _money(remaining - interest_amount)
+        principal_amount = min(remaining, principal_outstanding)
+        remaining = _money(remaining - principal_amount)
+        if interest_amount or principal_amount:
+            allocations.append({
+                "installment_id": installment.id,
+                "principal_amount": principal_amount,
+                "interest_amount": interest_amount,
+            })
+    if remaining > 0:
+        raise ValueError("Repayment exceeds the outstanding amount due on its value date")
+    return allocations
