@@ -251,9 +251,7 @@ def _classification_allowed(role: str, classification: str) -> bool:
     if classification == "restricted":
         return role == "org_admin"
     if classification == "confidential":
-        return role in {"org_admin", "branch_admin", "manager", "accountant", "hr_admin",
-                        "hr_manager", "payroll_manager", "payroll_approver", "payroll_payment",
-                        "payroll_accounting", "school_admin"}
+        return role == "org_admin"
     return classification == "internal"
 
 
@@ -367,8 +365,13 @@ def move_or_rename_file(file_id: int, payload: FileMoveIn, membership=Depends(ac
     parent = _parent_folder(db, membership.organization_id, payload.parent_id, membership)
     if parent and {"internal": 0, "confidential": 1, "restricted": 2}[row.classification] < {"internal": 0, "confidential": 1, "restricted": 2}[parent.classification]:
         raise HTTPException(422, "A file cannot be moved into a folder with a higher classification")
-    if row.is_folder and payload.parent_id == row.id:
-        raise HTTPException(409, "A folder cannot be moved into itself")
+    if row.is_folder and payload.parent_id:
+        ancestor = parent
+        while ancestor is not None:
+            if ancestor.id == row.id:
+                raise HTTPException(409, "A folder cannot be moved into itself or one of its descendants")
+            ancestor = db.query(ManagedFile).filter_by(id=ancestor.parent_id, organization_id=membership.organization_id,
+                                                       is_folder=True, deleted_at=None).first() if ancestor.parent_id else None
     row.name = payload.name.strip()
     row.parent_id = payload.parent_id
     _audit(db, user.id, membership.organization_id, "file.updated", "managed_file", row.id, row.name)
