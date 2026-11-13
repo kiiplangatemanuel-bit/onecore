@@ -34,7 +34,7 @@ function App(){
  async function finishPortalSignIn(identity){
   const params=new URLSearchParams(window.location.search);
   const redirectUri=params.get("return_to");
-  if(!redirectUri){setUser(identity);return;}
+  if(!redirectUri){const returnPath=sessionStorage.getItem("onecore.return_path");sessionStorage.removeItem("onecore.return_path");if(returnPath&&returnPath.startsWith("/")){history.replaceState({}, "", returnPath);setPath(returnPath);}setUser(identity);return;}
   const state=params.get("state"),codeChallenge=params.get("code_challenge");
   if(!state||!codeChallenge)throw new Error("The portal sign-in request is incomplete. Return to the portal and try again.");
   const handoff=await api("/api/v1/auth/portal-code",{method:"POST",body:JSON.stringify({redirect_uri:redirectUri,state,code_challenge:codeChallenge})});
