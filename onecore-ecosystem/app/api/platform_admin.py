@@ -1,5 +1,6 @@
 """Restricted OneCore platform administration APIs."""
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -166,7 +167,7 @@ class PlanIn(BaseModel):
     code: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name: str = Field(min_length=2, max_length=160)
     description: str = Field(default="", max_length=4000)
-    amount: float = Field(ge=0, le=100000000)
+    amount: Decimal = Field(ge=0, le=100000000)
     currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
     interval: Literal["monthly", "yearly"] = "monthly"
     entitlements: dict = Field(default_factory=dict)
