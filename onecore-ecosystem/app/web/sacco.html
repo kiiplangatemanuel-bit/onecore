@@ -507,7 +507,12 @@ $('loanDisbursement').addEventListener('submit',async event=>{
    external_reference:form.get('external_reference'),value_date:form.get('value_date'),
    request_note:form.get('request_note'),idempotency_key:form.get('idempotency_key')||crypto.randomUUID()
   })});
-  $('loanRepayment').addEventListener('submit',async event=>{
+  $('loanDisbursement').elements.idempotency_key.value=crypto.randomUUID();
+  status('Disbursement evidence '+result.id+' submitted for independent treasurer review.');
+  await refreshLoanSchedule(id);await refreshLoans();
+ }catch(error){status(error.message);}
+});
+$('loanRepayment').addEventListener('submit',async event=>{
  event.preventDefault();if(!token)return status('Sign in first.');
  const form=new FormData(event.currentTarget),id=Number(form.get('application_id'));
  if(!Number.isInteger(id)||id<1)return status('Enter a valid application ID.');
@@ -537,12 +542,6 @@ $('loanRepaymentVerify').addEventListener('submit',async event=>{
   if(applicationId>0)await refreshLoanSchedule(applicationId);
  }catch(error){status(error.message);}
 });
-$('loanDisbursement').elements.idempotency_key.value=crypto.randomUUID();
-$('loanRepayment').elements.idempotency_key.value=crypto.randomUUID();
-  status('Disbursement evidence '+result.id+' submitted for independent treasurer review.');
-  await refreshLoanSchedule(id);await refreshLoans();
- }catch(error){status(error.message);}
-});
 $('loanDisbursementVerify').addEventListener('submit',async event=>{
  event.preventDefault();if(!token)return status('Sign in first.');
  const form=new FormData(event.currentTarget),evidenceId=Number(form.get('disbursement_id'));
@@ -560,6 +559,7 @@ $('loanDisbursementVerify').addEventListener('submit',async event=>{
  }catch(error){status(error.message);}
 });
 $('loanDisbursement').elements.idempotency_key.value=crypto.randomUUID();
+$('loanRepayment').elements.idempotency_key.value=crypto.randomUUID();
 $('refreshLoans').addEventListener('click',async()=>{
  if(!token)return status('Sign in first.');
  try{await refreshLoans();status('Loan products and applications refreshed.');}catch(error){status(error.message);}
