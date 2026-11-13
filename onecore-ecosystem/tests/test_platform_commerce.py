@@ -73,6 +73,14 @@ def test_subscription_payment_is_idempotent_and_activates_only_after_admin_verif
         assert reviewed["payment_status"] == "verified"
         assert reviewed["subscription_status"] == "active"
         assert row.starts_at is not None and row.ends_at is not None
+        first_end = row.ends_at
+        renewal_payload = SubscriptionPaymentIn(method="mpesa", external_reference="QAB123XYZ2",
+                                                idempotency_key="subscription-pay-0002")
+        renewal = submit_subscription_payment(subscription["id"], renewal_payload, membership, admin, db)
+        renewed = review_subscription_payment(renewal["id"], PaymentReviewIn(decision="verified", note="Renewal checked"),
+                                              platform_admin, db)
+        assert renewed["subscription_status"] == "active"
+        assert row.ends_at > first_end
         assert db.query(AuditEvent).filter(AuditEvent.action.like("subscription.%")).count() >= 2
     engine.dispose()
 
@@ -130,3 +138,21 @@ def test_document_and_subscription_migration_is_chained_and_enforces_rls():
         assert f"ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY" in source
     assert "file_share_token_read" in source
     assert "subscription_plan_admin_write" in source
+
+def test_document_classification_access_is_role_limited():
+    from app.api.platform_commerce import _classification_allowed
+    assert _classification_allowed("staff", "internal")
+    assert not _classification_allowed("staff", "confidential")
+    assert _classification_allowed("manager", "confidential")
+    assert not _classification_allowed("manager", "restricted")
+    assert _classification_allowed("org_admin", "restricted")
+
+
+def test_document_version_migration_is_chained_and_forced_rls():
+    from pathlib import Path
+    path = Path(__file__).parents[1] / "migrations" / "versions" / "0072_managed_file_versions.py"
+    source = path.read_text()
+    assert 'revision = "0072_managed_file_versions"' in source
+    assert 'down_revision = "0071_platform_commerce_documents"' in source
+    assert "ALTER TABLE public.managed_file_versions ENABLE ROW LEVEL SECURITY" in source
+    assert "ALTER TABLE public.managed_file_versions FORCE ROW LEVEL SECURITY" in source
