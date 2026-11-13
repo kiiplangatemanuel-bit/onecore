@@ -46,6 +46,7 @@ from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa set
 from app.core import finance_ops_models  # noqa: F401 - register FX and statutory payroll tables
 from app.core import sacco_models  # noqa: F401 - register SACCO membership tables
 from app.core import sacco_loan_models  # noqa: F401 - register SACCO loan tables
+from app.core import platform_commerce_models  # noqa: F401 - register subscription and document tables
 from app.api.finance_payroll_ops import router as finance_payroll_ops_router
 from app.api.sacco import router as sacco_router
 from app.api.sacco_loans import router as sacco_loans_router
