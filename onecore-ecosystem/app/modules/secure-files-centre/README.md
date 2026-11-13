@@ -2,18 +2,12 @@
 
 Master specification category: **57**
 
-## Source scope
-files.onecore.co.ke: public-approved downloads, private personal/org storage, upload/download/folders/sharing/version/preview/search/permissions/ownership/history/expiring signed links/password/time-limited/revocable sharing/recipient restrictions/encryption/malware/integrity checks/secure deletion/retention/legal hold/classification/signatures/audit. No public exposure of private buckets.
+## Implemented foundation
+Tenant-scoped private file/folder metadata, S3-compatible private object storage, mandatory ClamAV scan before upload, classification-aware access, SHA-256 integrity metadata, immutable file version history, short-lived signed downloads, expiring download-limited share tokens, revocation and soft deletion are implemented.
 
-## Implementation status
-Scaffold only. This folder reserves the domain boundary; it is not a claim of production implementation.
+Uploads fail closed unless private object storage and malware scanning are configured. Private object bucket credentials remain server-side. The database stores metadata/object keys, not file contents.
 
-## Required implementation
-- Define domain entities, constraints, indexes and migrations.
-- Add domain services and versioned API routes.
-- Enforce tenant, branch and role authorization at the service layer.
-- Add validation, approval workflows, audit events and idempotency where needed.
-- Build responsive user/admin workflows and accessible states.
-- Add unit, integration, security and end-to-end tests.
-- Add monitoring, retention, backup/restore and operational documentation.
-- Complete sandbox/UAT and release approval for external dependencies.
+## Remaining scope
+Advanced preview/conversion, full retention schedules, legal holds, electronic signatures, recipient identity restrictions, malware re-scan orchestration, automated data-loss prevention and comprehensive restore drills remain to be implemented.
+
+See `onecore-ecosystem/docs/PLATFORM_COMMERCE_AND_ADMIN.md` for environment requirements and API routes.
