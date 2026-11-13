@@ -58,6 +58,7 @@ class SubscriptionPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         UniqueConstraint("organization_id", "idempotency_key", name="uq_subscription_payment_org_idempotency"),
+        UniqueConstraint("organization_id", "method", "external_reference", name="uq_subscription_payment_external_reference"),
         Index("ix_subscription_payment_org_status", "organization_id", "status"),
     )
 
