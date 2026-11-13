@@ -82,7 +82,8 @@ def _plan_out(row):
 
 def _subscription_out(row, plan=None):
     return {"id": row.id, "organization_id": row.organization_id, "plan_id": row.plan_id,
-            "plan": _plan_out(plan) if plan else None, "status": row.status,
+            "plan": _plan_out(plan) if plan else None, "amount": str(row.amount), "currency": row.currency,
+            "billing_interval": row.billing_interval, "status": row.status,
             "starts_at": row.starts_at.isoformat() if row.starts_at else None,
             "ends_at": row.ends_at.isoformat() if row.ends_at else None,
             "auto_renew": row.auto_renew, "created_at": row.created_at.isoformat()}
@@ -120,7 +121,8 @@ def start_subscription(payload: SubscriptionStartIn, membership=Depends(active_m
     if active:
         raise HTTPException(409, "An active or pending subscription already exists; contact OneCore to change plans")
     row = OrganizationSubscription(organization_id=membership.organization_id, plan_id=plan.id,
-                                    status="pending_payment", auto_renew=payload.auto_renew, created_by=user.id)
+                                    status="pending_payment", amount=plan.amount, currency=plan.currency,
+                                    billing_interval=plan.interval, auto_renew=False, created_by=user.id)
     db.add(row); db.flush()
     _audit(db, user.id, membership.organization_id, "subscription.started", "subscription", row.id,
            f"plan={plan.code};status=pending_payment")
@@ -170,8 +172,8 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
     plan = db.get(SubscriptionPlan, subscription.plan_id)
     fingerprint = hashlib.sha256(json.dumps({
         "subscription_id": subscription.id, "method": payload.method,
-        "reference": payload.external_reference.strip().upper(), "amount": str(plan.amount),
-        "currency": plan.currency,
+        "reference": payload.external_reference.strip().upper(), "amount": str(subscription.amount),
+        "currency": subscription.currency,
     }, sort_keys=True).encode()).hexdigest()
     existing = db.query(SubscriptionPayment).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
@@ -185,7 +187,7 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
         raise HTTPException(409, "A payment for this subscription is already awaiting verification")
     row = SubscriptionPayment(
         organization_id=membership.organization_id, subscription_id=subscription.id,
-        amount=plan.amount, currency=plan.currency, method=payload.method,
+        amount=subscription.amount, currency=subscription.currency, method=payload.method,
         external_reference=payload.external_reference.strip(), idempotency_key=payload.idempotency_key,
         request_hash=fingerprint, status="pending_verification", created_by=user.id,
     )
@@ -561,10 +563,10 @@ def review_subscription_payment(payment_id: int, payload: PaymentReviewIn,
         now = _utc()
         if subscription.status == "pending_payment":
             subscription.starts_at = now
-            subscription.ends_at = _add_months(now, 12 if plan.interval == "yearly" else 1)
+            subscription.ends_at = _add_months(now, 12 if subscription.billing_interval == "yearly" else 1)
         elif subscription.status == "active":
             base = subscription.ends_at if subscription.ends_at and subscription.ends_at > now else now
-            subscription.ends_at = _add_months(base, 12 if plan.interval == "yearly" else 1)
+            subscription.ends_at = _add_months(base, 12 if subscription.billing_interval == "yearly" else 1)
         else:
             raise HTTPException(409, "Subscription cannot be activated or renewed in its current state")
         subscription.status = "active"
