@@ -142,9 +142,9 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
             ).returning(SaccoLoanInstallment.id)).scalar_one()
             second_installment_id = connection.execute(insert(SaccoLoanInstallment).values(
                 organization_id=organization_id, application_id=application_id,
-                installment_number=2, due_date=date.today() + timedelta(days=30),
+                installment_number=2, due_date=date.today(),
                 principal_due=Decimal("100.00"), interest_due=Decimal("0.00"),
-                total_due=Decimal("100.00"), currency="KES", status="projected",
+                total_due=Decimal("100.00"), currency="KES", status="due",
                 created_at=now,
             ).returning(SaccoLoanInstallment.id)).scalar_one()
             disbursement_id = connection.execute(insert(SaccoLoanDisbursement).values(
