@@ -4,6 +4,13 @@ import { API_BASE, api, clearToken, completeMfaLogin, getToken, login, loginWith
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
 import PortalApp from "./PortalApp.jsx";
+import PortalApp from "./PortalApp.jsx";
+
+import PortalWorkspace from "./PortalWorkspace.jsx";
+import AIWorkspace from "./AIWorkspace.jsx";
+import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
+import AuthRecovery from "./AuthRecovery.jsx";
+import AccountSecurity from "./AccountSecurity.jsx";
 
 const integratedPortalRoutes = Object.freeze({
   "/support": "support",
@@ -13,11 +20,6 @@ const integratedPortalRoutes = Object.freeze({
   "/events": "events",
   "/admin": "admin",
 });
-import PortalWorkspace from "./PortalWorkspace.jsx";
-import AIWorkspace from "./AIWorkspace.jsx";
-import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
-import AuthRecovery from "./AuthRecovery.jsx";
-import AccountSecurity from "./AccountSecurity.jsx";
 
 const supabaseUrl=(import.meta.env.VITE_SUPABASE_URL||"").trim();
 const supabaseAnonKey=(import.meta.env.VITE_SUPABASE_ANON_KEY||"").trim();
