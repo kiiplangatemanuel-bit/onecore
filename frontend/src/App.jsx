@@ -6,11 +6,12 @@ import PublicSite from "./PublicSite.jsx";
 import PortalWorkspace from "./PortalWorkspace.jsx";
 import PortalApp from "./PortalApp.jsx";
 
-const integratedMainModules = Object.freeze({"/support":"support","/trust":"trust","/community":"community","/status":"status","/events":"events"});
 import AIWorkspace from "./AIWorkspace.jsx";
 import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 import AuthRecovery from "./AuthRecovery.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
+
+const integratedMainModules = Object.freeze({"/support":"support","/trust":"trust","/community":"community","/status":"status","/events":"events"});
 
 const supabaseUrl=(import.meta.env.VITE_SUPABASE_URL||"").trim();
 const supabaseAnonKey=(import.meta.env.VITE_SUPABASE_ANON_KEY||"").trim();
