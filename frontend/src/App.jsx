@@ -4,7 +4,6 @@ import { API_BASE, api, clearToken, completeMfaLogin, getToken, login, loginWith
 import { allModules, descriptions, groups, legacyRoutes } from "./modules";
 import PublicSite from "./PublicSite.jsx";
 import PortalApp from "./PortalApp.jsx";
-import PortalApp from "./PortalApp.jsx";
 
 import PortalWorkspace from "./PortalWorkspace.jsx";
 import AIWorkspace from "./AIWorkspace.jsx";
