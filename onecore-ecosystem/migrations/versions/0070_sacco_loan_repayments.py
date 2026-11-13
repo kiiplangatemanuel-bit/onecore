@@ -261,6 +261,17 @@ def upgrade():
                    OR NEW.status NOT IN ('verified', 'rejected') THEN
                     RAISE EXCEPTION 'Only pending repayment evidence can receive one final review';
                 END IF;
+                IF ROW(
+                    NEW.organization_id, NEW.application_id, NEW.amount, NEW.currency,
+                    NEW.channel, NEW.external_reference, NEW.value_date, NEW.request_note,
+                    NEW.requested_by, NEW.idempotency_key, NEW.request_fingerprint, NEW.created_at
+                ) IS DISTINCT FROM ROW(
+                    OLD.organization_id, OLD.application_id, OLD.amount, OLD.currency,
+                    OLD.channel, OLD.external_reference, OLD.value_date, OLD.request_note,
+                    OLD.requested_by, OLD.idempotency_key, OLD.request_fingerprint, OLD.created_at
+                ) THEN
+                    RAISE EXCEPTION 'Repayment request evidence is immutable after submission';
+                END IF;
                 IF NEW.reviewed_by IS NULL OR NEW.reviewed_by = OLD.requested_by
                    OR NEW.reviewed_at IS NULL OR length(trim(NEW.review_note)) < 5 THEN
                     RAISE EXCEPTION 'Independent repayment review evidence is required';
