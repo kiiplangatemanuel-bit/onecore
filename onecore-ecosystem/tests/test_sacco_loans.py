@@ -15,12 +15,14 @@ from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
     SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
     SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanRepayment, SaccoLoanRepaymentAllocation, SaccoLoanRepaymentJournalLine,
 )
 from app.core.sacco_loan_schemas import (
     SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
     SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementCreateIn,
     SaccoLoanDisbursementVerificationIn, SaccoLoanGuarantorConsentIn,
     SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
+    SaccoLoanRepaymentCreateIn, SaccoLoanRepaymentVerificationIn,
 )
 
 
@@ -31,7 +33,8 @@ def _database():
         AuditEvent.__table__, SaccoMember.__table__, SaccoLoanProduct.__table__,
         SaccoLoanApplication.__table__, SaccoLoanGuarantor.__table__,
         SaccoLoanCollateral.__table__, SaccoLoanInstallment.__table__,
-        SaccoLoanDisbursement.__table__,
+        SaccoLoanDisbursement.__table__, SaccoLoanRepayment.__table__,
+        SaccoLoanRepaymentAllocation.__table__, SaccoLoanRepaymentJournalLine.__table__,
     ])
     return engine, Session(engine)
 
@@ -564,6 +567,291 @@ def test_rejected_loan_disbursement_can_be_resubmitted_without_duplicate_activat
         engine.dispose()
 
 
+
+def _active_loan_for_repayment(db: Session):
+    creator, manager, approver, org, borrower, _ = _seed(db)
+    product = _create_product(db, manager, org)
+    application_out = _create_application(db, creator, org, borrower, product["id"])
+    application = db.query(SaccoLoanApplication).filter_by(
+        organization_id=org.id, id=application_out["id"]
+    ).one()
+    now = datetime.now(timezone.utc)
+    application.assessment_status = "eligible"
+    application.assessed_by = manager.id
+    application.assessed_at = now
+    application.status = "active"
+    application.decided_by = approver.id
+    application.decided_at = now
+    application.first_repayment_date = date.today()
+    requester = User(
+        email="loan-repayment-requester@example.test",
+        full_name="Repayment Requester", password_hash="unused",
+    )
+    reviewer = User(
+        email="loan-repayment-reviewer@example.test",
+        full_name="Repayment Reviewer", password_hash="unused",
+    )
+    db.add_all([requester, reviewer])
+    db.flush()
+    db.add(SaccoLoanDisbursement(
+        organization_id=org.id, application_id=application.id,
+        amount=Decimal("10000.00"), currency="KES", channel="bank_transfer",
+        external_reference="BANK-LOAN-SETTLEMENT-001",
+        value_date=date.today() - timedelta(days=1), status="verified",
+        request_note="Approved bank settlement evidence",
+        requested_by=requester.id, reviewed_by=reviewer.id,
+        reviewed_at=now, review_note="Statement checked independently",
+        idempotency_key="repayment-fixture-disbursement",
+        request_fingerprint="1" * 64,
+    ))
+    db.add(SaccoLoanInstallment(
+        organization_id=org.id, application_id=application.id,
+        installment_number=1, due_date=date.today(),
+        principal_due=Decimal("10000.00"), interest_due=Decimal("1200.00"),
+        total_due=Decimal("11200.00"), currency="KES", status="due",
+    ))
+    db.commit()
+    return org, application, requester, reviewer
+
+
+def _repayment_payload(amount, key, reference):
+    return SaccoLoanRepaymentCreateIn(
+        amount=amount, currency="kes", channel="mpesa",
+        external_reference=reference, value_date=date.today(),
+        request_note="External receipt evidence recorded for independent review",
+        idempotency_key=key,
+    )
+
+
+def test_repayment_schema_normalizes_evidence_and_rejects_future_value_dates():
+    from app.core.sacco_loan_schemas import SaccoLoanRepaymentCreateIn
+
+    payload = _repayment_payload("100.00", "repayment-schema-001", "  mpesa-rcpt-001 ")
+    assert payload.currency == "KES"
+    assert payload.external_reference == "MPESA-RCPT-001"
+    with pytest.raises(ValidationError):
+        SaccoLoanRepaymentCreateIn(
+            amount="100.00", currency="KES", channel="mpesa",
+            external_reference="MPESA-RCPT-002", value_date=date.today() + timedelta(days=1),
+            request_note="Future value date must be rejected by the repayment contract",
+            idempotency_key="repayment-schema-002",
+        )
+
+
+def test_repayment_allocation_is_oldest_due_and_interest_first():
+    from types import SimpleNamespace
+    from app.services.sacco_loans import allocate_due_repayment
+
+    installments = [
+        SimpleNamespace(
+            id=1, principal_due=Decimal("500.00"), interest_due=Decimal("100.00"),
+            principal_paid=Decimal("0.00"), interest_paid=Decimal("0.00"),
+        ),
+        SimpleNamespace(
+            id=2, principal_due=Decimal("500.00"), interest_due=Decimal("100.00"),
+            principal_paid=Decimal("0.00"), interest_paid=Decimal("0.00"),
+        ),
+    ]
+    result = allocate_due_repayment(Decimal("250.00"), installments)
+    assert result == [{
+        "installment_id": 1,
+        "principal_amount": Decimal("150.00"),
+        "interest_amount": Decimal("100.00"),
+    }]
+    with pytest.raises(ValueError):
+        allocate_due_repayment(Decimal("1200.01"), installments)
+
+
+def test_repayment_requires_independent_verification_and_posts_balanced_partial_allocations():
+    from app.api.sacco_loans import (
+        get_loan_balance, get_loan_schedule, list_loan_repayments,
+        request_loan_repayment, verify_loan_repayment,
+    )
+
+    engine, db = _database()
+    try:
+        org, application, requester, reviewer = _active_loan_for_repayment(db)
+        requester_membership = _membership(org.id, "sacco_officer")
+        reviewer_membership = _membership(org.id, "sacco_treasurer")
+        payload = _repayment_payload("500.00", "loan-repayment-001", "MPESA-LOAN-001")
+        with pytest.raises(HTTPException) as branch_denied:
+            request_loan_repayment(
+                application.id, payload, requester,
+                _membership(org.id, "sacco_officer", "unauthorized-branch"), db,
+            )
+        assert branch_denied.value.status_code == 404
+
+        with pytest.raises(HTTPException) as overpayment:
+            request_loan_repayment(
+                application.id,
+                _repayment_payload("11200.01", "loan-repayment-overpay", "MPESA-OVERPAY-001"),
+                requester, requester_membership, db,
+            )
+        assert overpayment.value.status_code == 422
+
+        with pytest.raises(HTTPException) as no_permission:
+            request_loan_repayment(
+                application.id, payload, reviewer, reviewer_membership, db
+            )
+        assert no_permission.value.status_code == 403
+
+        pending = request_loan_repayment(
+            application.id, payload, requester, requester_membership, db
+        )
+        assert pending["status"] == "pending_verification"
+        replay = request_loan_repayment(
+            application.id, payload, requester, requester_membership, db
+        )
+        assert replay["id"] == pending["id"]
+
+        with pytest.raises(HTTPException) as changed_replay:
+            request_loan_repayment(
+                application.id,
+                payload.model_copy(update={"amount": Decimal("600.00")}),
+                requester, requester_membership, db,
+            )
+        assert changed_replay.value.status_code == 409
+
+        with pytest.raises(HTTPException) as duplicate_pending:
+            request_loan_repayment(
+                application.id,
+                _repayment_payload("100.00", "loan-repayment-pending-2", "MPESA-LOAN-002"),
+                requester, requester_membership, db,
+            )
+        assert duplicate_pending.value.status_code == 409
+
+        decision = SaccoLoanRepaymentVerificationIn(
+            decision="verify", note="Provider statement and receipt independently checked"
+        )
+        with pytest.raises(HTTPException) as self_review:
+            verify_loan_repayment(
+                pending["id"], decision, requester, _membership(org.id, "org_admin"), db
+            )
+        assert self_review.value.status_code == 403
+
+        verified = verify_loan_repayment(
+            pending["id"], decision, reviewer, reviewer_membership, db
+        )
+        assert verified["status"] == "verified"
+        installment = db.query(SaccoLoanInstallment).filter_by(
+            organization_id=org.id, application_id=application.id
+        ).one()
+        assert installment.interest_paid == Decimal("500.00")
+        assert installment.principal_paid == Decimal("0.00")
+        assert installment.status == "partially_paid"
+
+        balance = get_loan_balance(application.id, _membership(org.id, "sacco_auditor"), db)
+        assert balance["principal_outstanding"] == "10000.00"
+        assert balance["interest_outstanding"] == "700.00"
+        assert balance["amount_due"] == "10700.00"
+        schedule = get_loan_schedule(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert schedule["items"][0]["interest_paid"] == "500.00"
+        assert schedule["items"][0]["total_outstanding"] == "10700.00"
+
+        first_lines = db.query(SaccoLoanRepaymentJournalLine).filter_by(
+            organization_id=org.id, repayment_id=pending["id"]
+        ).all()
+        assert sum((line.debit for line in first_lines), Decimal("0.00")) == Decimal("500.00")
+        assert sum((line.credit for line in first_lines), Decimal("0.00")) == Decimal("500.00")
+        assert {line.account_code for line in first_lines} == {
+            "cash_clearing", "loan_interest_income"
+        }
+
+        second = request_loan_repayment(
+            application.id,
+            _repayment_payload("800.00", "loan-repayment-002", "MPESA-LOAN-003"),
+            requester, requester_membership, db,
+        )
+        verify_loan_repayment(second["id"], decision, reviewer, reviewer_membership, db)
+        db.refresh(installment)
+        assert installment.interest_paid == Decimal("1200.00")
+        assert installment.principal_paid == Decimal("100.00")
+        assert installment.status == "partially_paid"
+
+        third = request_loan_repayment(
+            application.id,
+            _repayment_payload("9900.00", "loan-repayment-003", "MPESA-LOAN-004"),
+            requester, requester_membership, db,
+        )
+        verify_loan_repayment(third["id"], decision, reviewer, reviewer_membership, db)
+        db.refresh(installment)
+        db.refresh(application)
+        assert installment.status == "paid"
+        assert application.status == "settled"
+        final_balance = get_loan_balance(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert final_balance["scheduled_total_outstanding"] == "0.00"
+        history = list_loan_repayments(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert len(history["items"]) == 3
+        assert all(item["status"] == "verified" for item in history["items"])
+        assert all(item["journal_lines"] for item in history["items"])
+        for item in history["items"]:
+            lines = item["journal_lines"]
+            debit = sum((Decimal(line["debit"]) for line in lines), Decimal("0.00"))
+            credit = sum((Decimal(line["credit"]) for line in lines), Decimal("0.00"))
+            assert debit == credit == Decimal(item["amount"])
+
+        events = db.query(AuditEvent).filter(
+            AuditEvent.organization_id == org.id,
+            AuditEvent.resource_type == "sacco_loan_repayment",
+        ).all()
+        assert {event.action for event in events} >= {
+            "sacco.loan_repayment.requested", "sacco.loan_repayment.verified"
+        }
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_repayment_rejection_does_not_post_and_allows_a_new_evidence_request():
+    from app.api.sacco_loans import (
+        list_loan_repayments, request_loan_repayment, verify_loan_repayment,
+    )
+
+    engine, db = _database()
+    try:
+        org, application, requester, reviewer = _active_loan_for_repayment(db)
+        membership = _membership(org.id, "sacco_officer")
+        treasury = _membership(org.id, "sacco_treasurer")
+        pending = request_loan_repayment(
+            application.id,
+            _repayment_payload("100.00", "loan-repayment-reject-1", "MPESA-REJECT-001"),
+            requester, membership, db,
+        )
+        rejected = verify_loan_repayment(
+            pending["id"],
+            SaccoLoanRepaymentVerificationIn(
+                decision="reject", note="Receipt reference does not match the statement"
+            ),
+            reviewer, treasury, db,
+        )
+        assert rejected["status"] == "rejected"
+        assert db.query(SaccoLoanRepaymentAllocation).filter_by(
+            organization_id=org.id, repayment_id=pending["id"]
+        ).count() == 0
+        assert db.query(SaccoLoanRepaymentJournalLine).filter_by(
+            organization_id=org.id, repayment_id=pending["id"]
+        ).count() == 0
+        replacement = request_loan_repayment(
+            application.id,
+            _repayment_payload("100.00", "loan-repayment-retry-2", "MPESA-RETRY-002"),
+            requester, membership, db,
+        )
+        assert replacement["status"] == "pending_verification"
+        history = list_loan_repayments(
+            application.id, _membership(org.id, "sacco_auditor"), db
+        )
+        assert len(history["items"]) == 2
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_sacco_loan_routes_migration_and_workspace_are_registered():
     from app.main import app
 
@@ -574,6 +862,9 @@ def test_sacco_loan_routes_migration_and_workspace_are_registered():
     assert "/api/v1/sacco/loan-applications/{application_id}/decision" in paths
     assert "/api/v1/sacco/loan-applications/{application_id}/disbursements" in paths
     assert "/api/v1/sacco/loan-disbursements/{disbursement_id}/verification" in paths
+    assert "/api/v1/sacco/loan-applications/{application_id}/repayments" in paths
+    assert "/api/v1/sacco/loan-applications/{application_id}/balance" in paths
+    assert "/api/v1/sacco/loan-repayments/{repayment_id}/verification" in paths
     root = Path(__file__).resolve().parents[1]
     migration = (root / "migrations" / "versions" / "0068_sacco_loan_origination.py").read_text(encoding="utf-8")
     assert 'revision = "0068_sacco_loan_origination"' in migration
@@ -585,7 +876,13 @@ def test_sacco_loan_routes_migration_and_workspace_are_registered():
     assert 'down_revision = "0068_sacco_loan_origination"' in disbursement_migration
     assert "FORCE ROW LEVEL SECURITY" in disbursement_migration
     assert "uq_sacco_loan_disbursement_verified" in disbursement_migration
+    repayment_migration = (root / "migrations" / "versions" / "0070_sacco_loan_repayments.py").read_text(encoding="utf-8")
+    assert 'revision = "0070_sacco_loan_repayments"' in repayment_migration
+    assert 'down_revision = "0069_sacco_loan_disbursement"' in repayment_migration
+    assert "FORCE ROW LEVEL SECURITY" in repayment_migration
+    assert "onecore_assert_sacco_loan_repayment_journal_balanced" in repayment_migration
     page = (root / "app" / "web" / "sacco.html").read_text(encoding="utf-8")
     assert 'id="loanProduct"' in page and 'id="loanApplication"' in page
     assert 'id="loanDisbursement"' in page and 'id="loanDisbursementVerify"' in page
+    assert 'id="loanRepayment"' in page and 'id="loanRepaymentVerify"' in page
     assert "Powered by OneCore Technologies Ltd" in page
