@@ -22,7 +22,8 @@
 ## Release checks
 
 - Confirm Render reports healthy at `/ready` and API `/health` responds.
-- Confirm Vercel's `/login` and `/procurement` routes load.
+- Confirm Vercel's `/login`, `/procurement`, `/support`, `/trust`, `/community`, `/status` and `/events` routes load on the main website.
+- Build and smoke-test the four independent portals only: Developers, Documentation, Partners and Careers.
 - Sign in, select an organization and verify Procurement lists, supplier/requisition/PO creation, approval permissions, GRN inspection and accounting reconciliation.
 - Test Supabase backups/PITR and restore in a staging project before production data migration.
 - Configure M-Pesa/Daraja B2C, email/SMS/WhatsApp and bank credentials only after provider onboarding; leave each integration disabled until its credentials, callback URLs and UAT are complete.
