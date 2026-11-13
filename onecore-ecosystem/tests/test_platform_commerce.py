@@ -164,7 +164,8 @@ def test_platform_user_suspension_increments_auth_version_and_protects_root():
     with Session(engine) as db:
         root = User(email="root@example.com", password_hash="unused", platform_role="root_superadmin")
         customer = User(email="customer@example.com", password_hash="unused", auth_version=4)
-        db.add_all([root, customer]); db.commit()
+        second_root = User(email="root2@example.com", password_hash="unused", platform_role="root_superadmin")
+        db.add_all([root, customer, second_root]); db.commit()
         result = set_user_status(customer.id, UserStatusIn(is_active=False, reason="Security review"), root, db)
         assert result["is_active"] is False
         assert db.get(User, customer.id).auth_version == 5
@@ -172,8 +173,8 @@ def test_platform_user_suspension_increments_auth_version_and_protects_root():
             set_user_status(root.id, UserStatusIn(is_active=False, reason="Self suspend"), root, db)
         assert self_suspend.value.status_code == 409
         with pytest.raises(HTTPException) as root_suspend:
-            set_user_status(root.id + 100, UserStatusIn(is_active=False, reason="Suspend root"), root, db)
-        assert root_suspend.value.status_code == 404
+            set_user_status(second_root.id, UserStatusIn(is_active=False, reason="Suspend root"), root, db)
+        assert root_suspend.value.status_code == 403
     engine.dispose()
 
 
