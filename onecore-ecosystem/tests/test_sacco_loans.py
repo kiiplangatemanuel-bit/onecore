@@ -15,12 +15,14 @@ from app.core.sacco_models import SaccoMember
 from app.core.sacco_loan_models import (
     SaccoLoanApplication, SaccoLoanCollateral, SaccoLoanDisbursement,
     SaccoLoanGuarantor, SaccoLoanInstallment, SaccoLoanProduct,
+    SaccoLoanRepayment, SaccoLoanRepaymentAllocation, SaccoLoanRepaymentJournalLine,
 )
 from app.core.sacco_loan_schemas import (
     SaccoLoanApplicationCreateIn, SaccoLoanAssessmentIn, SaccoLoanCollateralCreateIn,
     SaccoLoanCollateralVerificationIn, SaccoLoanDecisionIn, SaccoLoanDisbursementCreateIn,
     SaccoLoanDisbursementVerificationIn, SaccoLoanGuarantorConsentIn,
     SaccoLoanGuarantorCreateIn, SaccoLoanProductCreateIn,
+    SaccoLoanRepaymentCreateIn, SaccoLoanRepaymentVerificationIn,
 )
 
 
@@ -31,7 +33,8 @@ def _database():
         AuditEvent.__table__, SaccoMember.__table__, SaccoLoanProduct.__table__,
         SaccoLoanApplication.__table__, SaccoLoanGuarantor.__table__,
         SaccoLoanCollateral.__table__, SaccoLoanInstallment.__table__,
-        SaccoLoanDisbursement.__table__,
+        SaccoLoanDisbursement.__table__, SaccoLoanRepayment.__table__,
+        SaccoLoanRepaymentAllocation.__table__, SaccoLoanRepaymentJournalLine.__table__,
     ])
     return engine, Session(engine)
 
