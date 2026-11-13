@@ -173,9 +173,6 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
         "reference": payload.external_reference.strip().upper(), "amount": str(plan.amount),
         "currency": plan.currency,
     }, sort_keys=True).encode()).hexdigest()
-    pending = db.query(SubscriptionPayment).filter_by(subscription_id=subscription.id, status="pending_verification").first()
-    if pending:
-        raise HTTPException(409, "A payment for this subscription is already awaiting verification")
     existing = db.query(SubscriptionPayment).filter_by(
         organization_id=membership.organization_id, idempotency_key=payload.idempotency_key
     ).first()
@@ -183,6 +180,9 @@ def submit_subscription_payment(subscription_id: int, payload: SubscriptionPayme
         if existing.request_hash != fingerprint:
             raise HTTPException(409, "Idempotency key was already used with different payment details")
         return {"id": existing.id, "status": existing.status, "idempotent_replay": True}
+    pending = db.query(SubscriptionPayment).filter_by(subscription_id=subscription.id, status="pending_verification").first()
+    if pending:
+        raise HTTPException(409, "A payment for this subscription is already awaiting verification")
     row = SubscriptionPayment(
         organization_id=membership.organization_id, subscription_id=subscription.id,
         amount=plan.amount, currency=plan.currency, method=payload.method,
