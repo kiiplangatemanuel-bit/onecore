@@ -299,6 +299,12 @@ def test_sacco_loan_tables_block_cross_tenant_reads_and_writes(monkeypatch):
                     UPDATE sacco_loan_installments SET principal_paid = 0
                     WHERE id = :id
                 """), {"id": a_ids[4]})
+        with pytest.raises(DBAPIError):
+            with connection.begin_nested():
+                connection.execute(text("""
+                    UPDATE sacco_loan_installments SET status = 'waived'
+                    WHERE id = :id
+                """), {"id": a_ids[4]})
 
         models = [
             ("sacco_loan_products", a_ids[0], b_ids[0]),
