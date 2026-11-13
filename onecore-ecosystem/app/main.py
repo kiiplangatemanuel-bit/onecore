@@ -280,6 +280,7 @@ def _verify_rls_database_boundary(connection):
         "payroll_payment_batch_items", "payroll_bank_statement_lines",
         "accounting_fx_rates", "accounting_fx_postings", "accounting_fx_revaluations", "accounting_fx_settlements",
         "payroll_statutory_batches", "user_sessions", "portal_authorization_assurance",
+        "subscription_plans", "organization_subscriptions", "subscription_payments", "managed_files", "managed_file_shares",
     )
     table_names = ", ".join("'" + name + "'" for name in required_tables)
     rows = connection.execute(text(f"""
