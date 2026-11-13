@@ -249,8 +249,11 @@ squash commit [15d2db0](https://github.com/kiiplangatemanuel-bit/onecore/commit/
   Pytest reported **471 passed, 8 warnings**.
 - Vercel status checks on the PR reported the account's `build-rate-limit` quota
   failure for four preview/deployment contexts. These are not successful deploys;
-  the GitHub Actions build jobs passed. Post-merge main CI was queued at tracker
-  update time and must be checked separately.
+  the GitHub Actions build jobs passed. Post-merge main run
+  [43411504909](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43411504909)
+  also passed: **471 pytest tests, 8 warnings**, migration upgrade/downgrade/re-upgrade,
+  PostgreSQL RLS/grant checks, dependency audit, Python compilation, main frontend
+  build and all ten portal builds.
 
 This records staff-reviewed external receipt references only. It does not initiate
 or independently verify M-Pesa/bank collections or callbacks. Advance payments,
@@ -269,15 +272,16 @@ outstanding.
    suite against the target Supabase project. CI uses disposable local PostgreSQL
    roles only.
 2. **Backups and disaster recovery:** scheduled backup run
-   [43145198319](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43145198319)
+   [43355745498](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43355745498)
    stopped at its configuration preflight because these repository secrets are
    missing: `ONECORE_BACKUP_DATABASE_URL`, `ONECORE_BACKUP_S3_BUCKET`,
    `ONECORE_BACKUP_AWS_ACCESS_KEY_ID`, `ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY`
    and `ONECORE_BACKUP_AWS_REGION`. The restore drill also needs
-   `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME`.
-   No successful production backup or restore drill is evidenced.
+   `ONECORE_RESTORE_DATABASE_URL` and `ONECORE_RESTORE_DATABASE_NAME`. The
+   restore-drill workflow is manual-dispatch only and no run is recorded. No
+   successful production backup or restore drill is evidenced.
 3. **Production monitoring:** latest health-monitor run
-   [43211928318](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43211928318)
+   [43403930679](https://github.com/kiiplangatemanuel-bit/onecore/actions/runs/43403930679)
    stopped at preflight because `ONECORE_HEALTHCHECK_URL` is not configured.
    Consequently no production `/health`, `/ready`, OpenAPI or provider-configuration
    probe has been verified.
