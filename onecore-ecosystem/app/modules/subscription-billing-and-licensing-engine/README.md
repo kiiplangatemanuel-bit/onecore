@@ -2,18 +2,10 @@
 
 Master specification category: **28**
 
-## Source scope
-Individual/business/industry/enterprise plans; monthly/annual/per-user/per-module/usage/hybrid/trial/custom pricing; activation/renewal/upgrades/downgrades/grace/suspension; payment verification/receipts/tax/refunds/limits/entitlements/revenue analytics; shared SaaS, dedicated, private, self-hosted, perpetual and custom arrangements with infrastructure/AI costs separately stated.
+## Implemented foundation
+The platform now has a persistent plan catalogue, organization subscriptions with immutable price snapshots, idempotent payment-reference submission, administrator verification/rejection, renewal term extension, cancellation and audit history. Plan entitlements are stored as structured data.
 
-## Implementation status
-Scaffold only. This folder reserves the domain boundary; it is not a claim of production implementation.
+## Remaining scope
+Recurring automatic charging is disabled until a payment-provider mandate is configured. M-Pesa STK push/card checkout, automated dunning, tax invoices/receipts, refunds, proration, usage metering, infrastructure/AI cost attribution and centralized entitlement enforcement are not yet complete. Do not treat a submitted payment reference as settled; a platform administrator must verify it against the provider/bank statement.
 
-## Required implementation
-- Define domain entities, constraints, indexes and migrations.
-- Add domain services and versioned API routes.
-- Enforce tenant, branch and role authorization at the service layer.
-- Add validation, approval workflows, audit events and idempotency where needed.
-- Build responsive user/admin workflows and accessible states.
-- Add unit, integration, security and end-to-end tests.
-- Add monitoring, retention, backup/restore and operational documentation.
-- Complete sandbox/UAT and release approval for external dependencies.
+See `onecore-ecosystem/docs/PLATFORM_COMMERCE_AND_ADMIN.md`.
