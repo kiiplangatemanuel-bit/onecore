@@ -144,7 +144,8 @@ def test_document_classification_access_is_role_limited():
     from app.api.platform_commerce import _classification_allowed
     assert _classification_allowed("staff", "internal")
     assert not _classification_allowed("staff", "confidential")
-    assert _classification_allowed("manager", "confidential")
+    assert not _classification_allowed("manager", "confidential")
+    assert _classification_allowed("org_admin", "confidential")
     assert not _classification_allowed("manager", "restricted")
     assert _classification_allowed("org_admin", "restricted")
 
