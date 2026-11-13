@@ -298,7 +298,8 @@ class OrganizationMemberUpdateIn(BaseModel):
 
 @router.get("/members")
 def list_organization_members(membership=Depends(active_membership), db: Session = Depends(get_db)):
-    require_permission(membership, "manage")
+    if membership.role != "org_admin":
+        raise HTTPException(403, "Only an organization administrator can list all members")
     rows = db.query(Membership, User).join(User, User.id == Membership.user_id).filter(
         Membership.organization_id == membership.organization_id
     ).order_by(User.full_name, User.email).all()
