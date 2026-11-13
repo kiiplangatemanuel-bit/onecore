@@ -71,6 +71,7 @@ class ManagedFile(Base):
     name: Mapped[str] = mapped_column(String(255))
     object_key: Mapped[str] = mapped_column(String(512), unique=True)
     content_type: Mapped[str] = mapped_column(String(160), default="application/octet-stream")
+    is_folder: Mapped[bool] = mapped_column(Boolean, default=False)
     size_bytes: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
     classification: Mapped[str] = mapped_column(String(24), default="internal")
