@@ -40,7 +40,7 @@ Configure the backend `CORS_ORIGINS` to the exact Vercel production origin (and 
 
 ## Website and portal topology
 
-The main website hosts Support (`/support`), Trust (`/trust`), Community (`/community`), Status (`/status`), Events (`/events`) and Admin/Superadmin (`/admin`) as integrated modules using the shared portal workflow UI. They are not independent frontend deployments. The only independent portal deployments are Developers (`frontend/portals/developers`), Documentation (`frontend/portals/docs`), Careers (`frontend/portals/careers`) and Partners (`frontend/portals/partners`). See `frontend/portals/PORTAL_DEPLOYMENT.md` for deployment and retirement steps.
+OneCore has one deployable frontend application. Support, Trust, Community, Status, Events, Developers, Documentation, Careers, Partners, business modules and Superadmin are routes/modules within the same React application and use the shared identity, navigation, API client and database. The `frontend/portals` directory is retained only as legacy compatibility source; do not configure separate Vercel projects or deploy those directories. Superadmin uses `/platform` with `/admin/login` routed through the same login/MFA flow.
 
 ## UI integration status
 
