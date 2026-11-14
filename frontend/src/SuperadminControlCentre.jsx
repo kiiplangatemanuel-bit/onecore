@@ -68,7 +68,7 @@ export default function SuperadminControlCentre({user}) {
     await act(async()=>{const result=await api("/api/v1/admin/platform/organizations",{method:"POST",body:JSON.stringify({...organizationDraft,owner_user_id:Number(organizationDraft.owner_user_id)})});setSelectedOrg(String(result.id));setOrganizationDraft({name:"",slug:"",owner_user_id:"",industry:"general",country:"KE",currency:"KES",timezone:"Africa/Nairobi"});},"Organization created with its initial owner membership.");
   }
   async function updateMembership(member,changes) {
-    await act(()=>api("/api/v1/admin/platform/memberships/"+member.id,{method:"PATCH",body:JSON.stringify({role:member.role,branch_scope:member.branch_scope,is_active:member.is_active,...changes})}),"Organization membership updated.");
+    await act(async()=>{const result=await api("/api/v1/admin/platform/memberships/"+member.id,{method:"PATCH",body:JSON.stringify({role:member.role,branch_scope:member.branch_scope,is_active:member.is_active,...changes})});setMemberships(rows=>rows.map(row=>row.id===member.id?{...row,...result}:row));},"Organization membership updated.");
   }
   async function assignPlan(e) {
     e.preventDefault();
