@@ -78,6 +78,8 @@ def test_business_api_routes_resolve_school_hr_and_payroll_entitlements():
     assert _module_for_path("/api/v1/hr/employees") == "hr"
     assert _module_for_path("/api/v1/payroll/statutory-batches") == "payroll"
     assert _module_for_path("/api/v1/integrations/mpesa/payments") == "accounting"
+    assert _module_for_path("/api/v1/files") == "documents"
+    assert _module_for_path("/api/v1/files/1/download") == "documents"
 
 
 def test_http_methods_and_workflow_actions_resolve_to_rbac_actions():
