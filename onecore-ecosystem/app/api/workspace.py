@@ -78,7 +78,7 @@ def workspace_context(
 ):
     organization = db.get(Organization, membership.organization_id)
     subscription, plan = _current_plan(db, membership.organization_id)
-    entitlements = (plan.entitlements or {}) if plan else {}
+    entitlements = (subscription.entitlements_override if subscription and subscription.entitlements_override is not None else ((plan.entitlements or {}) if plan else {}))
     entitled = _entitled_modules(entitlements)
     modules = []
     for item in MODULES:
@@ -115,7 +115,7 @@ def workspace_context(
                          "plan": plan.code if plan else None,
                          "ends_at": subscription.ends_at.isoformat() if subscription.ends_at else None}
                         if subscription else None),
-        "entitlements": {"modules": sorted(entitled)},
+        "entitlements": entitlements,
         "modules": modules,
     }
 
