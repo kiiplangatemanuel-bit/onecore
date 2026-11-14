@@ -117,13 +117,16 @@ class QueryParams:
 
 
 class BranchRequest:
-    def __init__(self, body=None, query=None, headers=None, path=None):
+    def __init__(self, body=None, query=None, headers=None, path=None, form_data=None):
         self._body = body
+        self._form_data = form_data or {}
         self.query_params = QueryParams(query)
         self.headers = headers or {"content-type": "application/json"}
         self.path_params = path or {}
     async def json(self):
         return self._body
+    async def form(self):
+        return QueryParams(self._form_data)
 
 
 def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
@@ -145,3 +148,7 @@ def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
         assert getattr(exc, "status_code", None) == 404
     else:
         raise AssertionError("Expected branch-scope denial")
+    form_denied = BranchRequest(headers={"content-type":"application/x-www-form-urlencoded"}, form_data={"destination_branch_id":"east"})
+    with pytest.raises(Exception) as form_error:
+        asyncio.run(_enforce_requested_branch_scope(form_denied, scoped))
+    assert getattr(form_error.value, "status_code", None) == 404
