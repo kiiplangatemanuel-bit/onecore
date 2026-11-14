@@ -2,12 +2,13 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
+import os
 from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -591,6 +592,48 @@ def _validate_operation_transition(kind: str, row, next_status: str, actor_id: i
     maker_checker_states = {"scheduled", "in_progress", "resolved", "closed", "completed"}
     if next_status in maker_checker_states and actor_id in {row.owner_user_id, last_actor}:
         raise HTTPException(403, "A different platform administrator must approve this operational transition")
+
+
+@router.get("/operations/readiness")
+def platform_operational_readiness(
+    user: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+):
+    """Expose safe configuration signals; never claim an unverified backup/restore."""
+    try:
+        db.execute(text("SELECT 1"))
+        database_reachable = True
+    except Exception:
+        db.rollback()
+        database_reachable = False
+    backup_storage_keys = (
+        "ONECORE_BACKUP_S3_BUCKET", "ONECORE_BACKUP_AWS_ACCESS_KEY_ID",
+        "ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY", "ONECORE_BACKUP_AWS_REGION",
+    )
+    configured_storage = [key for key in backup_storage_keys if os.getenv(key)]
+    backup_database_configured = bool(
+        os.getenv("ONECORE_BACKUP_DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
+    )
+    restore_database_configured = bool(os.getenv("ONECORE_RESTORE_DATABASE_URL"))
+    return {
+        "database": {"configured": True, "reachable": database_reachable},
+        "backup": {
+            "database_url_configured": backup_database_configured,
+            "storage_configured": len(configured_storage) == len(backup_storage_keys),
+            "storage_configuration_items_present": len(configured_storage),
+            "storage_configuration_items_required": len(backup_storage_keys),
+            "restore_target_configured": restore_database_configured,
+            "evidence": "Runtime environment configuration only; this endpoint does not verify scheduled workflow secrets, backup artifacts, checksums or restore drills.",
+        },
+        "security": {
+            "mfa_encryption_key_configured": bool(os.getenv("MFA_ENCRYPTION_KEY")),
+            "production_mode": os.getenv("APP_ENV", "").lower() == "production",
+        },
+        "monitoring": {
+            "healthcheck_url_configured": bool(os.getenv("ONECORE_HEALTHCHECK_URL")),
+            "evidence": "The API runtime cannot inspect repository-level GitHub Actions secrets or monitoring run history.",
+        },
+    }
 
 
 @router.get("/operations/{kind}")
