@@ -633,6 +633,10 @@ def platform_operational_readiness(
             "healthcheck_url_configured": bool(os.getenv("ONECORE_HEALTHCHECK_URL")),
             "evidence": "The API runtime cannot inspect repository-level GitHub Actions secrets or monitoring run history.",
         },
+        "maintenance": {
+            "global_request_gate_enabled": False,
+            "evidence": "The current maintenance register records and approves windows; it does not yet gate all API, worker or database writes globally.",
+        },
     }
 
 
