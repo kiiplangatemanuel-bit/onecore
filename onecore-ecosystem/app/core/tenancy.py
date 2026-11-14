@@ -185,7 +185,7 @@ def _enforce_module_entitlement(db: Session, membership: Membership, module_key:
         raise HTTPException(403, "This organization subscription does not include the requested module")
 
 
-def active_membership(
+async def active_membership(
     request: Request,
     x_organization_id: int | None = Header(default=None, alias="X-Organization-ID"),
     user: User = Depends(current_user),
