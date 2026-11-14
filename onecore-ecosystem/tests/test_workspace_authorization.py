@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import asyncio
 
 from app.core.authorization import (
     branch_scope_ids,
@@ -7,7 +8,7 @@ from app.core.authorization import (
     require_module_permission,
 )
 from app.api.workspace import _entitled_modules
-from app.core.tenancy import _module_for_path, _module_entitlements, _action_for_request
+from app.core.tenancy import _module_for_path, _module_entitlements, _action_for_request, _enforce_requested_branch_scope
 
 
 def member(role="org_admin", scope="*"):
@@ -93,3 +94,43 @@ def test_approver_roles_get_only_their_narrow_workflow_update_rights():
     assert not has_module_permission(member("payroll_approver"), "payroll", "create")
     assert has_module_permission(member("hr_manager"), "hr", "update")
     assert not has_module_permission(member("hr_manager"), "payroll", "create")
+
+
+
+class QueryParams:
+    def __init__(self, values=None):
+        self.values = values or {}
+    def getlist(self, key):
+        value = self.values.get(key, [])
+        return value if isinstance(value, list) else [value]
+
+
+class BranchRequest:
+    def __init__(self, body=None, query=None, headers=None, path=None):
+        self._body = body
+        self.query_params = QueryParams(query)
+        self.headers = headers or {"content-type": "application/json"}
+        self.path_params = path or {}
+    async def json(self):
+        return self._body
+
+
+def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
+    scoped = member("staff", "north,south")
+    allowed = BranchRequest(
+        body={"transfer": {"source_branch_id": "north", "branch_id": "south"}},
+        query={"branch_ids": ["north", "south"]},
+        headers={"content-type": "application/json", "x-branch-id": "north"},
+        path={"branch_id": "south"},
+    )
+    asyncio.run(_enforce_requested_branch_scope(allowed, scoped))
+    denied = BranchRequest(
+        body={"items": [{"branch_id": "east"}]},
+        headers={"content-type": "application/json"},
+    )
+    try:
+        asyncio.run(_enforce_requested_branch_scope(denied, scoped))
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 404
+    else:
+        raise AssertionError("Expected branch-scope denial")
