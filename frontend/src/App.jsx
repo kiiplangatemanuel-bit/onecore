@@ -89,7 +89,7 @@ function App(){
     {(path==="/platform"||path==="/admin/login")?(isPlatformAdmin?<SuperadminControlCentre user={user}/>:<div className="alert error">Platform administration access is restricted to authorized OneCore administrators.</div>):null}
     {ecosystemWorkflowRoutes[path]?<PortalWorkflowWorkspace portal={ecosystemWorkflowRoutes[path]} organizationId={activeOrgId} organizations={orgs}/>:null}
     {path==="/ai"?<AIWorkspace key={activeOrgId}/>:null}
-    {portalRoutes.has(path)&&path!=="/platform"&&path!=="/admin/login"?<PortalWorkspace key={activeOrgId} path={path}/>:null}
+    {portalRoutes.has(path)&&path!=="/platform"&&path!=="/admin/login"&&!ecosystemWorkflowRoutes[path]?<PortalWorkspace key={activeOrgId} path={path}/>:null}
     {!legacy&&!portalRoutes.has(path)&&!ecosystemWorkflowRoutes[path]&&path!=="/ai"&&path!=="/"&&path!=="/overview"&&path!=="/organizations"&&path!=="/account/security"?<ModuleLanding path={path} active={active} onNotice={setNotice}/>:null}
     {notice&&<div className="alert error">{notice}</div>}
     <footer className="footer">© {new Date().getFullYear()} OneCore Technologies Ltd <span><a href="https://onecore.co.ke">Powered by OneCore Technologies Ltd</a> · One platform. Every organization. Anywhere.</span></footer>
