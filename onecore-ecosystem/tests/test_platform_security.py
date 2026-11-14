@@ -73,6 +73,10 @@ def test_production_settings_require_secure_values():
         force_https=True,
     )
     Settings(_env_file=None, **safe)
+    # The unified OneCore app uses one same-origin login; legacy PKCE redirect origins are optional.
+    Settings(_env_file=None, **{key: value for key, value in safe.items() if key != "portal_redirect_origins"})
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{**safe, "portal_redirect_origins": "http://insecure.example.com"})
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{**safe, "secret_key": "unsafe-development-key-change-me"})
     with pytest.raises(ValidationError):
