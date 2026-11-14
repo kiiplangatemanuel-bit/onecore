@@ -9,6 +9,20 @@ microservices.
 **Reconciled:** 13 November 2026  
 **Implementation code head reviewed:** `15d2db0a2a704805259fbf70f473b7dff5ecdc77` (tracker-only reconciliation follows)
 
+## Unified workspace and Superadmin increment (draft PR #141)
+
+The open branch `feat/unified-platform-foundation-admin` extends the existing application rather than introducing separate portals or services:
+
+- Central active-membership enforcement maps Accounting/Finance/M-Pesa, Inventory, Procurement, POS, CRM, School, Hospital, Pharmacy, Laboratory, HR, Payroll, SACCO, Property, Hotel, Restaurant, Reports and managed Files to workspace entitlement keys.
+- Business requests are checked for both module access and an HTTP-derived RBAC action. Explicit workflow transitions (approval, decision, settlement, validation, clinical stock/sample changes and finance posting) require update permission rather than being treated as generic create operations.
+- Explicit branch identifiers in request headers, query strings, route parameters and nested JSON payloads are checked against the active membership branch scope. Existing route-level branch filters and PostgreSQL tenant RLS remain necessary; this request-selector check is not a substitute for a complete per-query branch isolation audit or branch-level database RLS.
+- Workspace context and dashboard are integrated into the existing authenticated React shell. Superadmin is mounted at `/platform` with `/admin/login` as an alias to the same login/MFA flow.
+- Superadmin includes organization creation/status and membership administration, organization module overrides, subscription plan creation and subscription lifecycle, developer credential issue/revocation, user suspension/session revocation, audit, incident and maintenance records, and safe operational configuration signals.
+- Incident and maintenance records use explicit state transitions with independent maker/checker controls for high-impact transitions. Operational readiness reports configuration presence only; it does not claim backup success, restore completion, monitoring run success or global maintenance enforcement.
+- CI now builds the single central frontend rather than separately building legacy portal apps. Existing Vercel projects, custom domains and DNS are external settings and are not retired by this repository change.
+
+**Verification status for this branch:** code and tests have been added, but backend pytest, Alembic upgrade/downgrade, frontend build, browser integration, MFA regression, complete tenant/branch isolation, maker/checker integration and production acceptance have not been executed here. GitHub Actions run results were not available for the branch; Vercel checks report account build-rate-limit failures. Keep PR #141 in draft and do not deploy until these gates pass.
+
 ## Verified on current main
 
 The following shared-platform foundations have implementation and automated-test
