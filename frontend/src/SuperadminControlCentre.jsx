@@ -46,7 +46,7 @@ export default function SuperadminControlCentre() {
   useEffect(()=>{
     if(!selectedOrg)return;
     api("/api/v1/admin/platform/organizations/"+selectedOrg+"/entitlements")
-      .then(result=>setEntitlements(result.effective_entitlements?.modules || []))
+      .then(result=>{const raw=result.effective_entitlements?.modules||[];setEntitlements(Array.isArray(raw)?raw:Object.keys(raw).filter(key=>raw[key]===true));})
       .catch(e=>setError(e.message));
   },[selectedOrg]);
 
