@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 def _module_for_path(path: str) -> str | None:
     """Map every business API namespace to its single workspace entitlement."""
     normalized = (path or "").lower().split("?", 1)[0].rstrip("/")
+    # More specific nested hospital workflows precede the hospital parent module.
+    if normalized.startswith("/api/v1/healthcare/") and "/pharmacy/" in normalized:
+        return "pharmacy"
+    if normalized.startswith("/api/v1/healthcare/") and ("/laboratory/" in normalized or "/lab/" in normalized):
+        return "laboratory"
     # More specific prefixes must precede their parent namespaces.
     prefixes = (
         ("/api/v1/healthcare/pharmacy", "pharmacy"),
