@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 import asyncio
+import json
+import pytest
 
 from app.core.authorization import (
     branch_scope_ids,
@@ -118,15 +120,11 @@ class QueryParams:
 
 class BranchRequest:
     def __init__(self, body=None, query=None, headers=None, path=None, form_data=None):
-        self._body = body
-        self._form_data = form_data or {}
+        self._body = json.dumps(body).encode("utf-8") if body is not None else None
+        self._form = QueryParams(form_data) if form_data is not None else None
         self.query_params = QueryParams(query)
         self.headers = headers or {"content-type": "application/json"}
         self.path_params = path or {}
-    async def json(self):
-        return self._body
-    async def form(self):
-        return QueryParams(self._form_data)
 
 
 def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
