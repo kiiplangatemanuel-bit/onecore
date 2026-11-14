@@ -660,6 +660,11 @@ def create_platform_operation(kind: Literal["incidents", "maintenance"], payload
                               user: User = Depends(require_platform_admin),
                               db: Session = Depends(get_db)):
     record_type = "incident" if kind == "incidents" else "maintenance"
+    if payload.starts_at and payload.ends_at:
+        starts = payload.starts_at.replace(tzinfo=timezone.utc) if payload.starts_at.tzinfo is None else payload.starts_at
+        ends = payload.ends_at.replace(tzinfo=timezone.utc) if payload.ends_at.tzinfo is None else payload.ends_at
+        if ends <= starts:
+            raise HTTPException(422, "Operational end time must be after its start time")
     record = PortalWorkflowRecord(
         portal_key="operations", record_type=record_type, organization_id=None,
         owner_user_id=user.id, visibility="private", status="draft",
