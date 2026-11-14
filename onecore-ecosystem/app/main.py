@@ -42,6 +42,7 @@ from app.api.developer_api_keys import router as developer_api_keys_router
 from app.api.developer_webhooks import router as developer_webhooks_router
 from app.api.platform_commerce import router as platform_commerce_router
 from app.api.platform_admin import router as platform_admin_router
+from app.api.workspace import router as workspace_router
 from app.core import hr_payroll_models  # noqa: F401 - register HR/payroll tables
 from app.core import models_status_alerts  # noqa: F401 - register Status alert outbox model
 from app.core import mpesa_settlement_models  # noqa: F401 - register M-Pesa settlement models
@@ -117,6 +118,7 @@ app.include_router(developer_api_keys_router)
 app.include_router(developer_webhooks_router)
 app.include_router(platform_commerce_router)
 app.include_router(platform_admin_router)
+app.include_router(workspace_router)
 
 @app.get("/school", response_class=HTMLResponse)
 def school_ui():
