@@ -54,6 +54,8 @@ def test_api_namespace_resolves_to_single_module_entitlement_keys():
     assert _module_for_path("/api/v1/inventory/products") == "inventory"
     assert _module_for_path("/api/v1/healthcare/patients") == "hospital"
     assert _module_for_path("/api/v1/sacco/members") == "sacco"
+    assert _module_for_path("/api/v1/pharmacy/medicines") == "pharmacy"
+    assert _module_for_path("/api/v1/lab/tests") == "laboratory"
     assert _module_for_path("/api/v1/records/accounting") == "accounting"
     assert _module_for_path("/api/v1/workspace/context") is None
 
