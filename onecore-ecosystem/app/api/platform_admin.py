@@ -1,5 +1,7 @@
 """Restricted OneCore platform administration APIs."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 from decimal import Decimal
 from typing import Literal
 
@@ -452,6 +454,51 @@ def update_subscription_lifecycle(subscription_id: int, payload: SubscriptionLif
     return {"id": row.id, "organization_id": row.organization_id,
             "status": row.status, "starts_at": row.starts_at.isoformat() if row.starts_at else None,
             "ends_at": row.ends_at.isoformat() if row.ends_at else None}
+
+
+class DeveloperCredentialCreateIn(BaseModel):
+    organization_id: int = Field(gt=0)
+    name: str = Field(min_length=2, max_length=120)
+    environment: Literal["sandbox", "production"] = "sandbox"
+    expires_in_days: int = Field(default=90, ge=1, le=365)
+
+
+@router.post("/developer-credentials", status_code=201)
+def create_platform_developer_credential(
+    payload: DeveloperCredentialCreateIn,
+    user: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+):
+    organization = db.query(Organization).filter_by(
+        id=payload.organization_id, is_active=True
+    ).first()
+    if not organization:
+        raise HTTPException(404, "Active organization not found")
+    raw_key = f"oc_{'live' if payload.environment == 'production' else 'test'}_{secrets.token_urlsafe(36)}"
+    row = DeveloperApiKey(
+        organization_id=organization.id,
+        created_by_user_id=user.id,
+        name=payload.name.strip(),
+        key_prefix=raw_key[:16],
+        secret_hash=hashlib.sha256(raw_key.encode("utf-8")).hexdigest(),
+        scopes=["organization:read"],
+        environment=payload.environment,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days),
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, user, organization.id, "platform.developer_credential_created",
+           "developer_api_key", row.id,
+           f"prefix={row.key_prefix};environment={row.environment}")
+    db.commit()
+    db.refresh(row)
+    # Secret is intentionally returned once only; it is never stored in plaintext.
+    return {
+        "id": row.id, "organization_id": row.organization_id, "name": row.name,
+        "key_prefix": row.key_prefix, "environment": row.environment,
+        "scopes": row.scopes, "expires_at": row.expires_at.isoformat(),
+        "secret": raw_key,
+    }
 
 
 @router.get("/developer-credentials")
