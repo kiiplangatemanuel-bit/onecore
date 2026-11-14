@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-import asyncio
 import json
 import pytest
 
@@ -135,18 +134,18 @@ def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
         headers={"content-type": "application/json", "x-branch-id": "north"},
         path={"branch_id": "south"},
     )
-    asyncio.run(_enforce_requested_branch_scope(allowed, scoped))
+    _enforce_requested_branch_scope(allowed, scoped)
     denied = BranchRequest(
         body={"items": [{"branch_id": "east"}]},
         headers={"content-type": "application/json"},
     )
     try:
-        asyncio.run(_enforce_requested_branch_scope(denied, scoped))
+        _enforce_requested_branch_scope(denied, scoped)
     except Exception as exc:
         assert getattr(exc, "status_code", None) == 404
     else:
         raise AssertionError("Expected branch-scope denial")
     form_denied = BranchRequest(headers={"content-type":"application/x-www-form-urlencoded"}, form_data={"destination_branch_id":"east"})
     with pytest.raises(Exception) as form_error:
-        asyncio.run(_enforce_requested_branch_scope(form_denied, scoped))
+        _enforce_requested_branch_scope(form_denied, scoped)
     assert getattr(form_error.value, "status_code", None) == 404
