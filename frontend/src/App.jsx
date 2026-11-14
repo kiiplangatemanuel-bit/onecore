@@ -10,6 +10,7 @@ import AIWorkspace from "./AIWorkspace.jsx";
 import ProcurementWorkspace from "./ProcurementWorkspace.jsx";
 import AuthRecovery from "./AuthRecovery.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
+import SuperadminControlCentre from "./SuperadminControlCentre.jsx";
 
 const integratedPortalRoutes = Object.freeze({
   "/support": "support",
@@ -81,6 +82,7 @@ function App(){
     {path==="/account/security"?<AccountSecurity/>:null}
     {path==="/organizations"?<Organizations orgs={orgs} refresh={()=>api("/api/v1/organizations").then(setOrgs).catch(e=>setNotice(e.message))} onNotice={setNotice} onSelectOrg={id=>{setActiveOrganization(id);setActiveOrgId(String(id));}}/>:null}
     {path==="/procurement"?<ProcurementWorkspace key={activeOrgId}/>:legacy&&meta?<><div className="page-heading"><div><p className="eyebrow">{active?.[4]||"BUSINESS WORKSPACE"}</p><h1>{meta[0]}</h1><p className="muted">{meta[1]}</p></div><a className="primary link-button" href={API_BASE+path} target="_blank" rel="noreferrer">Open full module ↗</a></div><div className="notice info">The original OneCore module interface is hosted by the backend. Open it in a new tab to use its full workflow UI. This workspace checks the related API connection.</div><div className="stat-grid compact"><Stat label="API connection" value={health==="online"?"Available":"Unavailable"} hint="Backend health endpoint" icon="⌁"/><Stat label="Module interface" value="Available" hint="Hosted by FastAPI backend" icon="▤"/><Stat label="Workspace" value={orgs[0]?.name||"Not selected"} hint="Active organization context" icon="⌂"/></div><section className="panel"><div className="panel-head"><div><h3>Module capabilities</h3><p className="muted">Open the established module UI to access its workflows.</p></div><span className="status online"><i/>Connected shell</span></div><div className="capability-list">{(active?.[3]||"OneCore module").split(",").map((x,i)=><div key={i}><span className="check">✓</span>{x.trim()}</div>)}<div><span className="check">✓</span>Tenant-scoped access is enforced by the backend API</div><div><span className="check">✓</span>API documentation available for authorized users</div></div><button className="secondary" onClick={()=>window.open(API_BASE+"/docs","_blank","noopener,noreferrer")}>Explore API endpoints ↗</button></section></>:null}
+    {path==="/platform"?(isPlatformAdmin?<SuperadminControlCentre/>:<div className="alert error">Platform administration access is restricted to authorized OneCore administrators.</div>):null}
     {path==="/ai"?<AIWorkspace key={activeOrgId}/>:null}\n    {portalRoutes.has(path)?<PortalWorkspace key={activeOrgId} path={path}/>:null}
     {!legacy&&!portalRoutes.has(path)&&path!=="/ai"&&path!=="/"&&path!=="/overview"&&path!=="/organizations"&&path!=="/account/security"?<ModuleLanding path={path} active={active} onNotice={setNotice}/>:null}
     {notice&&<div className="alert error">{notice}</div>}
