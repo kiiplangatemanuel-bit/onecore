@@ -25,6 +25,8 @@ def _module_for_path(path: str) -> str | None:
         ("/api/v1/school", "school"),
         ("/api/v1/healthcare", "hospital"),
         ("/api/v1/pharmacy-lab", "pharmacy"),
+        ("/api/v1/pharmacy", "pharmacy"),
+        ("/api/v1/lab", "laboratory"),
         ("/api/v1/hr", "hr"),
         ("/api/v1/payroll", "payroll"),
         ("/api/v1/sacco", "sacco"),
