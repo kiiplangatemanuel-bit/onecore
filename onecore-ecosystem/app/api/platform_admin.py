@@ -9,7 +9,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditEvent, Membership, Organization, User
+from app.core.models import AuditEvent, Membership, Organization, User, DeveloperApiKey, DeveloperApiKeyUsage, PortalWorkflowRecord
 from app.core.platform_commerce_models import OrganizationSubscription, SubscriptionPayment, SubscriptionPlan
 from app.core.security import require_platform_admin
 
@@ -305,6 +305,7 @@ class OrganizationSubscriptionGrantIn(BaseModel):
     status: Literal["active", "trialing", "suspended"] = "active"
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+    entitlements_override: dict | None = None
 
 
 @router.put("/organizations/{organization_id}/subscription")
@@ -336,6 +337,7 @@ def grant_organization_subscription(organization_id: int, payload: OrganizationS
         organization_id=organization_id, plan_id=plan.id, status=payload.status,
         amount=plan.amount, currency=plan.currency, billing_interval=plan.interval,
         starts_at=starts, ends_at=ends, auto_renew=False, created_by=user.id,
+        entitlements_override=payload.entitlements_override,
     )
     db.add(row)
     _audit(db, user, organization_id, "platform.organization_entitlements_granted",
@@ -343,6 +345,242 @@ def grant_organization_subscription(organization_id: int, payload: OrganizationS
            f"plan={plan.code};status={payload.status};modules={sorted((plan.entitlements or {}).get('modules', []))}")
     db.commit()
     db.refresh(row)
+    effective = row.entitlements_override if row.entitlements_override is not None else (plan.entitlements or {})
     return {"id": row.id, "organization_id": organization_id, "plan": _plan(plan),
             "status": row.status, "starts_at": row.starts_at.isoformat(),
+            "ends_at": row.ends_at.isoformat() if row.ends_at else None,
+            "entitlements_override": row.entitlements_override,
+            "effective_entitlements": effective}
+
+
+class OrganizationEntitlementsIn(BaseModel):
+    entitlements: dict = Field(default_factory=dict)
+
+
+@router.get("/organizations/{organization_id}/entitlements")
+def get_organization_entitlements(organization_id: int,
+                                  user: User = Depends(require_platform_admin),
+                                  db: Session = Depends(get_db)):
+    org = db.get(Organization, organization_id)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    subscription, plan = _current_organization_subscription(db, organization_id)
+    if not subscription:
+        return {"organization_id": organization_id, "subscription": None,
+                "entitlements_override": None, "effective_entitlements": {}}
+    effective = subscription.entitlements_override if subscription.entitlements_override is not None else ((plan.entitlements or {}) if plan else {})
+    return {"organization_id": organization_id,
+            "subscription": {"id": subscription.id, "status": subscription.status,
+                             "plan_id": subscription.plan_id, "plan_code": plan.code if plan else None},
+            "entitlements_override": subscription.entitlements_override,
+            "effective_entitlements": effective}
+
+
+def _current_organization_subscription(db: Session, organization_id: int):
+    now = datetime.now(timezone.utc)
+    rows = db.query(OrganizationSubscription).filter(
+        OrganizationSubscription.organization_id == organization_id,
+        OrganizationSubscription.status.in_(("active", "trialing")),
+    ).order_by(OrganizationSubscription.created_at.desc()).limit(10).all()
+    for row in rows:
+        start, end = row.starts_at, row.ends_at
+        if start and start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end and end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        if start and start > now:
+            continue
+        if end and end <= now:
+            continue
+        return row, db.get(SubscriptionPlan, row.plan_id)
+    return None, None
+
+
+@router.patch("/organizations/{organization_id}/entitlements")
+def update_organization_entitlements(organization_id: int, payload: OrganizationEntitlementsIn,
+                                     user: User = Depends(require_platform_admin),
+                                     db: Session = Depends(get_db)):
+    subscription, plan = _current_organization_subscription(db, organization_id)
+    if not subscription or not plan:
+        raise HTTPException(409, "Assign an active subscription before changing organization entitlements")
+    modules = payload.entitlements.get("modules", payload.entitlements.get("module_access", []))
+    if isinstance(modules, list):
+        if any(not isinstance(item, str) or not item.strip() for item in modules):
+            raise HTTPException(422, "Module entitlements must be non-empty module keys")
+        payload.entitlements["modules"] = sorted(set(item.strip().lower() for item in modules))
+    elif isinstance(modules, dict):
+        payload.entitlements["modules"] = {str(key).strip().lower(): value is True for key, value in modules.items()}
+    else:
+        raise HTTPException(422, "Entitlements must include modules as a list or boolean map")
+    subscription.entitlements_override = payload.entitlements
+    _audit(db, user, organization_id, "platform.organization_entitlements_updated",
+           "organization_subscription", subscription.id,
+           f"modules={payload.entitlements['modules']}")
+    db.commit()
+    return {"organization_id": organization_id, "subscription_id": subscription.id,
+            "entitlements_override": subscription.entitlements_override,
+            "effective_entitlements": subscription.entitlements_override}
+
+
+class SubscriptionLifecycleIn(BaseModel):
+    status: Literal["active", "trialing", "suspended", "cancelled", "past_due"]
+    reason: str = Field(min_length=3, max_length=500)
+    ends_at: datetime | None = None
+
+
+@router.patch("/subscriptions/{subscription_id}/lifecycle")
+def update_subscription_lifecycle(subscription_id: int, payload: SubscriptionLifecycleIn,
+                                   user: User = Depends(require_platform_admin),
+                                   db: Session = Depends(get_db)):
+    row = db.query(OrganizationSubscription).filter_by(id=subscription_id).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Subscription not found")
+    if payload.ends_at is not None:
+        ends = payload.ends_at
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=timezone.utc)
+        if row.starts_at and ends <= row.starts_at:
+            raise HTTPException(422, "Subscription end must be after its start")
+        row.ends_at = ends
+    row.status = payload.status
+    if payload.status in {"suspended", "cancelled", "past_due"}:
+        row.auto_renew = False
+    _audit(db, user, row.organization_id, "platform.subscription_lifecycle_changed",
+           "organization_subscription", row.id,
+           f"status={payload.status};reason={payload.reason.strip()}")
+    db.commit()
+    return {"id": row.id, "organization_id": row.organization_id,
+            "status": row.status, "starts_at": row.starts_at.isoformat() if row.starts_at else None,
             "ends_at": row.ends_at.isoformat() if row.ends_at else None}
+
+
+@router.get("/developer-credentials")
+def list_platform_developer_credentials(
+    organization_id: int | None = None,
+    user: User = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+):
+    query = db.query(DeveloperApiKey)
+    if organization_id is not None:
+        query = query.filter_by(organization_id=organization_id)
+    rows = query.order_by(DeveloperApiKey.created_at.desc()).limit(500).all()
+    counts = dict(db.query(DeveloperApiKeyUsage.api_key_id, func.count(DeveloperApiKeyUsage.id))
+                  .filter(DeveloperApiKeyUsage.api_key_id.in_([row.id for row in rows]))
+                  .group_by(DeveloperApiKeyUsage.api_key_id).all()) if rows else {}
+    return [{
+        "id": row.id, "organization_id": row.organization_id,
+        "name": row.name, "key_prefix": row.key_prefix,
+        "environment": row.environment, "scopes": row.scopes,
+        "created_by_user_id": row.created_by_user_id,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+        "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
+        "usage_count": counts.get(row.id, 0),
+    } for row in rows]
+
+
+@router.post("/developer-credentials/{credential_id}/revoke")
+def revoke_platform_developer_credential(credential_id: int,
+                                         user: User = Depends(require_platform_admin),
+                                         db: Session = Depends(get_db)):
+    row = db.query(DeveloperApiKey).filter_by(id=credential_id).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Developer credential not found")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(timezone.utc)
+        _audit(db, user, row.organization_id, "platform.developer_credential_revoked",
+               "developer_api_key", row.id, f"prefix={row.key_prefix}")
+        db.commit()
+    return {"id": row.id, "revoked": True, "revoked_at": row.revoked_at.isoformat()}
+
+
+class PlatformOperationIn(BaseModel):
+    title: str = Field(min_length=3, max_length=180)
+    summary: str = Field(default="", max_length=4000)
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    affected_services: list[str] = Field(default_factory=list, max_length=30)
+    owner: str = Field(default="", max_length=160)
+
+
+class PlatformOperationTransitionIn(BaseModel):
+    status: str = Field(min_length=3, max_length=32)
+    note: str = Field(min_length=3, max_length=1000)
+
+
+_OPERATION_STATES = {
+    "incidents": {"draft", "investigating", "identified", "monitoring", "resolved", "closed"},
+    "maintenance": {"draft", "scheduled", "in_progress", "completed", "cancelled"},
+}
+
+
+@router.get("/operations/{kind}")
+def list_platform_operations(kind: Literal["incidents", "maintenance"],
+                             user: User = Depends(require_platform_admin),
+                             db: Session = Depends(get_db)):
+    record_type = "incident" if kind == "incidents" else "maintenance"
+    rows = db.query(PortalWorkflowRecord).filter_by(
+        portal_key="operations", record_type=record_type
+    ).order_by(PortalWorkflowRecord.created_at.desc()).limit(500).all()
+    return [{"id": row.id, "status": row.status, "payload": row.payload or {},
+             "created_by": row.owner_user_id, "created_at": row.created_at.isoformat(),
+             "updated_at": row.updated_at.isoformat()} for row in rows]
+
+
+@router.post("/operations/{kind}", status_code=201)
+def create_platform_operation(kind: Literal["incidents", "maintenance"], payload: PlatformOperationIn,
+                              user: User = Depends(require_platform_admin),
+                              db: Session = Depends(get_db)):
+    record_type = "incident" if kind == "incidents" else "maintenance"
+    record = PortalWorkflowRecord(
+        portal_key="operations", record_type=record_type, organization_id=None,
+        owner_user_id=user.id, visibility="private", status="draft",
+        payload=payload.model_dump(mode="json"),
+    )
+    db.add(record)
+    db.flush()
+    _audit(db, user, None, f"platform.{record_type}_created", record_type, record.id, payload.title)
+    db.commit()
+    db.refresh(record)
+    return {"id": record.id, "status": record.status, "payload": record.payload}
+
+
+@router.post("/operations/{kind}/{record_id}/transition")
+def transition_platform_operation(kind: Literal["incidents", "maintenance"], record_id: int,
+                                  payload: PlatformOperationTransitionIn,
+                                  user: User = Depends(require_platform_admin),
+                                  db: Session = Depends(get_db)):
+    record_type = "incident" if kind == "incidents" else "maintenance"
+    row = db.query(PortalWorkflowRecord).filter_by(
+        id=record_id, portal_key="operations", record_type=record_type
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Operational record not found")
+    if payload.status not in _OPERATION_STATES[kind]:
+        raise HTTPException(422, "Unsupported operational status")
+    if payload.status in {"scheduled", "resolved", "closed", "completed"} and row.owner_user_id == user.id:
+        raise HTTPException(403, "A different platform administrator must perform this maker-checker transition")
+    previous = row.status
+    row.status = payload.status
+    row.payload = {**(row.payload or {}), "last_transition_note": payload.note,
+                   "last_transition_by": user.id, "last_transition_at": datetime.now(timezone.utc).isoformat()}
+    _audit(db, user, None, f"platform.{record_type}_transitioned", record_type, row.id,
+           f"{previous}->{payload.status};{payload.note.strip()}")
+    db.commit()
+    return {"id": row.id, "status": row.status, "payload": row.payload}
+
+
+@router.post("/users/{user_id}/revoke-sessions")
+def revoke_platform_user_sessions(user_id: int, reason: str = Query(min_length=3, max_length=500),
+                                  user: User = Depends(require_platform_admin),
+                                  db: Session = Depends(get_db)):
+    row = db.query(User).filter_by(id=user_id).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "User not found")
+    if row.platform_role == "root_superadmin":
+        raise HTTPException(403, "Root Superadmin sessions cannot be revoked through this endpoint")
+    row.auth_version = int(row.auth_version or 0) + 1
+    _audit(db, user, None, "platform.user_sessions_revoked", "user", row.id, reason.strip())
+    db.commit()
+    return {"user_id": row.id, "sessions_revoked": True}
