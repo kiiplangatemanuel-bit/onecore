@@ -110,6 +110,8 @@ class QueryParams:
     def getlist(self, key):
         value = self.values.get(key, [])
         return value if isinstance(value, list) else [value]
+    def keys(self):
+        return self.values.keys()
 
 
 class BranchRequest:
