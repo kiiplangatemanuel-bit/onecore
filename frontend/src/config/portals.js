@@ -33,10 +33,11 @@ export const portals = Object.freeze(Object.fromEntries(
 ));
 export function portalUrl(key, path = "") {
   const integratedPath = INTEGRATED_ROUTES[key];
+  const sameOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const base = integratedPath
-    ? (portals.publicSite || (typeof window !== "undefined" ? window.location.origin : ""))
-    : key === "app" ? (portals.app || portals.publicSite || (typeof window !== "undefined" ? window.location.origin : ""))
-    : integratedPath ? (portals.publicSite || (typeof window !== "undefined" ? window.location.origin : ""))
+    ? (portals.publicSite || sameOrigin)
+    : key === "app" ? (portals.app || portals.publicSite || sameOrigin)
+    : key === "publicSite" ? (portals.publicSite || sameOrigin)
     : portals[key];
   if (!base) return "";
   try {
