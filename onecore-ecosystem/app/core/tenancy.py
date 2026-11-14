@@ -59,6 +59,9 @@ def _action_for_request(request: Request) -> str:
         "mark-paid", "submit", "publish", "transition", "verify", "complete",
         "cancel", "reverse", "revoke", "acknowledge", "discharge", "transfer",
         "allocate", "inspect", "resolve", "confirm", "activate", "deactivate",
+        "quarantine", "recall", "expire", "dispense", "refill", "return", "custody",
+        "start-processing", "rotate-key", "qc", "calibration", "results",
+        "post-to-accounting", "reverse-accounting-journal", "employment-status",
     }
     if any(part in workflow_actions for part in path_parts):
         return "update"
