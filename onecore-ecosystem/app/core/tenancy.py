@@ -35,6 +35,7 @@ def _module_for_path(path: str) -> str | None:
         ("/api/v1/reports", "reports"),
         ("/api/v1/analytics", "reports"),
         ("/api/v1/documents", "documents"),
+        ("/api/v1/files", "documents"),
         ("/api/v1/integrations/mpesa", "accounting"),
     )
     for prefix, module_key in prefixes:
