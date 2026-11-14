@@ -132,9 +132,9 @@ def workspace_dashboard(
 ):
     """Tenant-scoped baseline KPIs; specialist widgets are added by their modules."""
     org_id = membership.organization_id
-    active_members = db.query(func.count(Membership.id)).filter_by(
+    active_members = (db.query(func.count(Membership.id)).filter_by(
         organization_id=org_id, is_active=True
-    ).scalar() or 0
+    ).scalar() or 0) if branch_scope_ids(membership) is None else None
     allowed_branches = branch_scope_ids(membership)
     branch_query = db.query(func.count(Branch.id)).filter_by(
         organization_id=org_id, is_active=True
