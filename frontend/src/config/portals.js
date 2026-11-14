@@ -12,6 +12,10 @@ const INTEGRATED_ROUTES = Object.freeze({
   status: "/status",
   events: "/events",
   admin: "/admin",
+  developers: "/developers",
+  docs: "/documentation",
+  careers: "/careers",
+  partners: "/partners",
 });
 function normalize(value) {
   if (typeof value !== "string" || !value.trim()) return "";
@@ -29,9 +33,12 @@ export const portals = Object.freeze(Object.fromEntries(
 ));
 export function portalUrl(key, path = "") {
   const integratedPath = INTEGRATED_ROUTES[key];
+  const sameOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const base = integratedPath
-    ? (portals.publicSite || (typeof window !== "undefined" ? window.location.origin : ""))
-    : key === "app" ? (portals.app || portals.publicSite) : portals[key];
+    ? (portals.publicSite || sameOrigin)
+    : key === "app" ? (portals.app || portals.publicSite || sameOrigin)
+    : key === "publicSite" ? (portals.publicSite || sameOrigin)
+    : portals[key];
   if (!base) return "";
   try {
     const destination = integratedPath ? integratedPath : path.replace(/^\//, "");

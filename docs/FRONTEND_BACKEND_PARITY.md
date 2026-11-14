@@ -1,7 +1,7 @@
 # OneCore frontend–backend parity standard
 
 **Status:** Required engineering and release standard  
-**Applies to:** The central OneCore application and its four independently deployable portals  
+**Applies to:** The single unified OneCore application and all role-controlled modules  
 **Repository:** `kiiplangatemanuel-bit/onecore`
 
 ## 1. Non-negotiable principle
@@ -72,38 +72,33 @@ For each module, retain evidence for at least:
 
 Use disposable test tenants and safe test data. Do not initiate live payments, statutory submissions, emails, or other external side effects as part of a test unless the provider's sandbox and authorization are explicitly configured.
 
-## 6. Product and portal boundaries
+## 6. Product and module boundaries
 
-OneCore has one main website/application and exactly four independently deployable portals. All products share the approved OneCore identity, API and database architecture.
+OneCore is one deployable application with one shared login/MFA experience, one FastAPI backend and one PostgreSQL database. Product areas are modules and role-controlled routes inside the same application, not separately deployed portals.
 
-### Four independent portals
+### First-class application modules
 
-| Independent portal | Required functional scope |
+| Module area | Required functional scope |
 |---|---|
-| Developers | Developer accounts, application registration, scoped credentials, webhook configuration, API usage and sandbox workflows |
-| Documentation | Public published guides, API references, tutorials and authenticated organization-specific content where applicable |
-| Partners | Public partner information and opportunities; authenticated partner profiles, referrals, leads, agreements and resources |
-| Careers | Public vacancies; private applicant profiles, applications and recruitment administration |
+| Business operations | Accounting, CRM, inventory, procurement, POS, HR and payroll |
+| Industry operations | School, hospital, pharmacy, laboratory, SACCO, property, hotel and restaurant |
+| Shared platform | Identity, organization/branch administration, subscriptions, documents, reports, notifications, workflows and integrations |
+| Digital ecosystem | Public website, developers, documentation, support, trust, community, status, events, partners and careers |
+| Governance and operations | Superadmin, security, audit, developer credentials, incidents, maintenance, monitoring, backup and recovery |
 
-### Modules integrated into the main OneCore website
+These are capabilities in the unified application. They must use the shared identity, active organization/branch context, backend authorization, API client and database. The frontend/portals source directory is legacy compatibility material only; it is not a deployment target and the CI pipeline builds only the central frontend.
 
-These are first-class modules within the main OneCore website/application. They are not independent portals, do not require separate portal deployments or standalone portal subdomains, and use the main website's navigation, identity and shared application shell:
+Superadmin is mounted at /admin and /platform inside the authenticated application. /admin/login is an alias to the same OneCore login/MFA flow, not a separate authentication portal.
 
-| Integrated module | Required functional scope |
-|---|---|
-| Support | Public enquiries and ticket submission, guest ticket access where supported, authenticated ticket history, replies and attachments |
-| Trust | Public policies and disclosures, confidential report submission and restricted case handling |
-| Community | Public content; authenticated posts, comments, groups and profiles; moderation workflows |
-| Status | Public health, incident and maintenance information; authenticated alert preferences. Health reachability must not be misrepresented as full monitoring |
-| Events | Public event discovery; authenticated registration, booking, attendance and payment status where enabled |
-| Admin / Superadmin | Integrated privileged administration area within the main OneCore application, with tenant governance, audit, support and platform operations; every privileged action must be server-authorized |
+Public pages may be accessible without signing in, but this does not create a separate application or identity system. Existing external Vercel projects, custom domains and DNS records require an owner-operated traffic and rollback review before retirement; code changes alone do not alter external hosting.
 
-A shared shell or successful Vite build does not prove that any module or portal's user journeys are complete. Each of the four independent portals and each integrated main-website module needs its own route/API/data/permission/end-to-end coverage. The five integrated modules must not be represented as separately deployable portals.
+A shared shell or successful Vite build does not prove that a module's user journeys are complete. Every module must meet the same frontend/backend parity, authorization, persistence, integration, testing, monitoring and acceptance criteria in this standard.
+
 
 ## 7. Integration and deployment rules
 
 - Browser applications call the shared FastAPI API; they do not connect with database credentials or Supabase service-role keys.
-- All portal origins must be explicitly allowlisted in CORS and portal redirect configuration. Do not use wildcard CORS for bearer-token applications.
+- The single OneCore frontend origin must be explicitly allowlisted in CORS. Legacy PKCE redirect origins are optional and are not part of the unified login path. Do not use wildcard CORS for bearer-token applications.
 - Portal SSO must use the approved short-lived, single-use PKCE handoff; never put bearer tokens in redirect URLs.
 - Every deployment must verify the frontend's configured API origin, backend health/readiness, migrations, required secrets, deep-link fallback, and public/authenticated access.
 - A successful CI build is source validation, not proof of production deployment, live provider connectivity, or user acceptance.
@@ -127,7 +122,7 @@ Never infer a higher status from file presence, route presence, a passing build,
 
 The repository contains the React/Vite central frontend, a shared portal shell in `frontend/src/PortalApp.jsx`, shared API client in `frontend/src/api.js`, and portal entry points under `frontend/portals`.
 
-The target architecture is one main OneCore website plus four independent portals (Developers, Documentation, Partners and Careers). Support, Trust, Community, Status, Events and Admin/Superadmin are routed through the main website at `/support`, `/trust`, `/community`, `/status`, `/events` and `/admin`. The main application mounts the shared portal workflow UI at these routes and synchronizes authentication state with the main app. The former six independent entry points now act as compatibility redirects to the corresponding main-site route; they are excluded from the independent portal CI matrix. The CI portal build matrix now covers only Developers, Documentation, Careers and Partners. Existing Vercel projects and DNS records for retired modules still require owner-operated retirement or redirects after production route smoke tests. These code changes establish the target deployment topology but do not prove every workflow is complete or that hosting configuration has been changed.
+The target architecture is one OneCore application, one FastAPI backend, one PostgreSQL database and one shared login/MFA experience. Business, developer, documentation, support, community, status, partner, careers and Superadmin capabilities are modules/routes within that application, not independently deployed portals or separately authenticated applications. Superadmin is available inside the authenticated application at `/platform` (with `/admin/login` as a same-login route alias). Public information routes may remain accessible without authentication, but they do not establish separate customer or staff applications. Legacy hosting projects and DNS records must be retired or redirected only after owner-approved route smoke tests; repository changes alone do not alter Vercel projects, DNS or production hosting.
 
 The central frontend README explicitly identifies some module entries as workspace shells until dedicated screens and API contracts are implemented. The backend implementation tracker also classifies several specialist business applications as partial and documents production configuration, provider, monitoring, backup/restore and UAT gates. These limitations must remain visible in delivery reporting.
 

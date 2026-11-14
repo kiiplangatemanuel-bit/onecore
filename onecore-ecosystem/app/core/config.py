@@ -160,9 +160,12 @@ class Settings(BaseSettings):
                 raise ValueError("TRUSTED_HOSTS must contain explicit hostnames in production")
             if not self.force_https:
                 raise ValueError("FORCE_HTTPS must be enabled in production")
+            # PKCE redirects remain as a compatibility mechanism for any legacy
+            # client, but the unified OneCore application needs only its own exact
+            # CORS origin and must not require separately deployed portal origins.
             redirect_origins = [item.strip() for item in self.portal_redirect_origins.split(",") if item.strip()]
-            if not redirect_origins or any(not item.startswith("https://") for item in redirect_origins):
-                raise ValueError("PORTAL_REDIRECT_ORIGINS must contain the exact HTTPS origins of the independently deployed portals")
+            if any(not item.startswith("https://") for item in redirect_origins):
+                raise ValueError("PORTAL_REDIRECT_ORIGINS, when supplied for compatibility, must contain exact HTTPS origins")
         if production and self.integration_object_storage_enabled and not self.support_attachment_scanning_enabled:
             raise ValueError("SUPPORT_ATTACHMENT_SCANNING_ENABLED must be true when production Support object storage is enabled")
         if self.support_attachment_scanning_enabled:

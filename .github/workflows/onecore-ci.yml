@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/unified-platform-foundation-admin"]
     paths:
       - "onecore-ecosystem/**"
       - "frontend/**"
@@ -160,22 +160,4 @@ jobs:
         run: npm install
       - name: Build Vercel frontend
         working-directory: frontend
-        run: npm run build
-  portal-build:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        portal: [developers, docs, careers, partners]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install portal dependencies
-        working-directory: frontend/portals/${{ matrix.portal }}
-        run: npm install
-      - name: Build independent portal
-        working-directory: frontend/portals/${{ matrix.portal }}
         run: npm run build
