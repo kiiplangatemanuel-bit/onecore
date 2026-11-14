@@ -72,33 +72,28 @@ For each module, retain evidence for at least:
 
 Use disposable test tenants and safe test data. Do not initiate live payments, statutory submissions, emails, or other external side effects as part of a test unless the provider's sandbox and authorization are explicitly configured.
 
-## 6. Product and portal boundaries
+## 6. Product and module boundaries
 
-OneCore has one main website/application and exactly four independently deployable portals. All products share the approved OneCore identity, API and database architecture.
+OneCore is one deployable application with one shared login/MFA experience, one FastAPI backend and one PostgreSQL database. Product areas are modules and role-controlled routes inside the same application, not separately deployed portals.
 
-### Four independent portals
+### First-class application modules
 
-| Independent portal | Required functional scope |
+| Module area | Required functional scope |
 |---|---|
-| Developers | Developer accounts, application registration, scoped credentials, webhook configuration, API usage and sandbox workflows |
-| Documentation | Public published guides, API references, tutorials and authenticated organization-specific content where applicable |
-| Partners | Public partner information and opportunities; authenticated partner profiles, referrals, leads, agreements and resources |
-| Careers | Public vacancies; private applicant profiles, applications and recruitment administration |
+| Business operations | Accounting, CRM, inventory, procurement, POS, HR and payroll |
+| Industry operations | School, hospital, pharmacy, laboratory, SACCO, property, hotel and restaurant |
+| Shared platform | Identity, organization/branch administration, subscriptions, documents, reports, notifications, workflows and integrations |
+| Digital ecosystem | Public website, developers, documentation, support, trust, community, status, events, partners and careers |
+| Governance and operations | Superadmin, security, audit, developer credentials, incidents, maintenance, monitoring, backup and recovery |
 
-### Modules integrated into the main OneCore website
+These are capabilities in the unified application. They must use the shared identity, active organization/branch context, backend authorization, API client and database. The frontend/portals source directory is legacy compatibility material only; it is not a deployment target and the CI pipeline builds only the central frontend.
 
-These are first-class modules within the main OneCore website/application. They are not independent portals, do not require separate portal deployments or standalone portal subdomains, and use the main website's navigation, identity and shared application shell:
+Superadmin is mounted at /platform inside the authenticated application. /admin/login is an alias to the same OneCore login/MFA flow, not a separate authentication portal.
 
-| Integrated module | Required functional scope |
-|---|---|
-| Support | Public enquiries and ticket submission, guest ticket access where supported, authenticated ticket history, replies and attachments |
-| Trust | Public policies and disclosures, confidential report submission and restricted case handling |
-| Community | Public content; authenticated posts, comments, groups and profiles; moderation workflows |
-| Status | Public health, incident and maintenance information; authenticated alert preferences. Health reachability must not be misrepresented as full monitoring |
-| Events | Public event discovery; authenticated registration, booking, attendance and payment status where enabled |
-| Admin / Superadmin | Integrated privileged administration area within the main OneCore application, with tenant governance, audit, support and platform operations; every privileged action must be server-authorized |
+Public pages may be accessible without signing in, but this does not create a separate application or identity system. Existing external Vercel projects, custom domains and DNS records require an owner-operated traffic and rollback review before retirement; code changes alone do not alter external hosting.
 
-A shared shell or successful Vite build does not prove that any module or portal's user journeys are complete. Each of the four independent portals and each integrated main-website module needs its own route/API/data/permission/end-to-end coverage. The five integrated modules must not be represented as separately deployable portals.
+A shared shell or successful Vite build does not prove that a module's user journeys are complete. Every module must meet the same frontend/backend parity, authorization, persistence, integration, testing, monitoring and acceptance criteria in this standard.
+
 
 ## 7. Integration and deployment rules
 
