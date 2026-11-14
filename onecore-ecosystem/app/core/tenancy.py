@@ -67,6 +67,53 @@ def _action_for_request(request: Request) -> str:
     return "create"
 
 
+
+def _collect_branch_ids(value, found: set[str]) -> None:
+    """Collect explicit branch selectors from nested JSON request payloads."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized in {"branch_id", "branch_ids"}:
+                if isinstance(item, (list, tuple, set)):
+                    found.update(str(entry) for entry in item if entry is not None and str(entry).strip())
+                elif item is not None and str(item).strip():
+                    found.add(str(item))
+            elif isinstance(item, (dict, list, tuple)):
+                _collect_branch_ids(item, found)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_branch_ids(item, found)
+
+
+async def _enforce_requested_branch_scope(request: Request, membership: Membership) -> None:
+    """Reject branch selectors outside the active membership's explicit scope."""
+    requested: set[str] = set()
+    for name in ("branch_id", "branch_ids"):
+        requested.update(value for value in request.query_params.getlist(name) if value)
+    header = request.headers.get("x-branch-id")
+    if header:
+        requested.add(header)
+    for key in ("branch_id", "branch_ids"):
+        value = request.path_params.get(key)
+        if isinstance(value, (list, tuple, set)):
+            requested.update(str(item) for item in value if item is not None)
+        elif value is not None:
+            requested.add(str(value))
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            _collect_branch_ids(body, requested)
+        except (ValueError, TypeError):
+            # Malformed JSON is rejected by FastAPI's body validation; it must
+            # not cause this authorization dependency to silently grant scope.
+            pass
+    outside = sorted(value for value in requested if not can_access_branch(membership, value))
+    if outside:
+        raise HTTPException(404, "Branch not found")
+
+
+
 def _module_entitlements(value) -> set[str]:
     if not isinstance(value, dict):
         return set()
@@ -147,7 +194,5 @@ def active_membership(
         action = _action_for_request(request)
         if not has_module_permission(membership, module_key, action):
             raise HTTPException(403, "Your organization role does not grant permission for this operation")
-    requested_branch = request.headers.get("x-branch-id") or request.query_params.get("branch_id")
-    if requested_branch and not can_access_branch(membership, requested_branch):
-        raise HTTPException(404, "Branch not found")
+    await _enforce_requested_branch_scope(request, membership)
     return membership
