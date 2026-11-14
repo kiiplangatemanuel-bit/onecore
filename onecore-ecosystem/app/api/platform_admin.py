@@ -475,8 +475,9 @@ def create_platform_developer_credential(
     ).first()
     if not organization:
         raise HTTPException(404, "Active organization not found")
-    credential_owner = db.query(Membership).filter_by(
-        organization_id=organization.id, role="org_admin", is_active=True
+    credential_owner = db.query(Membership).join(User, User.id == Membership.user_id).filter(
+        Membership.organization_id == organization.id, Membership.role == "org_admin",
+        Membership.is_active.is_(True), User.is_active.is_(True),
     ).order_by(Membership.id.asc()).first()
     if not credential_owner:
         raise HTTPException(409, "Assign an active organization administrator before issuing developer credentials")
