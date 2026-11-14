@@ -7,6 +7,7 @@ from app.core.authorization import (
     require_module_permission,
 )
 from app.api.workspace import _entitled_modules
+from app.core.tenancy import _module_for_path, _module_entitlements
 
 
 def member(role="org_admin", scope="*"):
@@ -45,3 +46,20 @@ def test_entitlement_parser_supports_list_and_boolean_map_only():
     assert _entitled_modules({"modules": {"accounting": True, "inventory": False}}) == {"accounting"}
     assert _entitled_modules({}) == set()
     assert _entitled_modules({"modules": "all"}) == set()
+
+
+
+def test_api_namespace_resolves_to_single_module_entitlement_keys():
+    assert _module_for_path("/api/v1/accounting/journals") == "accounting"
+    assert _module_for_path("/api/v1/inventory/products") == "inventory"
+    assert _module_for_path("/api/v1/healthcare/patients") == "hospital"
+    assert _module_for_path("/api/v1/sacco/members") == "sacco"
+    assert _module_for_path("/api/v1/records/accounting") == "accounting"
+    assert _module_for_path("/api/v1/workspace/context") is None
+
+
+def test_effective_module_entitlement_parser_is_fail_closed():
+    assert _module_entitlements({"modules": ["accounting", "reports"]}) == {"accounting", "reports"}
+    assert _module_entitlements({"modules": {"accounting": True, "pos": False}}) == {"accounting"}
+    assert _module_entitlements({"modules": "all"}) == set()
+    assert _module_entitlements({}) == set()
