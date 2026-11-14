@@ -612,24 +612,18 @@ def platform_operational_readiness(
     except Exception:
         db.rollback()
         database_reachable = False
-    backup_storage_keys = (
-        "ONECORE_BACKUP_S3_BUCKET", "ONECORE_BACKUP_AWS_ACCESS_KEY_ID",
-        "ONECORE_BACKUP_AWS_SECRET_ACCESS_KEY", "ONECORE_BACKUP_AWS_REGION",
-    )
-    configured_storage = [key for key in backup_storage_keys if os.getenv(key)]
     backup_database_configured = bool(
         os.getenv("ONECORE_BACKUP_DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
     )
     restore_database_configured = bool(os.getenv("ONECORE_RESTORE_DATABASE_URL"))
     return {
-        "database": {"configured": True, "reachable": database_reachable},
+        "database": {"configured": bool(os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")), "reachable": database_reachable},
         "backup": {
             "database_url_configured": backup_database_configured,
-            "storage_configured": len(configured_storage) == len(backup_storage_keys),
-            "storage_configuration_items_present": len(configured_storage),
-            "storage_configuration_items_required": len(backup_storage_keys),
+            "remote_archive_storage_configured": False,
+            "archive_storage_mode": "local_cli_output",
             "restore_target_configured": restore_database_configured,
-            "evidence": "Runtime environment configuration only; this endpoint does not verify scheduled workflow secrets, backup artifacts, checksums or restore drills.",
+            "evidence": "Runtime configuration only. The current backup script writes a local archive; durable remote object storage, scheduled execution, artifact checksums and restore drills are not verified by this endpoint.",
         },
         "security": {
             "mfa_encryption_key_configured": bool(os.getenv("MFA_ENCRYPTION_KEY")),
@@ -638,6 +632,10 @@ def platform_operational_readiness(
         "monitoring": {
             "healthcheck_url_configured": bool(os.getenv("ONECORE_HEALTHCHECK_URL")),
             "evidence": "The API runtime cannot inspect repository-level GitHub Actions secrets or monitoring run history.",
+        },
+        "maintenance": {
+            "global_request_gate_enabled": False,
+            "evidence": "The current maintenance register records and approves windows; it does not yet gate all API, worker or database writes globally.",
         },
     }
 

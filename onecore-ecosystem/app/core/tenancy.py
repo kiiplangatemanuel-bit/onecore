@@ -7,6 +7,7 @@ from app.core.host_routing import organization_for_host
 from app.core.authorization import has_module_permission, can_access_branch
 from app.core.platform_commerce_models import OrganizationSubscription, SubscriptionPlan
 from datetime import datetime, timezone
+import json
 
 
 def _module_for_path(path: str) -> str | None:
@@ -94,8 +95,13 @@ def _collect_branch_ids(value, found: set[str]) -> None:
             _collect_branch_ids(item, found)
 
 
-async def _enforce_requested_branch_scope(request: Request, membership: Membership) -> None:
-    """Reject branch selectors outside the active membership's explicit scope."""
+def _enforce_requested_branch_scope(request: Request, membership: Membership) -> None:
+    """Reject explicit branch selectors outside the active membership scope.
+
+    FastAPI parses declared JSON/form bodies before resolving dependencies. Read
+    those cached parsed values here so this remains a synchronous dependency and
+    does not change the existing SQLAlchemy session/dependency execution contract.
+    """
     requested: set[str] = set()
     for name in request.query_params.keys():
         normalized = name.lower()
@@ -115,22 +121,23 @@ async def _enforce_requested_branch_scope(request: Request, membership: Membersh
                 requested.add(str(value))
     content_type = request.headers.get("content-type", "").lower()
     if "application/json" in content_type:
-        try:
-            body = await request.json()
+        body = getattr(request, "_json", None)
+        if body is None:
+            raw_body = getattr(request, "_body", None)
+            if raw_body:
+                try:
+                    body = json.loads(raw_body)
+                except (ValueError, TypeError):
+                    body = None
+        if body is not None:
             _collect_branch_ids(body, requested)
-        except (ValueError, TypeError):
-            # Malformed JSON is rejected by FastAPI's body validation; it must
-            # not cause this authorization dependency to silently grant scope.
-            pass
     elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        try:
-            form = await request.form()
+        form = getattr(request, "_form", None)
+        if form is not None:
             for name in form.keys():
                 normalized = str(name).lower()
                 if normalized in {"branch_id", "branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
                     requested.update(str(value) for value in form.getlist(name) if value is not None and str(value).strip())
-        except (ValueError, TypeError):
-            pass
     outside = sorted(value for value in requested if not can_access_branch(membership, value))
     if outside:
         raise HTTPException(404, "Branch not found")
@@ -185,7 +192,7 @@ def _enforce_module_entitlement(db: Session, membership: Membership, module_key:
         raise HTTPException(403, "This organization subscription does not include the requested module")
 
 
-async def active_membership(
+def active_membership(
     request: Request,
     x_organization_id: int | None = Header(default=None, alias="X-Organization-ID"),
     user: User = Depends(current_user),
@@ -217,5 +224,5 @@ async def active_membership(
         action = _action_for_request(request)
         if not has_module_permission(membership, module_key, action):
             raise HTTPException(403, "Your organization role does not grant permission for this operation")
-    await _enforce_requested_branch_scope(request, membership)
+    _enforce_requested_branch_scope(request, membership)
     return membership
