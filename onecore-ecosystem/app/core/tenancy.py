@@ -4,31 +4,30 @@ from app.core.database import get_db
 from app.core.models import User, Membership, Organization
 from app.core.security import current_user, set_verified_organization_context
 from app.core.host_routing import organization_for_host
-from app.core.authorization import has_module_permission
+from app.core.authorization import has_module_permission, can_access_branch
 from app.core.platform_commerce_models import OrganizationSubscription, SubscriptionPlan
 from datetime import datetime, timezone
 
 
 def _module_for_path(path: str) -> str | None:
-    """Map API namespaces to the single entitlement key used by the workspace."""
-    normalized = (path or "").lower()
-    if normalized.startswith("/api/v1/records/"):
-        parts = normalized.split("/")
-        return parts[4] if len(parts) > 4 else None
+    """Map every business API namespace to its single workspace entitlement."""
+    normalized = (path or "").lower().split("?", 1)[0].rstrip("/")
+    # More specific prefixes must precede their parent namespaces.
     prefixes = (
+        ("/api/v1/healthcare/pharmacy", "pharmacy"),
+        ("/api/v1/healthcare/laboratory", "laboratory"),
+        ("/api/v1/healthcare", "hospital"),
+        ("/api/v1/pharmacy", "pharmacy"),
+        ("/api/v1/lab", "laboratory"),
+        ("/api/v1/school", "school"),
+        ("/api/v1/hr", "hr"),
+        ("/api/v1/payroll", "payroll"),
         ("/api/v1/accounting", "accounting"),
         ("/api/v1/finance", "accounting"),
         ("/api/v1/pos", "pos"),
         ("/api/v1/inventory", "inventory"),
         ("/api/v1/procurement", "procurement"),
         ("/api/v1/crm", "crm"),
-        ("/api/v1/school", "school"),
-        ("/api/v1/healthcare", "hospital"),
-        ("/api/v1/pharmacy-lab", "pharmacy"),
-        ("/api/v1/pharmacy", "pharmacy"),
-        ("/api/v1/lab", "laboratory"),
-        ("/api/v1/hr", "hr"),
-        ("/api/v1/payroll", "payroll"),
         ("/api/v1/sacco", "sacco"),
         ("/api/v1/property", "property"),
         ("/api/v1/hotel", "hotel"),
@@ -36,11 +35,36 @@ def _module_for_path(path: str) -> str | None:
         ("/api/v1/reports", "reports"),
         ("/api/v1/analytics", "reports"),
         ("/api/v1/documents", "documents"),
+        ("/api/v1/integrations/mpesa", "accounting"),
     )
     for prefix, module_key in prefixes:
         if normalized == prefix or normalized.startswith(prefix + "/"):
             return module_key
+    if normalized.startswith("/api/v1/records/"):
+        parts = normalized.split("/")
+        return parts[4] if len(parts) > 4 else None
     return None
+
+
+def _action_for_request(request: Request) -> str:
+    """Translate HTTP verbs and state-changing workflow actions into RBAC actions."""
+    method = request.method.upper()
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return "read"
+    if method == "DELETE":
+        return "delete"
+    path_parts = [part for part in request.url.path.lower().split("/") if part]
+    workflow_actions = {
+        "approve", "decision", "review", "validate", "settle", "record-payment",
+        "mark-paid", "submit", "publish", "transition", "verify", "complete",
+        "cancel", "reverse", "revoke", "acknowledge", "discharge", "transfer",
+        "allocate", "inspect", "resolve", "confirm", "activate", "deactivate",
+    }
+    if any(part in workflow_actions for part in path_parts):
+        return "update"
+    if method in {"PUT", "PATCH"}:
+        return "update"
+    return "create"
 
 
 def _module_entitlements(value) -> set[str]:
@@ -120,4 +144,10 @@ def active_membership(
     module_key = _module_for_path(request.url.path)
     if module_key:
         _enforce_module_entitlement(db, membership, module_key)
+        action = _action_for_request(request)
+        if not has_module_permission(membership, module_key, action):
+            raise HTTPException(403, "Your organization role does not grant permission for this operation")
+    requested_branch = request.headers.get("x-branch-id") or request.query_params.get("branch_id")
+    if requested_branch and not can_access_branch(membership, requested_branch):
+        raise HTTPException(404, "Branch not found")
     return membership
