@@ -3,7 +3,7 @@ import { api } from "./api";
 
 const MODULES = ["accounting","crm","inventory","procurement","pos","hr","payroll","school","hospital","pharmacy","laboratory","sacco","property","hotel","restaurant","reports","documents"];
 const TABS = ["overview","organizations","subscriptions","developers","security","incidents","maintenance","audit"];
-const label = value => String(value || "").replaceAll("_"," ").replace(/\b\w/g, c => c.toUpperCase());
+const label = value => String(value || "").replaceAll("_"," ").split(" ").map(word => word ? word.charAt(0).toUpperCase()+word.slice(1) : word).join(" ");
 
 function Panel({title,children,action}) {
   return <section className="panel"><div className="panel-head"><div><h3>{title}</h3></div>{action}</div>{children}</section>;
