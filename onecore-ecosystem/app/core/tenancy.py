@@ -122,6 +122,15 @@ async def _enforce_requested_branch_scope(request: Request, membership: Membersh
             # Malformed JSON is rejected by FastAPI's body validation; it must
             # not cause this authorization dependency to silently grant scope.
             pass
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        try:
+            form = await request.form()
+            for name in form.keys():
+                normalized = str(name).lower()
+                if normalized in {"branch_id", "branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
+                    requested.update(str(value) for value in form.getlist(name) if value is not None and str(value).strip())
+        except (ValueError, TypeError):
+            pass
     outside = sorted(value for value in requested if not can_access_branch(membership, value))
     if outside:
         raise HTTPException(404, "Branch not found")
