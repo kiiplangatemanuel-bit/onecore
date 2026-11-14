@@ -86,6 +86,9 @@ def test_http_methods_and_workflow_actions_resolve_to_rbac_actions():
     assert _action_for_request(request("PATCH", "/api/v1/accounting/journals/1")) == "update"
     assert _action_for_request(request("POST", "/api/v1/payroll/runs/1/approve")) == "update"
     assert _action_for_request(request("POST", "/api/v1/sacco/withdrawals/1/decision")) == "update"
+    assert _action_for_request(request("POST", "/api/v1/payroll/runs/1/post-to-accounting")) == "update"
+    assert _action_for_request(request("POST", "/api/v1/pharmacy/batches/1/quarantine")) == "update"
+    assert _action_for_request(request("POST", "/api/v1/lab/orders/1/results")) == "update"
     assert _action_for_request(request("DELETE", "/api/v1/inventory/products/1")) == "delete"
 
 
@@ -94,6 +97,8 @@ def test_approver_roles_get_only_their_narrow_workflow_update_rights():
     assert not has_module_permission(member("payroll_approver"), "payroll", "create")
     assert has_module_permission(member("hr_manager"), "hr", "update")
     assert not has_module_permission(member("hr_manager"), "payroll", "create")
+    assert has_module_permission(member("payroll_manager"), "payroll", "create")
+    assert has_module_permission(member("payroll_accounting"), "accounting", "create")
 
 
 
