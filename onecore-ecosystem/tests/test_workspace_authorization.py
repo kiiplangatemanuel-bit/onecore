@@ -126,7 +126,7 @@ def test_branch_scope_checks_nested_body_query_header_and_path_selectors():
     scoped = member("staff", "north,south")
     allowed = BranchRequest(
         body={"transfer": {"source_branch_id": "north", "branch_id": "south"}},
-        query={"branch_ids": ["north", "south"]},
+        query={"branch_ids": ["north", "south"], "source_branch_id": "north"},
         headers={"content-type": "application/json", "x-branch-id": "north"},
         path={"branch_id": "south"},
     )
