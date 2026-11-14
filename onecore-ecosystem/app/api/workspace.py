@@ -135,13 +135,23 @@ def workspace_dashboard(
     active_members = db.query(func.count(Membership.id)).filter_by(
         organization_id=org_id, is_active=True
     ).scalar() or 0
-    active_branches = db.query(func.count(Branch.id)).filter_by(
+    allowed_branches = branch_scope_ids(membership)
+    branch_query = db.query(func.count(Branch.id)).filter_by(
         organization_id=org_id, is_active=True
-    ).scalar() or 0
-    records = db.query(func.count(Record.id)).filter_by(
-        organization_id=org_id
-    ).scalar() or 0
-    recent = db.query(AuditEvent).filter_by(
+    )
+    record_query = db.query(func.count(Record.id)).filter_by(organization_id=org_id)
+    if allowed_branches is not None:
+        if allowed_branches:
+            branch_query = branch_query.filter(Branch.id.in_(allowed_branches))
+            record_query = record_query.filter(Record.branch_id.in_(allowed_branches))
+        else:
+            branch_query = branch_query.filter(Branch.id == "__no_branch_access__")
+            record_query = record_query.filter(Record.id == -1)
+    active_branches = branch_query.scalar() or 0
+    records = record_query.scalar() or 0
+    # AuditEvent has no branch key; omit it for restricted users rather than
+    # leaking activity from branches outside their membership scope.
+    recent = [] if allowed_branches is not None else db.query(AuditEvent).filter_by(
         organization_id=org_id
     ).order_by(AuditEvent.created_at.desc()).limit(8).all()
     return {
