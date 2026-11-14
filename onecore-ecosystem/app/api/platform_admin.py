@@ -208,3 +208,141 @@ def update_plan(plan_id: int, payload: PlanIn, user: User = Depends(require_plat
     _audit(db, user, None, "platform.subscription_plan_updated", "subscription_plan", row.id, row.code)
     db.commit(); db.refresh(row)
     return _plan(row)
+
+
+class OrganizationCreateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    slug: str = Field(min_length=2, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    owner_user_id: int
+    industry: str = Field(default="general", min_length=2, max_length=100)
+    country: str = Field(default="KE", pattern=r"^[A-Z]{2}$")
+    currency: str = Field(default="KES", pattern=r"^[A-Z]{3}$")
+    timezone: str = Field(default="Africa/Nairobi", min_length=1, max_length=80)
+
+
+@router.post("/organizations", status_code=201)
+def create_platform_organization(payload: OrganizationCreateIn,
+                                 user: User = Depends(require_platform_admin),
+                                 db: Session = Depends(get_db)):
+    owner = db.query(User).filter_by(id=payload.owner_user_id, is_active=True).first()
+    if not owner:
+        raise HTTPException(404, "Active owner user not found")
+    if db.query(Organization).filter_by(slug=payload.slug).first():
+        raise HTTPException(409, "Organization slug already exists")
+    row = Organization(name=payload.name.strip(), slug=payload.slug,
+                       owner_user_id=owner.id, industry=payload.industry.strip().lower(),
+                       country=payload.country, currency=payload.currency,
+                       timezone=payload.timezone, is_active=True)
+    db.add(row)
+    db.flush()
+    membership = Membership(user_id=owner.id, organization_id=row.id,
+                            role="org_admin", branch_scope="*", is_active=True)
+    db.add(membership)
+    _audit(db, user, row.id, "platform.organization_created", "organization", row.id,
+           f"owner_user_id={owner.id};industry={row.industry}")
+    db.commit()
+    db.refresh(row)
+    return _org(row, 1)
+
+
+class MembershipAdminIn(BaseModel):
+    role: str = Field(min_length=2, max_length=50)
+    branch_scope: str = Field(default="*", max_length=500)
+    is_active: bool = True
+
+
+@router.get("/organizations/{organization_id}/memberships")
+def list_organization_memberships(organization_id: int,
+                                  user: User = Depends(require_platform_admin),
+                                  db: Session = Depends(get_db)):
+    if not db.get(Organization, organization_id):
+        raise HTTPException(404, "Organization not found")
+    rows = db.query(Membership).filter_by(organization_id=organization_id).order_by(Membership.id).all()
+    users = {x.id: x for x in db.query(User).filter(
+        User.id.in_([m.user_id for m in rows])).all()} if rows else {}
+    return [{"id": m.id, "user_id": m.user_id,
+             "email": users[m.user_id].email if m.user_id in users else None,
+             "full_name": users[m.user_id].full_name if m.user_id in users else None,
+             "role": m.role, "branch_scope": m.branch_scope, "is_active": m.is_active}
+            for m in rows]
+
+
+@router.patch("/memberships/{membership_id}")
+def update_platform_membership(membership_id: int, payload: MembershipAdminIn,
+                               user: User = Depends(require_platform_admin),
+                               db: Session = Depends(get_db)):
+    from app.core.models import Branch
+    from app.core.authorization import ROLE_PERMISSIONS
+    row = db.query(Membership).filter_by(id=membership_id).with_for_update().first()
+    if not row:
+        raise HTTPException(404, "Membership not found")
+    if payload.role not in ROLE_PERMISSIONS:
+        raise HTTPException(422, "Unsupported organization role")
+    scope = payload.branch_scope.strip()
+    if scope != "*":
+        ids = [x.strip() for x in scope.split(",")]
+        if not ids or len(ids) != len(set(ids)) or any(not x for x in ids):
+            raise HTTPException(422, "Branch scope must contain unique branch IDs")
+        found = {x[0] for x in db.query(Branch.id).filter(
+            Branch.organization_id == row.organization_id,
+            Branch.is_active.is_(True), Branch.id.in_(ids)).all()}
+        if found != set(ids):
+            raise HTTPException(422, "Branch scope must reference active branches in this organization")
+        scope = ",".join(ids)
+    row.role = payload.role
+    row.branch_scope = scope
+    row.is_active = payload.is_active
+    _audit(db, user, row.organization_id, "platform.membership_updated",
+           "membership", row.id,
+           f"role={row.role};branch_scope={row.branch_scope};is_active={row.is_active}")
+    db.commit()
+    return {"id": row.id, "user_id": row.user_id, "organization_id": row.organization_id,
+            "role": row.role, "branch_scope": row.branch_scope, "is_active": row.is_active}
+
+
+class OrganizationSubscriptionGrantIn(BaseModel):
+    plan_id: int
+    status: Literal["active", "trialing", "suspended"] = "active"
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+@router.put("/organizations/{organization_id}/subscription")
+def grant_organization_subscription(organization_id: int, payload: OrganizationSubscriptionGrantIn,
+                                    user: User = Depends(require_platform_admin),
+                                    db: Session = Depends(get_db)):
+    org = db.query(Organization).filter_by(id=organization_id).with_for_update().first()
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    plan = db.query(SubscriptionPlan).filter_by(id=payload.plan_id, is_active=True).first()
+    if not plan:
+        raise HTTPException(404, "Active subscription plan not found")
+    starts = payload.starts_at or datetime.now(timezone.utc)
+    ends = payload.ends_at
+    if starts.tzinfo is None:
+        starts = starts.replace(tzinfo=timezone.utc)
+    if ends is not None and ends.tzinfo is None:
+        ends = ends.replace(tzinfo=timezone.utc)
+    if ends is not None and ends <= starts:
+        raise HTTPException(422, "Subscription end must be after its start")
+    previous = db.query(OrganizationSubscription).filter(
+        OrganizationSubscription.organization_id == organization_id,
+        OrganizationSubscription.status.in_(("active", "trialing", "pending_payment", "past_due")),
+    ).with_for_update().all()
+    for old in previous:
+        old.status = "superseded"
+        old.auto_renew = False
+    row = OrganizationSubscription(
+        organization_id=organization_id, plan_id=plan.id, status=payload.status,
+        amount=plan.amount, currency=plan.currency, billing_interval=plan.interval,
+        starts_at=starts, ends_at=ends, auto_renew=False, created_by=user.id,
+    )
+    db.add(row)
+    _audit(db, user, organization_id, "platform.organization_entitlements_granted",
+           "organization_subscription", organization_id,
+           f"plan={plan.code};status={payload.status};modules={sorted((plan.entitlements or {}).get('modules', []))}")
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "organization_id": organization_id, "plan": _plan(plan),
+            "status": row.status, "starts_at": row.starts_at.isoformat(),
+            "ends_at": row.ends_at.isoformat() if row.ends_at else None}
