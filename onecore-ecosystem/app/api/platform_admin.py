@@ -622,7 +622,7 @@ def platform_operational_readiness(
     )
     restore_database_configured = bool(os.getenv("ONECORE_RESTORE_DATABASE_URL"))
     return {
-        "database": {"configured": True, "reachable": database_reachable},
+        "database": {"configured": bool(os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")), "reachable": database_reachable},
         "backup": {
             "database_url_configured": backup_database_configured,
             "storage_configured": len(configured_storage) == len(backup_storage_keys),
