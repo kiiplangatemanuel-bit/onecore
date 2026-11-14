@@ -80,10 +80,14 @@ def workspace_context(
     subscription, plan = _current_plan(db, membership.organization_id)
     entitlements = (subscription.entitlements_override if subscription and subscription.entitlements_override is not None else ((plan.entitlements or {}) if plan else {}))
     entitled = _entitled_modules(entitlements)
+    has_subscription_history = db.query(OrganizationSubscription.id).filter_by(
+        organization_id=membership.organization_id
+    ).first() is not None
+    legacy_access = not subscription and not has_subscription_history
     modules = []
     for item in MODULES:
         key = item["key"]
-        if key == "dashboard" or (subscription and ("*" in entitled or key in entitled)):
+        if key == "dashboard" or (legacy_access or (subscription and ("*" in entitled or key in entitled))):
             if key == "dashboard" or has_module_permission(membership, key, "read"):
                 modules.append(item)
 
@@ -115,7 +119,7 @@ def workspace_context(
                          "plan": plan.code if plan else None,
                          "ends_at": subscription.ends_at.isoformat() if subscription.ends_at else None}
                         if subscription else None),
-        "entitlements": entitlements,
+        "entitlements": ({"modules": ["*"], "legacy_access": True} if legacy_access else entitlements),
         "modules": modules,
     }
 
