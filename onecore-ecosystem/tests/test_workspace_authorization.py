@@ -7,7 +7,7 @@ from app.core.authorization import (
     require_module_permission,
 )
 from app.api.workspace import _entitled_modules
-from app.core.tenancy import _module_for_path, _module_entitlements
+from app.core.tenancy import _module_for_path, _module_entitlements, _action_for_request
 
 
 def member(role="org_admin", scope="*"):
@@ -65,3 +65,31 @@ def test_effective_module_entitlement_parser_is_fail_closed():
     assert _module_entitlements({"modules": {"accounting": True, "pos": False}}) == {"accounting"}
     assert _module_entitlements({"modules": "all"}) == set()
     assert _module_entitlements({}) == set()
+
+
+
+def request(method, path):
+    return SimpleNamespace(method=method, url=SimpleNamespace(path=path))
+
+
+def test_business_api_routes_resolve_school_hr_and_payroll_entitlements():
+    assert _module_for_path("/api/v1/school/fees/payments") == "school"
+    assert _module_for_path("/api/v1/hr/employees") == "hr"
+    assert _module_for_path("/api/v1/payroll/statutory-batches") == "payroll"
+    assert _module_for_path("/api/v1/integrations/mpesa/payments") == "accounting"
+
+
+def test_http_methods_and_workflow_actions_resolve_to_rbac_actions():
+    assert _action_for_request(request("GET", "/api/v1/accounting/journals")) == "read"
+    assert _action_for_request(request("POST", "/api/v1/accounting/journals")) == "create"
+    assert _action_for_request(request("PATCH", "/api/v1/accounting/journals/1")) == "update"
+    assert _action_for_request(request("POST", "/api/v1/payroll/runs/1/approve")) == "update"
+    assert _action_for_request(request("POST", "/api/v1/sacco/withdrawals/1/decision")) == "update"
+    assert _action_for_request(request("DELETE", "/api/v1/inventory/products/1")) == "delete"
+
+
+def test_approver_roles_get_only_their_narrow_workflow_update_rights():
+    assert has_module_permission(member("payroll_approver"), "payroll", "update")
+    assert not has_module_permission(member("payroll_approver"), "payroll", "create")
+    assert has_module_permission(member("hr_manager"), "hr", "update")
+    assert not has_module_permission(member("hr_manager"), "payroll", "create")
