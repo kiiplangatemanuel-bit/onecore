@@ -475,10 +475,15 @@ def create_platform_developer_credential(
     ).first()
     if not organization:
         raise HTTPException(404, "Active organization not found")
+    credential_owner = db.query(Membership).filter_by(
+        organization_id=organization.id, role="org_admin", is_active=True
+    ).order_by(Membership.id.asc()).first()
+    if not credential_owner:
+        raise HTTPException(409, "Assign an active organization administrator before issuing developer credentials")
     raw_key = f"oc_{'live' if payload.environment == 'production' else 'test'}_{secrets.token_urlsafe(36)}"
     row = DeveloperApiKey(
         organization_id=organization.id,
-        created_by_user_id=user.id,
+        created_by_user_id=credential_owner.user_id,
         name=payload.name.strip(),
         key_prefix=raw_key[:16],
         secret_hash=hashlib.sha256(raw_key.encode("utf-8")).hexdigest(),
