@@ -562,6 +562,37 @@ _OPERATION_STATES = {
 }
 
 
+_OPERATION_TRANSITIONS = {
+    "incidents": {
+        "draft": {"investigating"},
+        "investigating": {"identified"},
+        "identified": {"monitoring"},
+        "monitoring": {"resolved"},
+        "resolved": {"closed"},
+        "closed": set(),
+    },
+    "maintenance": {
+        "draft": {"scheduled", "cancelled"},
+        "scheduled": {"in_progress", "cancelled"},
+        "in_progress": {"completed", "cancelled"},
+        "completed": set(),
+        "cancelled": set(),
+    },
+}
+
+
+def _validate_operation_transition(kind: str, row, next_status: str, actor_id: int) -> None:
+    current = row.status
+    if next_status not in _OPERATION_STATES[kind]:
+        raise HTTPException(422, "Unsupported operational status")
+    if next_status not in _OPERATION_TRANSITIONS[kind].get(current, set()):
+        raise HTTPException(409, f"Invalid {kind[:-1]} transition: {current} -> {next_status}")
+    last_actor = (row.payload or {}).get("last_transition_by")
+    maker_checker_states = {"scheduled", "in_progress", "resolved", "closed", "completed"}
+    if next_status in maker_checker_states and actor_id in {row.owner_user_id, last_actor}:
+        raise HTTPException(403, "A different platform administrator must approve this operational transition")
+
+
 @router.get("/operations/{kind}")
 def list_platform_operations(kind: Literal["incidents", "maintenance"],
                              user: User = Depends(require_platform_admin),
@@ -604,10 +635,7 @@ def transition_platform_operation(kind: Literal["incidents", "maintenance"], rec
     ).with_for_update().first()
     if not row:
         raise HTTPException(404, "Operational record not found")
-    if payload.status not in _OPERATION_STATES[kind]:
-        raise HTTPException(422, "Unsupported operational status")
-    if payload.status in {"scheduled", "resolved", "closed", "completed"} and row.owner_user_id == user.id:
-        raise HTTPException(403, "A different platform administrator must perform this maker-checker transition")
+    _validate_operation_transition(kind, row, payload.status, user.id)
     previous = row.status
     row.status = payload.status
     row.payload = {**(row.payload or {}), "last_transition_note": payload.note,
