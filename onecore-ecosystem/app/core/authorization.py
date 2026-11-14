@@ -16,16 +16,16 @@ ROLE_PERMISSIONS = {
     "teacher": {"read", "create", "update"},
     "guardian": {"read"},
     "school_admin": {"read", "create", "update", "delete", "manage"},
-    "hr_admin": {"read", "create", "update"},
-    "hr_manager": {"read", "update"},
-    "payroll_manager": {"read", "create", "update"},
-    "payroll_approver": {"read", "update"},
-    "payroll_payment": {"read", "update"},
-    "payroll_accounting": {"read", "create", "update"},
-    "sacco_officer": {"read", "create", "update"},
-    "sacco_manager": {"read", "create", "update", "delete"},
-    "sacco_kyc_approver": {"read", "update"},
-    "sacco_treasurer": {"read", "create", "update"},
+    "hr_admin": {"read"},
+    "hr_manager": {"read"},
+    "payroll_manager": {"read"},
+    "payroll_approver": {"read"},
+    "payroll_payment": {"read"},
+    "payroll_accounting": {"read"},
+    "sacco_officer": {"read"},
+    "sacco_manager": {"read"},
+    "sacco_kyc_approver": {"read"},
+    "sacco_treasurer": {"read"},
     "sacco_auditor": {"read"},
 }
 
@@ -78,11 +78,30 @@ ROLE_MODULES = {
 }
 
 
+# Specialist workflows use module-scoped actions instead of granting broad
+# generic CRUD permissions to approval, payment and SACCO roles.
+ROLE_MODULE_ACTIONS = {
+    "hr_admin": {"hr": {"read", "create", "update"}, "payroll": {"read"}},
+    "hr_manager": {"hr": {"read", "update"}, "reports": {"read"}, "documents": {"read"}},
+    "payroll_manager": {"payroll": {"read", "create", "update"}, "reports": {"read"}, "documents": {"read"}},
+    "payroll_approver": {"payroll": {"read", "update"}, "reports": {"read"}},
+    "payroll_payment": {"payroll": {"read", "update"}},
+    "payroll_accounting": {"payroll": {"read", "update"}, "accounting": {"read", "create", "update"}, "reports": {"read"}},
+    "sacco_officer": {"sacco": {"read", "create", "update"}, "documents": {"read"}},
+    "sacco_manager": {"sacco": {"read", "create", "update", "delete"}, "reports": {"read"}, "documents": {"read"}},
+    "sacco_kyc_approver": {"sacco": {"read", "update"}},
+    "sacco_treasurer": {"sacco": {"read", "create", "update"}, "accounting": {"read", "create", "update"}, "reports": {"read"}},
+    "sacco_auditor": {"sacco": {"read"}, "reports": {"read"}},
+}
+
+
 def has_module_permission(membership, module_key: str, action: str = "read") -> bool:
     """Check role action + module grant + optional branch scope at the route layer."""
     role = (getattr(membership, "role", "") or "").lower()
     module = (module_key or "").strip().lower()
-    if action not in ROLE_PERMISSIONS.get(role, set()):
+    global_actions = ROLE_PERMISSIONS.get(role, set())
+    module_actions = ROLE_MODULE_ACTIONS.get(role, {}).get(module, set())
+    if action not in global_actions and action not in module_actions:
         return False
     allowed = ROLE_MODULES.get(role, set())
     return "*" in allowed or module in allowed
