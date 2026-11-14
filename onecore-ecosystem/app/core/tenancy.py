@@ -92,17 +92,22 @@ def _collect_branch_ids(value, found: set[str]) -> None:
 async def _enforce_requested_branch_scope(request: Request, membership: Membership) -> None:
     """Reject branch selectors outside the active membership's explicit scope."""
     requested: set[str] = set()
-    for name in ("branch_id", "branch_ids"):
-        requested.update(value for value in request.query_params.getlist(name) if value)
-    header = request.headers.get("x-branch-id")
-    if header:
-        requested.add(header)
-    for key in ("branch_id", "branch_ids"):
-        value = request.path_params.get(key)
-        if isinstance(value, (list, tuple, set)):
-            requested.update(str(item) for item in value if item is not None)
-        elif value is not None:
-            requested.add(str(value))
+    for name in request.query_params.keys():
+        normalized = name.lower()
+        if normalized in {"branch_id", "branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
+            requested.update(value for value in request.query_params.getlist(name) if value)
+    for name, value in request.headers.items():
+        normalized = name.lower().replace("-", "_")
+        if normalized in {"x_branch_id", "x_branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
+            if value:
+                requested.add(value)
+    for key, value in request.path_params.items():
+        normalized = str(key).lower()
+        if normalized in {"branch_id", "branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
+            if isinstance(value, (list, tuple, set)):
+                requested.update(str(item) for item in value if item is not None)
+            elif value is not None:
+                requested.add(str(value))
     content_type = request.headers.get("content-type", "").lower()
     if "application/json" in content_type:
         try:
