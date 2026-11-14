@@ -73,7 +73,7 @@ def _collect_branch_ids(value, found: set[str]) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             normalized = str(key).lower()
-            if normalized in {"branch_id", "branch_ids"}:
+            if normalized in {"branch_id", "branch_ids"} or normalized.endswith("_branch_id") or normalized.endswith("_branch_ids"):
                 if isinstance(item, (list, tuple, set)):
                     found.update(str(entry) for entry in item if entry is not None and str(entry).strip())
                 elif item is not None and str(item).strip():
