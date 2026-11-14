@@ -98,7 +98,7 @@ A shared shell or successful Vite build does not prove that a module's user jour
 ## 7. Integration and deployment rules
 
 - Browser applications call the shared FastAPI API; they do not connect with database credentials or Supabase service-role keys.
-- All portal origins must be explicitly allowlisted in CORS and portal redirect configuration. Do not use wildcard CORS for bearer-token applications.
+- The single OneCore frontend origin must be explicitly allowlisted in CORS. Legacy PKCE redirect origins are optional and are not part of the unified login path. Do not use wildcard CORS for bearer-token applications.
 - Portal SSO must use the approved short-lived, single-use PKCE handoff; never put bearer tokens in redirect URLs.
 - Every deployment must verify the frontend's configured API origin, backend health/readiness, migrations, required secrets, deep-link fallback, and public/authenticated access.
 - A successful CI build is source validation, not proof of production deployment, live provider connectivity, or user acceptance.
