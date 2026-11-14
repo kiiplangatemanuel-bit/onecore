@@ -1,7 +1,7 @@
 # OneCore frontend–backend parity standard
 
 **Status:** Required engineering and release standard  
-**Applies to:** The central OneCore application and its four independently deployable portals  
+**Applies to:** The single unified OneCore application and all role-controlled modules  
 **Repository:** `kiiplangatemanuel-bit/onecore`
 
 ## 1. Non-negotiable principle
