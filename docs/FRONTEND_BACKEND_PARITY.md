@@ -88,7 +88,7 @@ OneCore is one deployable application with one shared login/MFA experience, one 
 
 These are capabilities in the unified application. They must use the shared identity, active organization/branch context, backend authorization, API client and database. The frontend/portals source directory is legacy compatibility material only; it is not a deployment target and the CI pipeline builds only the central frontend.
 
-Superadmin is mounted at /platform inside the authenticated application. /admin/login is an alias to the same OneCore login/MFA flow, not a separate authentication portal.
+Superadmin is mounted at /admin and /platform inside the authenticated application. /admin/login is an alias to the same OneCore login/MFA flow, not a separate authentication portal.
 
 Public pages may be accessible without signing in, but this does not create a separate application or identity system. Existing external Vercel projects, custom domains and DNS records require an owner-operated traffic and rollback review before retirement; code changes alone do not alter external hosting.
 
